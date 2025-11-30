@@ -20,4 +20,7 @@ public interface StockDailyDataRepository extends JpaRepository<StockDailyData, 
         Optional<StockDailyData> findFirstByStockAndDateLessThanEqualOrderByDateDesc(Stock stock, LocalDate date);
 
         Optional<StockDailyData> findFirstByStockAndDateGreaterThanEqualOrderByDateAsc(Stock stock, LocalDate date);
+
+        List<StockDailyData> findByStock_StockCodeAndDateBetweenOrderByDateAsc(String stockCode, LocalDate startDate,
+                        LocalDate endDate);
 }

@@ -34,6 +34,9 @@ public class EcosService {
     private static final String STAT_CODE_BASE_RATE = "722Y001"; // 한국은행 기준금리 및 여수신금리
     private static final String ITEM_CODE_BASE_RATE = "0101000"; // 한국은행 기준금리
 
+    private static final String STAT_CODE_CPI = "901Y009"; // 소비자물가지수 (2020=100)
+    private static final String ITEM_CODE_CPI_TOTAL = "0"; // 총지수 (API 문서상 '0' 또는 'A01' 등이 아닌 최상위 코드 확인 필요, 보통 '0'이 총지수)
+
     @Transactional(readOnly = true)
     public List<MacroIndicatorDto> fetchM2MoneySupply(String startDateStr, String endDateStr) {
         String startMonth = startDateStr.substring(0, 6);
@@ -48,6 +51,13 @@ public class EcosService {
         return getMacroDataFromDb(STAT_CODE_BASE_RATE, ITEM_CODE_BASE_RATE, startMonth, endMonth, "M");
     }
 
+    @Transactional(readOnly = true)
+    public List<MacroIndicatorDto> fetchCPI(String startDateStr, String endDateStr) {
+        String startMonth = startDateStr.substring(0, 6);
+        String endMonth = endDateStr.substring(0, 6);
+        return getMacroDataFromDb(STAT_CODE_CPI, ITEM_CODE_CPI_TOTAL, startMonth, endMonth, "M");
+    }
+
     @Transactional
     public void saveM2Data(String startDateStr, String endDateStr) {
         String startMonth = startDateStr.substring(0, 6);
@@ -60,6 +70,13 @@ public class EcosService {
         String startMonth = startDateStr.substring(0, 6);
         String endMonth = endDateStr.substring(0, 6);
         fetchAndSaveFromApi(STAT_CODE_BASE_RATE, "M", ITEM_CODE_BASE_RATE, startMonth, endMonth);
+    }
+
+    @Transactional
+    public void saveCPI(String startDateStr, String endDateStr) {
+        String startMonth = startDateStr.substring(0, 6);
+        String endMonth = endDateStr.substring(0, 6);
+        fetchAndSaveFromApi(STAT_CODE_CPI, "M", ITEM_CODE_CPI_TOTAL, startMonth, endMonth);
     }
 
     private List<MacroIndicatorDto> getMacroDataFromDb(String statCode, String itemCode, String reqStartDateStr,
@@ -84,17 +101,59 @@ public class EcosService {
     }
 
     private void fetchAndSaveFromApi(String statCode, String cycle, String itemCode, String startDate, String endDate) {
-        String url = String.format("%s/StatisticSearch/%s/json/kr/1/1000/%s/%s/%s/%s/%s",
+        // ECOS API URL Format:
+        // /StatisticSearch/KEY/json/kr/START_COUNT/END_COUNT/STAT_CODE/CYCLE/START_DATE/END_DATE/ITEM_CODE1
+
+        if (STAT_CODE_CPI.equals(statCode)) {
+            fetchCpiMonthly(statCode, cycle, itemCode, startDate, endDate);
+            return;
+        }
+
+        // Default behavior for other stats (fetch all at once)
+        String url = String.format("%s/StatisticSearch/%s/json/kr/1/10000/%s/%s/%s/%s/%s",
                 ecosApiProperties.getBaseUrl(),
                 ecosApiProperties.getApiKey(),
                 statCode,
                 cycle,
                 startDate,
                 endDate,
-                itemCode);
+                itemCode != null ? itemCode : "");
 
-        log.info("Fetching ECOS data from API: {} ({} ~ {})", statCode, startDate, endDate);
+        fetchAndProcessUrl(url, statCode, cycle, itemCode);
+    }
 
+    private void fetchCpiMonthly(String statCode, String cycle, String itemCode, String startDateStr,
+            String endDateStr) {
+        try {
+            DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMM");
+            java.time.YearMonth start = java.time.YearMonth.parse(startDateStr, formatter);
+            java.time.YearMonth end = java.time.YearMonth.parse(endDateStr, formatter);
+
+            java.time.YearMonth current = start;
+            while (!current.isAfter(end)) {
+                String currentMonth = current.format(formatter);
+
+                // Fetch only the first row (1/1) which is expected to be the Total Index (Item
+                // Code 0)
+                String url = String.format("%s/StatisticSearch/%s/json/kr/1/1/%s/%s/%s/%s/",
+                        ecosApiProperties.getBaseUrl(),
+                        ecosApiProperties.getApiKey(),
+                        statCode,
+                        cycle,
+                        currentMonth,
+                        currentMonth);
+
+                fetchAndProcessUrl(url, statCode, cycle, itemCode);
+
+                current = current.plusMonths(1);
+            }
+        } catch (Exception e) {
+            log.error("Error during CPI monthly fetch loop", e);
+        }
+    }
+
+    private void fetchAndProcessUrl(String url, String statCode, String cycle, String targetItemCode) {
+        log.info("Fetching ECOS data: {}", url);
         try {
             String responseBody = webClient.get()
                     .uri(url)
@@ -112,6 +171,14 @@ public class EcosService {
             JsonNode rows = statisticSearch.path("row");
             if (rows.isArray()) {
                 for (JsonNode row : rows) {
+                    String rowItemCode = row.path("ITEM_CODE1").asText();
+
+                    // For CPI, we expect "0" (Total Index). If targetItemCode is provided, filter
+                    // by it.
+                    if (targetItemCode != null && !targetItemCode.isEmpty() && !targetItemCode.equals(rowItemCode)) {
+                        continue;
+                    }
+
                     String dateStr = row.path("TIME").asText();
                     String valueStr = row.path("DATA_VALUE").asText();
 
@@ -122,14 +189,14 @@ public class EcosService {
                         date = LocalDate.parse(dateStr, DateTimeFormatter.ofPattern("yyyyMMdd"));
                     }
 
-                    if (macroDailyDataRepository.findTopByStatCodeAndItemCodeOrderByDateDesc(statCode, itemCode)
+                    if (macroDailyDataRepository.findTopByStatCodeAndItemCodeOrderByDateDesc(statCode, rowItemCode)
                             .filter(d -> d.getDate().isEqual(date)).isPresent()) {
                         continue;
                     }
 
                     MacroDailyData entity = MacroDailyData.builder()
                             .statCode(statCode)
-                            .itemCode(itemCode)
+                            .itemCode(rowItemCode)
                             .date(date)
                             .value(new java.math.BigDecimal(valueStr))
                             .build();
@@ -137,9 +204,9 @@ public class EcosService {
                     macroDailyDataRepository.save(entity);
                 }
             }
-
         } catch (Exception e) {
-            log.error("Failed to fetch/save ECOS data", e);
+            log.error("Failed to fetch/save ECOS data for URL: " + url, e);
         }
     }
+
 }

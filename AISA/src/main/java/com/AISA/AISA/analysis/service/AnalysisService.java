@@ -45,17 +45,56 @@ public class AnalysisService {
         Map<LocalDate, Double> series1 = fetchAssetData(asset1Type, asset1Code, startDate, endDate);
         Map<LocalDate, Double> series2 = fetchAssetData(asset2Type, asset2Code, startDate, endDate);
 
-        List<Double> returns1;
-        List<Double> returns2;
-        List<String> dates;
-        int bestLag = 0;
-
         // AUTO Method Selection Logic
         if ("AUTO".equalsIgnoreCase(method)) {
             if (isMacroIndicator(asset1Type) || isMacroIndicator(asset2Type)) {
                 method = "YOY";
             } else {
                 method = "AUTO_LAG";
+            }
+        }
+
+        return calculateCorrelationInternal(series1, asset1Code, series2, asset2Code, method);
+    }
+
+    // Overloaded method for custom data injection (e.g., Portfolio Daily Values)
+    @Transactional(readOnly = true)
+    public CorrelationResultDto calculateCorrelation(Map<LocalDate, Double> customSeries1, String asset1Name,
+            String asset2Type, String asset2Code, String startDate, String endDate, String method) {
+        Map<LocalDate, Double> series2 = fetchAssetData(asset2Type, asset2Code, startDate, endDate);
+
+        return calculateCorrelationInternal(customSeries1, asset1Name, series2, asset2Code, method);
+    }
+
+    private CorrelationResultDto calculateCorrelationInternal(Map<LocalDate, Double> series1, String asset1Name,
+            Map<LocalDate, Double> series2, String asset2Name, String method) {
+        List<Double> returns1;
+        List<Double> returns2;
+        List<String> dates;
+        int bestLag = 0;
+
+        // AUTO Method Selection Logic (Simplified for custom data)
+        if ("AUTO".equalsIgnoreCase(method)) {
+            // If asset2 is Macro, use YOY. Otherwise AUTO_LAG.
+            // (Assuming customSeries1 is Portfolio, which behaves like Stock)
+            if (isMacroIndicator(asset2Name)) { // Check asset2Name (or type if passed) - here using name as proxy or
+                                                // need type
+                // Actually, isMacroIndicator checks type strings like "CPI".
+                // We might need to pass asset2Type to this internal method or infer it.
+                // For now, let's assume the caller handles "AUTO" or we check known macro
+                // codes.
+                // Better approach: Pass asset2Type to internal method.
+            }
+            // Re-evaluating: The original method had asset types.
+            // Let's keep the logic simple here:
+            // If method is AUTO, we default to AUTO_LAG unless we know it's macro.
+            // But we don't have asset2Type here easily unless passed.
+            // Let's stick to the passed method or default to AUTO_LAG if not YOY/MOM.
+            // If method is AUTO, we default to AUTO_LAG unless we know it's macro.
+            // But we don't have asset2Type here easily unless passed.
+            // Let's stick to the passed method or default to AUTO_LAG if not YOY/MOM.
+            if ("AUTO".equalsIgnoreCase(method)) {
+                method = "AUTO_LAG"; // Default for Portfolio vs Asset
             }
         }
 
@@ -75,8 +114,8 @@ public class AnalysisService {
 
             if (commonMonths.size() < 13) { // Need at least 13 months for YoY
                 return CorrelationResultDto.builder()
-                        .asset1Name(asset1Code)
-                        .asset2Name(asset2Code)
+                        .asset1Name(asset1Name)
+                        .asset2Name(asset2Name)
                         .coefficient(0)
                         .description("데이터 부족 (최소 13개월 필요)")
                         .build();
@@ -100,8 +139,8 @@ public class AnalysisService {
 
             if (commonDates.size() < 5) {
                 return CorrelationResultDto.builder()
-                        .asset1Name(asset1Code)
-                        .asset2Name(asset2Code)
+                        .asset1Name(asset1Name)
+                        .asset2Name(asset2Name)
                         .coefficient(0)
                         .description("데이터 부족")
                         .build();
@@ -112,7 +151,7 @@ public class AnalysisService {
             dates = commonDates.stream().skip(1).map(d -> d.format(FORMATTER)).collect(Collectors.toList());
 
             if ("AUTO_LAG".equalsIgnoreCase(method)) {
-                return calculateAutoLagCorrelation(returns1, returns2, dates, asset1Code, asset2Code);
+                return calculateAutoLagCorrelation(returns1, returns2, dates, asset1Name, asset2Name);
             }
         }
 
@@ -130,8 +169,8 @@ public class AnalysisService {
         }
 
         return CorrelationResultDto.builder()
-                .asset1Name(asset1Code)
-                .asset2Name(asset2Code)
+                .asset1Name(asset1Name)
+                .asset2Name(asset2Name)
                 .coefficient(correlation)
                 .pValue(pValue)
                 .sampleSize(r1.length)

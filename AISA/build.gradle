@@ -36,6 +36,7 @@ dependencies {
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
     runtimeOnly 'com.mysql:mysql-connector-j'
     implementation 'org.springframework.boot:spring-boot-starter-security'
+    implementation 'org.apache.commons:commons-math3:3.6.1'
 }
 
 tasks.named('test') {

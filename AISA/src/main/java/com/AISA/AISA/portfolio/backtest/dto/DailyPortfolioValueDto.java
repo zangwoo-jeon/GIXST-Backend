@@ -15,4 +15,5 @@ public class DailyPortfolioValueDto {
     private String date;
     private BigDecimal totalValue;
     private Double dailyReturnRate;
+    private BigDecimal adjustedValue; // New field for correlation analysis (pure performance index)
 }

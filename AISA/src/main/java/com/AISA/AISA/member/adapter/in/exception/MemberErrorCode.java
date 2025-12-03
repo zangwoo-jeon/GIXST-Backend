@@ -13,7 +13,8 @@ public enum MemberErrorCode implements ErrorCode {
     DUPLICATE_USERNAME(HttpStatus.CONFLICT, false, "M409-1", "이미 존재하는 아이디입니다"),
     DUPLICATE_DISPLAY_NAME(HttpStatus.CONFLICT, false, "M409-2", "이미 존재하는 닉네임입니다"),
     MEMBER_NOT_FOUND(HttpStatus.NOT_FOUND, false, "M404-1", "해당 회원을 찾을 수 없습니다."),
-    INVALID_CURRENT_PASSWORD(HttpStatus.BAD_REQUEST, false, "M400-3", "현재 비밀번호가 일치하지 않습니다.");
+    INVALID_CURRENT_PASSWORD(HttpStatus.BAD_REQUEST, false, "M400-3", "현재 비밀번호가 일치하지 않습니다."),
+    INVALID_PASSWORD(HttpStatus.UNAUTHORIZED, false, "M401-1", "비밀번호가 일치하지 않습니다.");
 
     private final HttpStatus httpStatus;
     private final boolean isSuccess;

@@ -1,6 +1,5 @@
 package com.AISA.AISA.portfolio.PortfolioGroup;
 
-
 import com.AISA.AISA.global.response.SuccessResponse;
 import com.AISA.AISA.portfolio.PortfolioGroup.dto.PortfolioCreateRequest;
 import com.AISA.AISA.portfolio.PortfolioGroup.dto.PortfolioNameUpdateRequest;
@@ -21,50 +20,46 @@ public class PortfolioController {
     private final PortfolioService portfolioService;
 
     @GetMapping("/list")
-    @Operation(summary = "포트폴리오 조회", description = "포트폴리오 목록을 조회합니다. " +
-            "memberId 값을 추가하면 해당 member의 포트폴리오를 조회합니다.")
+    @Operation(summary = "포트폴리오 조회", description = "로그인한 사용자의 포트폴리오 목록을 조회합니다.")
     public ResponseEntity<SuccessResponse<List<Portfolio>>> getPortfolios(
-            @RequestParam(required = false) UUID memberId
-    ) {
-        List<Portfolio> portfolios = portfolioService.findPortfolios(memberId);
-        String message = (memberId == null) ? "전체 포트폴리오 목록 조회 성공" : memberId + "의 포트폴리오 목록 조회 성공";
-        return ResponseEntity.ok(new SuccessResponse<>(true, message, portfolios));
+            java.security.Principal principal) {
+        List<Portfolio> portfolios = portfolioService.findPortfolios(principal.getName());
+        return ResponseEntity.ok(new SuccessResponse<>(true, "포트폴리오 목록 조회 성공", portfolios));
 
     }
 
     @PostMapping("/create")
     @Operation(summary = "포트폴리오 생성", description = "포트폴리오를 생성합니다.")
     public ResponseEntity<SuccessResponse<Portfolio>> createPortfolio(
+            java.security.Principal principal,
             @RequestBody PortfolioCreateRequest request) {
-        Portfolio createdPortfolio = portfolioService.createPortfolio(request);
+        Portfolio createdPortfolio = portfolioService.createPortfolio(principal.getName(), request);
         return ResponseEntity.ok(new SuccessResponse<>(true, "포트폴리오 생성 성공", createdPortfolio));
     }
 
-    @DeleteMapping("/remove/{memberId}/{portId}")
+    @DeleteMapping("/remove/{portId}")
     @Operation(summary = "포트폴리오 삭제", description = "특정 포트폴리오를 삭제합니다.")
     public ResponseEntity<SuccessResponse<Void>> removePortfolio(
-            @PathVariable UUID memberId, @PathVariable UUID portId
-    ) {
-        portfolioService.deletePortfolio(memberId, portId);
+            java.security.Principal principal, @PathVariable UUID portId) {
+        portfolioService.deletePortfolio(principal.getName(), portId);
         return ResponseEntity.ok(new SuccessResponse<>(true, "포트폴리오 삭제 성공", null));
     }
 
-    @PutMapping("/changeName/{memberId}/{portId}")
+    @PutMapping("/changeName/{portId}")
     @Operation(summary = "포트폴리오 이름 변경", description = "포트폴리오 이름을 변경합니다.")
     public ResponseEntity<SuccessResponse<Void>> changePortfolioName(
-            @PathVariable UUID memberId, @PathVariable UUID portId, @RequestBody PortfolioNameUpdateRequest request
-            ) {
-        portfolioService.updatePortfolioName(memberId, portId, request);
+            java.security.Principal principal, @PathVariable UUID portId,
+            @RequestBody PortfolioNameUpdateRequest request) {
+        portfolioService.updatePortfolioName(principal.getName(), portId, request);
         return ResponseEntity.ok(new SuccessResponse<>(true, "포트폴리오 이름 변경 성공", null));
     }
 
-    @PutMapping("/main/{memberId}/{portId}")
-    @Operation(summary = "메인 포트폴리오 변경", description = "회원 ID와 포트 ID로 메인 포트폴리오 그룹을 변경합니다.")
+    @PutMapping("/main/{portId}")
+    @Operation(summary = "메인 포트폴리오 변경", description = "메인 포트폴리오 그룹을 변경합니다.")
     public ResponseEntity<SuccessResponse<Void>> changeMainPortfolio(
-            @PathVariable UUID memberId,
-            @PathVariable UUID portId
-    ) {
-        portfolioService.changeMainPortfolio(memberId, portId);
+            java.security.Principal principal,
+            @PathVariable UUID portId) {
+        portfolioService.changeMainPortfolio(principal.getName(), portId);
         return ResponseEntity.ok(new SuccessResponse<>(true, "메인 포트폴리오 변경 성공", null));
     }
 

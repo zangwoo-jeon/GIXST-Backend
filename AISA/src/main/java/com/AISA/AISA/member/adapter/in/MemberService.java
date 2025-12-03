@@ -1,11 +1,19 @@
 package com.AISA.AISA.member.adapter.in;
 
 import com.AISA.AISA.global.exception.BusinessException;
+import com.AISA.AISA.global.jwt.JwtTokenProvider;
+import com.AISA.AISA.global.jwt.RefreshToken;
+import com.AISA.AISA.global.jwt.RefreshTokenRepository;
+import com.AISA.AISA.member.adapter.in.dto.LoginRequestDto;
 import com.AISA.AISA.member.adapter.in.dto.MemberSignupRequest;
 import com.AISA.AISA.member.adapter.in.dto.PasswordChangeRequest;
+import com.AISA.AISA.global.jwt.dto.TokenResponseDto;
 import com.AISA.AISA.member.adapter.in.exception.MemberErrorCode;
 import com.AISA.AISA.member.adapter.out.dto.MemberResponse;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -14,12 +22,16 @@ import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+import static java.util.Collections.singletonList;
+
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
 public class MemberService {
     private final MemberRepository memberRepository;
     private final PasswordEncoder passwordEncoder;
+    private final JwtTokenProvider jwtTokenProvider;
+    private final RefreshTokenRepository refreshTokenRepository;
 
     @Transactional
     public Member signup(MemberSignupRequest request) {
@@ -34,12 +46,28 @@ public class MemberService {
             throw new BusinessException(MemberErrorCode.INVALID_PASSWORD_POLICY);
         }
 
+        // 중복 체크
+        checkUserNameDuplicate(request.getUserName());
+        checkDisplayNameDuplicate(request.getDisplayName());
+
         Member newMember = Member.builder()
                 .userName(request.getUserName())
                 .displayName(request.getDisplayName())
                 .password(passwordEncoder.encode(request.getPassword()))
                 .build();
         return memberRepository.save(newMember);
+    }
+
+    public void checkUserNameDuplicate(String userName) {
+        if (memberRepository.existsByUserName(userName)) {
+            throw new BusinessException(MemberErrorCode.DUPLICATE_USERNAME);
+        }
+    }
+
+    public void checkDisplayNameDuplicate(String displayName) {
+        if (memberRepository.existsByDisplayName(displayName)) {
+            throw new BusinessException(MemberErrorCode.DUPLICATE_DISPLAY_NAME);
+        }
     }
 
     public MemberResponse findMemberById(UUID memberId) {
@@ -88,4 +116,37 @@ public class MemberService {
         // 비밀번호 변경
         member.changePassword(passwordEncoder.encode(newPassword));
     }
+
+    @Transactional
+    public TokenResponseDto login(LoginRequestDto request) {
+        // 1. 회원 확인
+        Member member = memberRepository.findByUserName(request.getUserName())
+                .orElseThrow(() -> new BusinessException(MemberErrorCode.MEMBER_NOT_FOUND));
+
+        // 2. 비밀번호 확인
+        if (!passwordEncoder.matches(request.getPassword(), member.getPassword())) {
+            throw new BusinessException(MemberErrorCode.INVALID_PASSWORD);
+        }
+
+        // 3. 토큰 생성
+        Authentication authentication = new UsernamePasswordAuthenticationToken(
+                member.getUserName(), null, singletonList(
+                        new SimpleGrantedAuthority("ROLE_USER")));
+
+        String accessToken = jwtTokenProvider.createAccessToken(authentication);
+        String refreshToken = jwtTokenProvider.createRefreshToken(authentication);
+
+        // Refresh Token 저장
+        refreshTokenRepository.save(RefreshToken.builder()
+                .userName(member.getUserName())
+                .token(refreshToken)
+                .build());
+
+        return TokenResponseDto.builder()
+                .accessToken(accessToken)
+                .refreshToken(refreshToken)
+                .grantType("Bearer")
+                .build();
+    }
+
 }

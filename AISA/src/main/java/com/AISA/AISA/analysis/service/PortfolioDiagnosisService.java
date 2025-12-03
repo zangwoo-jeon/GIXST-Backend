@@ -2,6 +2,7 @@ package com.AISA.AISA.analysis.service;
 
 import com.AISA.AISA.analysis.dto.CorrelationResultDto;
 import com.AISA.AISA.analysis.dto.DiagnosisResultDto;
+import com.AISA.AISA.analysis.dto.RollingCorrelationDto;
 import com.AISA.AISA.portfolio.backtest.dto.BacktestResultDto;
 import com.AISA.AISA.portfolio.backtest.dto.DailyPortfolioValueDto;
 import com.AISA.AISA.portfolio.backtest.service.BacktestService;
@@ -92,21 +93,60 @@ public class PortfolioDiagnosisService {
             String startDate, String endDate,
             List<DiagnosisResultDto.FactorAnalysisResult> results, List<String> adviceList) {
         try {
+            // 1. Basic Correlation
             CorrelationResultDto correlationResult = analysisService.calculateCorrelation(
                     portfolioSeries, "MyPortfolio", factorType, factorCode, startDate, endDate, "AUTO");
 
             double correlation = correlationResult.getCoefficient();
             String sensitivity = determineSensitivity(correlation);
-            String description = interpretFactorResult(factorName, correlation);
+
+            // 2. Risk Metrics (Volatility & MDD)
+            Map<LocalDate, Double> factorSeries = analysisService.fetchAssetData(factorType, factorCode, startDate,
+                    endDate);
+            double factorVol = analysisService.calculateVolatility(factorSeries);
+            double factorMDD = analysisService.calculateMDD(factorSeries);
+
+            // Portfolio Volatility (for Scenario Analysis)
+            double portfolioVol = analysisService.calculateVolatility(portfolioSeries);
+
+            // 3. Trend Analysis (Rolling Correlation Slope)
+            RollingCorrelationDto rollingResult = analysisService.calculateRollingCorrelation(
+                    portfolioSeries, "MyPortfolio", factorType, factorCode, startDate, endDate, 60); // 60-day window
+            String trend = analysisService.calculateTrend(rollingResult.getRollingData());
+
+            // 4. Scenario Analysis (Diversification Check)
+            String scenarioAnalysis = "N/A";
+            if (correlation < 0.3) { // Potential Diversifier
+                double w1 = 0.95; // Portfolio Weight
+                double w2 = 0.05; // Factor Weight
+                double var1 = Math.pow(portfolioVol, 2);
+                double var2 = Math.pow(factorVol, 2);
+
+                double newVariance = analysisService.calculatePortfolioVariance(w1, var1, w2, var2, correlation);
+                double newVol = Math.sqrt(newVariance);
+
+                if (newVol < portfolioVol) {
+                    double reduction = (portfolioVol - newVol) * 100;
+                    scenarioAnalysis = String.format("5%% 비중 추가 시 포트폴리오 변동성 %.2f%%p 감소 예상", reduction);
+                } else {
+                    scenarioAnalysis = "분산 효과 미미함";
+                }
+            }
+
+            String description = interpretFactorResult(factorName, correlation, trend, factorVol);
 
             results.add(DiagnosisResultDto.FactorAnalysisResult.builder()
                     .factorName(factorName)
                     .correlation(Math.round(correlation * 100.0) / 100.0)
                     .sensitivity(sensitivity)
                     .description(description)
+                    .volatility(Math.round(factorVol * 100.0) / 100.0)
+                    .mdd(Math.round(factorMDD * 100.0) / 100.0)
+                    .correlationTrend(trend)
+                    .scenarioAnalysis(scenarioAnalysis)
                     .build());
 
-            generateAdvice(factorName, correlation, adviceList);
+            generateAdvice(factorName, correlation, trend, factorVol, scenarioAnalysis, adviceList);
 
         } catch (Exception e) {
             log.warn("Failed to analyze factor {}: {}", factorName, e.getMessage());
@@ -129,60 +169,73 @@ public class PortfolioDiagnosisService {
         return "매우 높음 (음의 상관)";
     }
 
-    private String interpretFactorResult(String factorName, double correlation) {
+    private String interpretFactorResult(String factorName, double correlation, String trend, double volatility) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("포트폴리오가 ").append(factorName).append("와(과) ");
+
         if (correlation >= 0.7)
-            return "포트폴리오가 " + factorName + "와(과) 매우 유사하게 움직입니다.";
-        if (correlation >= 0.3)
-            return "포트폴리오가 " + factorName + "의 영향을 어느 정도 받습니다.";
-        if (correlation > -0.3)
-            return "포트폴리오가 " + factorName + "와(과) 무관하게 움직입니다 (분산 효과).";
-        if (correlation > -0.7)
-            return "포트폴리오가 " + factorName + "와(과) 반대로 움직이는 경향이 있습니다 (헷지 효과).";
-        return "포트폴리오가 " + factorName + "와(과) 정반대로 움직입니다 (강한 헷지).";
+            sb.append("매우 유사하게 움직입니다.");
+        else if (correlation >= 0.3)
+            sb.append("어느 정도 유사하게 움직입니다.");
+        else if (correlation > -0.3)
+            sb.append("무관하게 움직입니다 (분산 효과).");
+        else
+            sb.append("반대로 움직이는 경향이 있습니다 (헷지 효과).");
+
+        sb.append(" 최근 상관관계는 ").append(trend).append(" 추세이며, ");
+        if (volatility > 0.2)
+            sb.append("해당 자산의 변동성이 높습니다.");
+        else
+            sb.append("해당 자산의 변동성은 안정적입니다.");
+
+        return sb.toString();
     }
 
-    // TODO: 추후 LLM(ChatGPT, HyperClova 등)과 연동하여 더 정교하고 개인화된 조언을 생성하도록 고도화 필요
-    private void generateAdvice(String factorName, double correlation, List<String> adviceList) {
-        if ("국내 시장(KOSPI)".equals(factorName)) {
-            if (correlation >= 0.7) {
-                adviceList.add("국내 시장 의존도가 매우 높습니다. 해외 자산이나 채권 비중을 늘려 분산투자 효과를 높이세요.");
-            } else if (correlation >= 0.4) {
-                adviceList.add("국내 시장의 흐름을 어느 정도 따르고 있습니다. 포트폴리오 변동성 관리에 유의하세요.");
+    private void generateAdvice(String factorName, double correlation, String trend, double volatility,
+            String scenarioAnalysis, List<String> adviceList) {
+        // 1. Diversification Advice (Scenario based)
+        if (!"N/A".equals(scenarioAnalysis) && scenarioAnalysis.contains("감소 예상")) {
+            adviceList.add(
+                    String.format("[%s] %s (상관관계: %.2f, 추세: %s)", factorName, scenarioAnalysis, correlation, trend));
+            return; // Prioritize diversification advice
+        }
+
+        // 2. Risk Management Advice
+        if (correlation >= 0.7) {
+            if ("증가".equals(trend)) {
+                adviceList.add(String.format("[%s] 의존도가 심화되고 있습니다(상관관계 증가). 리스크 관리를 위해 비중 축소를 고려하세요.", factorName));
+            } else {
+                adviceList.add(String.format("[%s] 시장과 매우 유사하게 움직입니다. 초과 수익을 위해 개별 종목 발굴이 필요할 수 있습니다.", factorName));
             }
-        } else if ("국내 코스닥(KOSDAQ)".equals(factorName)) {
-            if (correlation >= 0.6) {
-                adviceList.add("변동성이 큰 코스닥 시장과 유사하게 움직입니다. 중소형주 비중이 높다면 우량주 비중을 늘려 안정성을 확보하세요.");
-            } else if (correlation >= 0.4) {
-                adviceList.add("코스닥 시장의 영향을 받고 있습니다. 변동성이 커질 수 있으니 리스크 관리가 필요합니다.");
-            }
-        } else if ("미국 기술주(NASDAQ)".equals(factorName)) {
-            if (correlation >= 0.7) {
-                adviceList.add("기술주 중심의 공격적 성향입니다. 시장 하락 시 변동성이 클 수 있으니 방어 자산(배당주, 채권)을 고려하세요.");
-            } else if (correlation >= 0.5) {
-                adviceList.add("미국 기술주의 영향을 꽤 받고 있습니다. 성장주 위주의 포트폴리오라면 금리 변화에 민감할 수 있습니다.");
-            }
-        } else if ("미국 대형주(S&P500)".equals(factorName)) {
-            if (correlation >= 0.7) {
-                adviceList.add("미국 시장 전반과 동행하는 안정적인 포트폴리오입니다. 초과 수익을 원한다면 개별 성장주나 섹터 ETF를 고려해보세요.");
-            } else if (correlation >= 0.5) {
-                adviceList.add("미국 대형주의 흐름을 따르고 있습니다. 장기적으로 안정적인 성장이 기대되나, 환율 리스크도 함께 고려해야 합니다.");
-            }
-        } else if ("달러 환율".equals(factorName)) {
-            if (correlation <= -0.5) {
-                adviceList.add("환율 상승 시(원화 가치 하락) 포트폴리오 가치가 하락하는 구조입니다. 달러 자산 비중을 늘려 환 헷지를 고려해보세요.");
-            } else if (correlation >= 0.5) {
-                adviceList.add("환율 상승 시 수혜를 보는 구조입니다(달러 자산 과다). 원화 자산 비중을 점검하세요.");
-            }
-        } else if ("한국 기준금리".equals(factorName)) {
-            if (correlation >= 0.4) {
-                adviceList.add("금리 인상기에 유리한 자산(현금, 변동금리 채권 등)이 포함되어 있습니다.");
-            } else if (correlation <= -0.4) {
-                adviceList.add("금리 인상 시 부정적 영향을 받는 구조입니다. 금리 리스크 관리가 필요합니다.");
-            }
-        } else if (factorName.contains("국채")) {
-            if (correlation <= -0.5) {
-                adviceList.add(factorName + " 금리 상승 시(채권 가격 하락) 포트폴리오가 타격을 입을 수 있습니다. 금리 인상기에 주의가 필요합니다.");
+        } else if (correlation <= -0.5) {
+            adviceList.add(String.format("[%s] 훌륭한 헷지 수단으로 작용하고 있습니다. 현재 비중을 유지하거나 시장 불안 시 비중 확대를 고려하세요.", factorName));
+        }
+
+        // 3. Volatility Warning
+        if (volatility > 0.25 && correlation > 0.3) {
+            adviceList.add(String.format("[%s] 변동성이 높은 자산입니다. 포트폴리오 전체 리스크를 높일 수 있으니 유의하세요.", factorName));
+        }
+    }
+
+    @Transactional(readOnly = true)
+    public com.AISA.AISA.analysis.dto.RollingCorrelationDto getPortfolioRollingCorrelation(UUID portfolioId,
+            String benchmarkType, String benchmarkCode, String startDate, String endDate, int windowSize) {
+        // 1. Get Portfolio Daily Values (Virtual Asset)
+        BacktestResultDto backtestResult = backtestService.calculatePortfolioBacktest(portfolioId, startDate, endDate);
+        Map<LocalDate, Double> portfolioSeries = new TreeMap<>();
+        for (DailyPortfolioValueDto daily : backtestResult.getDailyValues()) {
+            if (daily.getAdjustedValue() != null) {
+                portfolioSeries.put(LocalDate.parse(daily.getDate(), FORMATTER),
+                        daily.getAdjustedValue().doubleValue());
+            } else {
+                portfolioSeries.put(LocalDate.parse(daily.getDate(), FORMATTER), daily.getTotalValue().doubleValue());
             }
         }
+
+        // 2. Calculate Rolling Correlation
+        return analysisService.calculateRollingCorrelation(
+                portfolioSeries, "MyPortfolio",
+                benchmarkType, benchmarkCode,
+                startDate, endDate, windowSize);
     }
 }

@@ -20,5 +20,11 @@ public class DiagnosisResultDto {
         private double correlation;
         private String sensitivity; // e.g., "High", "Medium", "Low", "Inverse"
         private String description;
+
+        // New Risk Metrics
+        private double volatility; // Annualized Volatility
+        private double mdd; // Maximum Drawdown
+        private String correlationTrend; // "Increasing", "Decreasing", "Stable"
+        private String scenarioAnalysis; // e.g., "Adding 5% reduces risk by 0.2%"
     }
 }

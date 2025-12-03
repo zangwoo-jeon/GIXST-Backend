@@ -12,7 +12,10 @@ import com.AISA.AISA.portfolio.macro.dto.MacroIndicatorDto;
 import com.AISA.AISA.portfolio.macro.service.EcosService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.math3.distribution.TDistribution;
 import org.apache.commons.math3.stat.correlation.PearsonsCorrelation;
+import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics;
+import org.apache.commons.math3.stat.regression.SimpleRegression;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -186,6 +189,19 @@ public class AnalysisService {
         Map<LocalDate, Double> series1 = fetchAssetData(asset1Type, asset1Code, startDate, endDate);
         Map<LocalDate, Double> series2 = fetchAssetData(asset2Type, asset2Code, startDate, endDate);
 
+        return calculateRollingCorrelationInternal(series1, asset1Code, series2, asset2Code, windowSize);
+    }
+
+    @Transactional(readOnly = true)
+    public RollingCorrelationDto calculateRollingCorrelation(Map<LocalDate, Double> customSeries1, String asset1Name,
+            String asset2Type, String asset2Code, String startDate, String endDate, int windowSize) {
+        Map<LocalDate, Double> series2 = fetchAssetData(asset2Type, asset2Code, startDate, endDate);
+
+        return calculateRollingCorrelationInternal(customSeries1, asset1Name, series2, asset2Code, windowSize);
+    }
+
+    private RollingCorrelationDto calculateRollingCorrelationInternal(Map<LocalDate, Double> series1, String asset1Name,
+            Map<LocalDate, Double> series2, String asset2Name, int windowSize) {
         List<LocalDate> commonDates = new ArrayList<>();
         for (LocalDate date : series1.keySet()) {
             if (series2.containsKey(date)) {
@@ -194,9 +210,17 @@ public class AnalysisService {
         }
         Collections.sort(commonDates);
 
+        if (commonDates.size() < windowSize + 1) {
+            return RollingCorrelationDto.builder()
+                    .asset1Name(asset1Name)
+                    .asset2Name(asset2Name)
+                    .windowSize(windowSize)
+                    .rollingData(new ArrayList<>())
+                    .build();
+        }
+
         List<Double> returns1 = calculateLogReturns(series1, commonDates);
         List<Double> returns2 = calculateLogReturns(series2, commonDates);
-        // Dates for returns correspond to commonDates.subList(1, size)
 
         List<RollingCorrelationDto.RollingDataPoint> rollingData = new ArrayList<>();
         PearsonsCorrelation pc = new PearsonsCorrelation();
@@ -206,14 +230,13 @@ public class AnalysisService {
             double[] w2 = returns2.subList(i, i + windowSize).stream().mapToDouble(Double::doubleValue).toArray();
             double corr = pc.correlation(w1, w2);
 
-            // Date of the rolling window is usually the last date of the window
             String dateStr = commonDates.get(i + windowSize).format(FORMATTER);
             rollingData.add(new RollingCorrelationDto.RollingDataPoint(dateStr, corr));
         }
 
         return RollingCorrelationDto.builder()
-                .asset1Name(asset1Code)
-                .asset2Name(asset2Code)
+                .asset1Name(asset1Name)
+                .asset2Name(asset2Name)
                 .windowSize(windowSize)
                 .rollingData(rollingData)
                 .build();
@@ -276,7 +299,7 @@ public class AnalysisService {
                 .build();
     }
 
-    private Map<LocalDate, Double> fetchAssetData(String type, String code, String startDate, String endDate) {
+    public Map<LocalDate, Double> fetchAssetData(String type, String code, String startDate, String endDate) {
         Map<LocalDate, Double> dataMap = new TreeMap<>(); // Sorted by date
 
         if ("STOCK".equalsIgnoreCase(type)) {
@@ -368,7 +391,7 @@ public class AnalysisService {
         if (n < 3)
             return 1.0;
         double t = r * Math.sqrt((n - 2) / (1 - r * r));
-        org.apache.commons.math3.distribution.TDistribution tDist = new org.apache.commons.math3.distribution.TDistribution(
+        TDistribution tDist = new TDistribution(
                 n - 2);
         return 2.0 * (1.0 - tDist.cumulativeProbability(Math.abs(t)));
     }
@@ -383,6 +406,74 @@ public class AnalysisService {
         if (r > -0.7)
             return "약한 음의 상관관계";
         return "강한 음의 상관관계";
+    }
+
+    public double calculateVolatility(Map<LocalDate, Double> series) {
+        List<LocalDate> dates = new ArrayList<>(series.keySet());
+        Collections.sort(dates);
+        List<Double> returns = calculateLogReturns(series, dates);
+
+        if (returns.isEmpty()) {
+            return 0.0;
+        }
+
+        DescriptiveStatistics stats = new DescriptiveStatistics();
+        returns.forEach(stats::addValue);
+
+        double stdDev = stats.getStandardDeviation();
+        // Annualized Volatility (assuming 252 trading days)
+        return stdDev * Math.sqrt(252);
+    }
+
+    public double calculateMDD(Map<LocalDate, Double> series) {
+        double maxPeak = Double.MIN_VALUE;
+        double maxDrawdown = 0.0;
+
+        for (Double value : series.values()) {
+            if (value > maxPeak) {
+                maxPeak = value;
+            }
+            double drawdown = (maxPeak - value) / maxPeak;
+            if (drawdown > maxDrawdown) {
+                maxDrawdown = drawdown;
+            }
+        }
+        return maxDrawdown; // Returns positive value (e.g., 0.20 for -20%)
+    }
+
+    public String calculateTrend(List<RollingCorrelationDto.RollingDataPoint> rollingData) {
+        if (rollingData.size() < 10) {
+            return "데이터 부족";
+        }
+
+        // Use recent 3 months (approx 60 days) or available data
+        int lookback = Math.min(rollingData.size(), 60);
+        List<RollingCorrelationDto.RollingDataPoint> recentData = rollingData.subList(rollingData.size() - lookback,
+                rollingData.size());
+
+        SimpleRegression regression = new SimpleRegression();
+        for (int i = 0; i < recentData.size(); i++) {
+            regression.addData(i, recentData.get(i).getCorrelation());
+        }
+
+        double slope = regression.getSlope();
+
+        if (slope > 0.001) {
+            return "증가";
+        } else if (slope < -0.001) {
+            return "감소";
+        } else {
+            return "보합";
+        }
+    }
+
+    public double calculatePortfolioVariance(double w1, double var1, double w2, double var2, double correlation) {
+        // Portfolio Variance = w1^2 * var1 + w2^2 * var2 + 2 * w1 * w2 * std1 * std2 *
+        // correlation
+        // Note: Input var1, var2 are Variances (std^2)
+        double std1 = Math.sqrt(var1);
+        double std2 = Math.sqrt(var2);
+        return (w1 * w1 * var1) + (w2 * w2 * var2) + (2 * w1 * w2 * std1 * std2 * correlation);
     }
 
     private boolean isMacroIndicator(String assetType) {

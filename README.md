@@ -14,12 +14,16 @@
 
 - **실시간/과거 데이터 조회**: 국내/해외 주식, 주요 지수(KOSPI, S&P500 등), 환율, 경제 지표 조회
 - **KIS(한국투자증권) API 연동**: 신뢰할 수 있는 실시간 금융 데이터 제공
+- **하이브리드 지수 차트**: 실시간 데이터(KIS)와 과거 데이터(DB)를 결합하여 최적의 차트 데이터 제공
+- **배당금 조회 (OpenDart)**: 기업의 과거 배당금 지급 내역 및 수익률 조회
 
 ### 2. 💼 포트폴리오 관리 (Portfolio Management)
 
 - **나만의 포트폴리오 구성**: 관심 종목으로 포트폴리오를 구성하고 관리
+- **포트폴리오 진단**:
+    - **자산 상관관계 분석**: 포트폴리오 내 자산 간의 상관계수(Pearson) 분석 및 시각화 (히트맵)
+    - **변동성 분석**: 시장 지수 대비 포트폴리오의 변동성 비교
 - **백테스팅 (Backtesting)**: 구성한 포트폴리오의 과거 성과(수익률, MDD, Sharpe Ratio) 시뮬레이션
-- **자산 상관관계 분석**: 자산 간 상관관계를 분석하여 분산 투자 효과 극대화
 
 ### 3. 💰 ISA 특화 기능 (ISA Specialization)
 
@@ -37,28 +41,34 @@
 - **Frontend**: (TBD)
 - **Backend** : Java, Spring Boot, JPA
 - **Database** : MySQL
-- **External API** : 한국투자증권 API, ChatGPT API
+- **External API** : 한국투자증권 API, OpenDart API, ChatGPT API
 
 ## 📅 개발 로드맵 (Roadmap)
 
-### Phase 1: 데이터 기반 구축
+### Phase 1: 데이터 기반 구축 (Data Foundation)
 
-- [X] 주식, 지수, 환율, 경제 지표 데이터 수집 및 조회 API 구현
-- [X] KIS API 연동 및 데이터 전처리
+- [x] 주식, 지수, 환율, 경제 지표 데이터 수집 및 조회 API 구현
+- [x] KIS API 연동 및 데이터 전처리
+- [x] OpenDart API 연동 (배당금 정보 조회)
+- [x] 하이브리드 지수 차트 데이터 조회 (DB + 실시간)
 
-### Phase 2: 사용자 및 포트폴리오 코어
 
-- [ ] 회원가입/로그인 (JWT/Session)
-- [X] 포트폴리오 생성 및 수익률 계산 로직 구현
+### Phase 2: 사용자 및 포트폴리오 코어 (User & Portfolio Core)
+
+- [x] 회원가입/로그인 (Kakao OAuth 2.0)
+- [x] 포트폴리오 생성 및 관리 기본 로직
+- [x] 포트폴리오 진단 기능 (자산 상관관계 분석)
 - [ ] 관심 종목(Watchlist) 기능
+- [ ] 포트폴리오 수익률 계산 고도화
 
-### Phase 3: 분석 및 시뮬레이션 (차별화)
+### Phase 3: 분석 및 시뮬레이션 (Analysis & Simulation)
 
+- [ ] 자산 상관관계 분석 시각화 (Frontend)
 - [X] 포트폴리오 백테스팅 엔진 개발
-- [X] 자산 상관관계 분석 시각화
 - [X] ISA 절세 계산기 구현
 
-### Phase 4: AI 및 고도화
+
+### Phase 4: AI 및 고도화 (AI & Advanced Features)
 
 - [ ] ChatGPT API 연동 및 프롬프트 엔지니어링
 - [ ] RAG(검색 증강 생성) 시스템 구축

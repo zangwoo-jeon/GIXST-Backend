@@ -36,12 +36,20 @@ public class Member {
     private LocalDateTime subscriptionStartDate;
     private LocalDateTime subscriptionEndDate;
 
+    @Column(name = "provider")
+    private String provider;
+
+    @Column(name = "provider_id")
+    private String providerId;
+
     @Builder
-    public Member(String userName, String displayName, String password) {
+    public Member(String userName, String displayName, String password, String provider, String providerId) {
         this.userName = userName;
         this.displayName = displayName;
         this.password = password;
         this.membershipType = MembershipType.FREE;
+        this.provider = provider;
+        this.providerId = providerId;
     }
 
     public void changePassword(String newPassword) {

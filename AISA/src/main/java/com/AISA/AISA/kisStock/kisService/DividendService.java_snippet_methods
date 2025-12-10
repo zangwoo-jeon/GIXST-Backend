@@ -1,0 +1,123 @@
+    public DividendRankDto getDividendRank() {
+        List<StockDividendRank> rankList = stockDividendRankRepository.findAll();
+
+        // Sort by dividend rate desc
+        rankList.sort(Comparator.comparing(StockDividendRank::getDividendRate, (s1, s2) -> {
+             Double d1 = Double.parseDouble(s1);
+             Double d2 = Double.parseDouble(s2);
+             return d2.compareTo(d1);
+        }));
+
+        List<DividendRankDto.DividendRankEntry> entries = rankList.stream()
+                .map(entity -> DividendRankDto.DividendRankEntry.builder()
+                        .rank(entity.getRank())
+                        .stockCode(entity.getStockCode())
+                        .stockName(entity.getStockName())
+                        .dividendAmount(entity.getDividendAmount())
+                        .dividendRate(entity.getDividendRate())
+                        .build())
+                .collect(Collectors.toList());
+
+        return DividendRankDto.builder()
+                .ranks(entries)
+                .build();
+    }
+
+    @Transactional
+    public void refreshDividendRank() {
+        log.info("Starting batch dividend rank refresh...");
+        
+        // 1. Get all stocks
+        List<Stock> allStocks = stockRepository.findAll();
+        List<StockDividendRank> newRankList = new ArrayList<>();
+        
+        // Date range for 'Last Year' dividend
+        String endDate = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
+        String startDate = LocalDate.now().minusYears(1).format(DateTimeFormatter.ofPattern("yyyyMMdd"));
+
+        int count = 0;
+        int maxStocks = 50; // Safety limit for now to avoid blocking too long, or maybe full loop if user insists.
+        // User asked to process. I will process ALL but with a small sleep.
+        // There are 2000+ stocks. 2000 * 0.1s = 200s (3 mins). Acceptable.
+        
+        for (Stock stock : allStocks) {
+             try {
+                // Rate limit
+                TimeUnit.MILLISECONDS.sleep(100); 
+
+                // 2. Get Dividend Info
+                List<StockDividendInfoDto> dividends = getDividendInfo(stock.getStockCode(), startDate, endDate);
+                
+                if (dividends.isEmpty()) continue;
+
+                // Take the most recent one (or sum? usually yield is based on annual. KIS History returns list of payments.)
+                // Let's assume the sum of dividends in the last year is the annual dividend.
+                // Or simply take the max for now. The user said "Last Year's Dividend".
+                // Usually yield = (Total Dividend last year) / Current Price.
+                
+                BigDecimal totalDividend = BigDecimal.ZERO;
+                for(StockDividendInfoDto info : dividends) {
+                    totalDividend = totalDividend.add(info.getDividendAmount());
+                }
+
+                if (totalDividend.compareTo(BigDecimal.ZERO) == 0) continue;
+
+                // 3. Get Current Price
+                StockPriceDto priceDto = kisStockService.getStockPrice(stock.getStockCode());
+                BigDecimal currentPrice = new BigDecimal(priceDto.getStockPrice());
+                
+                if (currentPrice.compareTo(BigDecimal.ZERO) == 0) continue;
+
+                // 4. Calculate Yield
+                // Yield = (Dividend / Price) * 100
+                double yield = totalDividend.divide(currentPrice, 4, BigDecimal.ROUND_HALF_UP).multiply(new BigDecimal(100)).doubleValue();
+                
+                // Add to list
+                StockDividendRank rankEntity = StockDividendRank.builder()
+                        .stockCode(stock.getStockCode())
+                        .stockName(stock.getStockName())
+                        .dividendAmount(totalDividend.toString())
+                        .dividendRate(String.format("%.2f", yield))
+                        .rank("0") // Will assign later
+                        .build();
+                
+                newRankList.add(rankEntity);
+                count++;
+                
+                if (count % 10 == 0) {
+                    log.info("Processed {} stocks...", count);
+                }
+
+             } catch (Exception e) {
+                 log.warn("Failed to process dividend for {}: {}", stock.getStockCode(), e.getMessage());
+             }
+        }
+
+        // 5. Sort and Assign Rank
+        newRankList.sort((r1, r2) -> {
+            Double d1 = Double.parseDouble(r1.getDividendRate());
+            Double d2 = Double.parseDouble(r2.getDividendRate());
+            return d2.compareTo(d1);
+        });
+
+        for (int i = 0; i < newRankList.size(); i++) {
+            // Need to set rank field. Since Entity is builder, we might need a setter or rebuild.
+            // Entity didn't have setter (only Getter/Builder).
+            // Actually, I can rebuild or simpler: 
+            // I will modify the list logic to builder inside loop? No, rank is known after sort.
+            // I'll create a new list with rank set.
+            StockDividendRank old = newRankList.get(i);
+             newRankList.set(i, StockDividendRank.builder()
+                    .stockCode(old.getStockCode())
+                    .stockName(old.getStockName())
+                    .dividendAmount(old.getDividendAmount())
+                    .dividendRate(old.getDividendRate())
+                    .rank(String.valueOf(i + 1))
+                    .build());
+        }
+
+        // 6. Save to DB
+        stockDividendRankRepository.deleteAll();
+        stockDividendRankRepository.saveAll(newRankList);
+        log.info("Refreshed Dividend Rank with {} stocks.", newRankList.size());
+    }

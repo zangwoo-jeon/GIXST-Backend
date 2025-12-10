@@ -21,6 +21,7 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @Service
@@ -102,6 +103,39 @@ public class KisMacroService {
     public void fetchAndSaveBondYield(BondYield bond, String startDateStr, String endDateStr) {
         fetchAndSaveMacroData(STAT_CODE_BOND_YIELD, bond.getSymbol(), "I", bond.getSymbol(), startDateStr,
                 endDateStr);
+    }
+
+    public Double getLatestExchangeRate() {
+        LocalDate endDate = LocalDate.now();
+        LocalDate startDate = endDate.minusDays(7); // Check last 7 days for holidays/weekends
+
+        List<MacroDailyData> data = macroDailyDataRepository.findAllByStatCodeAndItemCodeAndDateBetweenOrderByDateAsc(
+                STAT_CODE_EXCHANGE_RATE, ITEM_CODE_USD, startDate, endDate);
+
+        if (data.isEmpty()) {
+            return null;
+        }
+
+        // Return the latest value
+        return data.get(data.size() - 1).getValue().doubleValue();
+    }
+
+    public Map<String, Double> getExchangeRateMap(String startDate, String endDate) {
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
+        LocalDate start = LocalDate.parse(startDate, formatter);
+        LocalDate end = LocalDate.parse(endDate, formatter);
+
+        // Fetch enough range to handle holidays (look back 7 more days)
+        LocalDate fetchStart = start.minusDays(7);
+
+        List<MacroDailyData> data = macroDailyDataRepository.findAllByStatCodeAndItemCodeAndDateBetweenOrderByDateAsc(
+                STAT_CODE_EXCHANGE_RATE, ITEM_CODE_USD, fetchStart, end);
+
+        return data.stream()
+                .collect(Collectors.toMap(
+                        entity -> entity.getDate().format(formatter),
+                        entity -> entity.getValue().doubleValue(),
+                        (existing, replacement) -> existing)); // In case of duplicates
     }
 
     private void fetchAndSaveMacroData(String statCode, String itemCode, String marketDivCode, String symbol,

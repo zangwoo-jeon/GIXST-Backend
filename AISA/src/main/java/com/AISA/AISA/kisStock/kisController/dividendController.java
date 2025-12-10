@@ -2,6 +2,7 @@ package com.AISA.AISA.kisStock.kisController;
 
 import com.AISA.AISA.global.response.SuccessResponse;
 import com.AISA.AISA.kisStock.dto.Dividend.StockDividendInfoDto;
+import com.AISA.AISA.kisStock.dto.DividendRank.DividendRankDto;
 
 import com.AISA.AISA.kisStock.kisService.DividendService;
 
@@ -29,6 +30,20 @@ public class DividendController {
             @RequestParam String endDate) {
         List<StockDividendInfoDto> dividendInfoList = dividendService.getDividendInfo(stockCode, startDate, endDate);
         return ResponseEntity.ok(new SuccessResponse<>(true, "주식 배당금 조회 성공", dividendInfoList));
+    }
+
+    @PostMapping("/rank/refresh")
+    @Operation(summary = "배당률 순위 갱신", description = "전체 주식의 작년 배당금을 조회하여 배당수익률 순위를 갱신합니다. (시간 소요 주의)")
+    public ResponseEntity<SuccessResponse<String>> refreshDividendRank() {
+        dividendService.refreshDividendRank();
+        return ResponseEntity.ok(new SuccessResponse<>(true, "배당률 순위 갱신 완료", null));
+    }
+
+    @GetMapping("/rank")
+    @Operation(summary = "배당률 순위 조회", description = "저장된 배당수익률 상위 순위를 조회합니다.")
+    public ResponseEntity<SuccessResponse<DividendRankDto>> getDividendRank() {
+        DividendRankDto rank = dividendService.getDividendRank();
+        return ResponseEntity.ok(new SuccessResponse<>(true, "배당률 순위 조회 성공", rank));
     }
 
 }

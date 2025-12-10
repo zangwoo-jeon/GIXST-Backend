@@ -15,10 +15,10 @@ jobs:
   build-and-push:
     name: Build and Push
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write # Needed for auth with WIF
+    runs-on: ubuntu-latest
 
+
+    steps:
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -26,8 +26,7 @@ jobs:
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v1
         with:
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          credentials_json: ${{ secrets.GCP_CREDENTIALS }}
 
       - name: Configure Docker for GAR
         run: |
@@ -46,15 +45,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Authenticate to Google Cloud (Workload Identity)
-        uses: google-github-actions/auth@v1
-        with:
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
-          token_format: 'access_token'
-          access_token_lifetime: '300s'
-
-      - name: Deploy via SSH (with Token)
+      - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.0
         with:
           host: ${{ secrets.GCP_SSH_HOST }}

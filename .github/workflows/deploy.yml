@@ -1,0 +1,149 @@
+name: Deploy to GCP (Artifact Registry)
+
+on:
+  push:
+    branches: [ "main" ]
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  GAR_LOCATION: asia-northeast3 # Seoul
+  REPOSITORY: aisa-repo
+  IMAGE: aisa-portfolio
+  CONTAINER_NAME: aisa-server
+
+jobs:
+  build-and-push:
+    name: Build and Push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # Needed for auth with WIF
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v3
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x AISA/gradlew
+
+      - name: Build with Gradle
+        working-directory: ./AISA
+        # Test 제외하고 빌드 (속도 최적화)
+        run: ./gradlew clean bootJar -x test
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v1
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Configure Docker for GAR
+        run: |
+          gcloud auth configure-docker ${{ env.GAR_LOCATION }}-docker.pkg.dev
+
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v4
+        with:
+          context: ./AISA
+          push: true
+          tags: ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.IMAGE }}:latest
+
+  deploy:
+    name: Deploy to GCE
+    needs: build-and-push
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to GCE
+    needs: build-and-push
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Authenticate to Google Cloud (Workload Identity)
+        uses: google-github-actions/auth@v1
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          token_format: 'access_token'
+          access_token_lifetime: '300s'
+
+      - name: Deploy via SSH (with Token)
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.GCP_SSH_HOST }}
+          username: ubuntu
+          key: ${{ secrets.GCP_SSH_KEY }}
+          port: 22
+          envs: PROJECT_ID,GAR_LOCATION,REPOSITORY,IMAGE,CONTAINER_NAME
+          script: |
+            # 1. Login to GAR using Access Token (passed from Runner via GHA Auth Action)
+            # WIF 인증 결과로 생성된 토큰 파일은 SSH 세션에 복사되지 않으므로,
+            # 여기서는 VM 내부가 아닌, GitHub Runner가 만든 토큰을 넘기는 방식을 써야 합니다.
+            # 하지만 SSH Action으로 토큰을 안전하게 넘기기 어려우므로,
+            # VM 자체의 Service Account가 GAR 권한을 가지는 것이 정석입니다.
+            
+            # (중요) VM은 "Compute Engine default service account"를 사용 중일 것이므로,
+            # 해당 SA에 "Artifact Registry Reader" 권한만 있으면 별도 로그인 없이도 pull 가능합니다!
+            # 로그인 과정 생략하고 바로 gcloud auth configure-docker 시도
+            
+            gcloud auth configure-docker ${{ env.GAR_LOCATION }}-docker.pkg.dev --quiet || true
+            
+            # 만약 위 방법이 안 된다면, Runner에서 토큰을 파일로 만들어 scp로 보낸 뒤 로그인해야 합니다.
+            # 하지만 간단하게 가기 위해, VM Service Account 권한 부여를 권장합니다.
+
+            # 2. Define Image URI
+            FULL_IMAGE_URI="${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.IMAGE }}:latest"
+
+            # 3. Pull Image
+            # (로그인 없이 시도 - VM SA 권한 의존)
+            docker pull $FULL_IMAGE_URI || { echo "Docker pull failed. Ensure VM has 'Artifact Registry Reader' permission."; exit 1; }
+
+            # 2. Define Image URI
+            FULL_IMAGE_URI="${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.IMAGE }}:latest"
+
+            echo "Deploying $FULL_IMAGE_URI ..."
+
+            # 3. Pull Image
+            docker pull $FULL_IMAGE_URI || { echo "Docker pull failed"; exit 1; }
+
+            # 4. Stop & Remove Existing Container
+            if [ "$(docker ps -aq -f name=${{ env.CONTAINER_NAME }})" ]; then
+                echo "Stopping existing container..."
+                docker stop ${{ env.CONTAINER_NAME }}
+                docker rm ${{ env.CONTAINER_NAME }}
+            fi
+
+            # 5. Run New Container
+            # (로그 디렉토리 마운트 및 헬스 체크 포함)
+            mkdir -p ~/logs
+            
+            echo "Starting container..."
+            docker run -d \
+              --name ${{ env.CONTAINER_NAME }} \
+              -p 8080:8080 \
+              -v ~/logs:/logs \
+              -e SPRING_DATASOURCE_URL="jdbc:mysql://${{ secrets.GCP_SSH_HOST }}:3306/aisa_portfolio?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Seoul&characterEncoding=UTF-8" \
+              -e SPRING_DATASOURCE_USERNAME="user" \
+              -e SPRING_DATASOURCE_PASSWORD="password" \
+              $FULL_IMAGE_URI
+
+            # 6. Health Check Loop
+            echo "Waiting for service to start..."
+            for i in {1..10}; do
+              if curl -s http://localhost:8080/actuator/health | grep 'UP' > /dev/null; then
+                echo "Health check passed!"
+                exit 0
+              fi
+              echo "Waiting... ($i/10)"
+              sleep 10
+            done
+
+            echo "Health check failed or timed out."
+            # (Optional) docker logs ${{ env.CONTAINER_NAME }}
+            # exit 1  <-- Uncomment to fail the job if health check fails

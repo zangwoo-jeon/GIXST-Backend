@@ -52,6 +52,7 @@
 - [x] OpenDart API 연동 (배당금 정보 조회)
 - [x] 하이브리드 지수 차트 데이터 조회 (DB + 실시간)
 
+
 ### Phase 2: 사용자 및 포트폴리오 코어 (User & Portfolio Core)
 
 - [x] 회원가입/로그인 (Kakao OAuth 2.0)
@@ -62,9 +63,10 @@
 
 ### Phase 3: 분석 및 시뮬레이션 (Analysis & Simulation)
 
-- [ ] 포트폴리오 백테스팅 엔진 개발
-- [ ] ISA 절세 계산기 구현
 - [ ] 자산 상관관계 분석 시각화 (Frontend)
+- [X] 포트폴리오 백테스팅 엔진 개발
+- [X] ISA 절세 계산기 구현
+
 
 ### Phase 4: AI 및 고도화 (AI & Advanced Features)
 

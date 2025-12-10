@@ -81,6 +81,12 @@ public class IsaDTOs {
 
         @Schema(description = "최종 수익금 (매매손익 + 배당수익 - 세금)")
         private BigDecimal finalReturn;
+
+        @Schema(description = "원금 (초기 투자 금액)")
+        private BigDecimal principal;
+
+        @Schema(description = "수익률 (%)")
+        private BigDecimal roi;
     }
 
     public enum IsaAccountType {

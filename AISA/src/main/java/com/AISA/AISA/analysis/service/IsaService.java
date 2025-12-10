@@ -85,6 +85,7 @@ public class IsaService {
 
         BigDecimal totalDividendIncome = BigDecimal.ZERO;
         BigDecimal totalCapitalGains = BigDecimal.ZERO; // PnL (Price Return)
+        BigDecimal principal = BigDecimal.ZERO; // Total Initial Investment
 
         // For Normal Account Tax Calculation
         BigDecimal normalDividendTax = BigDecimal.ZERO;
@@ -101,6 +102,7 @@ public class IsaService {
             BigDecimal totalPnl = pnlPerShare.multiply(quantity);
 
             totalCapitalGains = totalCapitalGains.add(totalPnl);
+            principal = principal.add(startPrice.multiply(quantity));
 
             // Normal Account Tax on PnL
             if (stock.getStockType() == StockType.FOREIGN_ETF && totalPnl.compareTo(BigDecimal.ZERO) > 0) {
@@ -144,6 +146,12 @@ public class IsaService {
         BigDecimal taxSavings = normalTotalTax.subtract(isaTax);
         BigDecimal finalReturn = totalCapitalGains.add(totalDividendIncome).subtract(isaTax);
 
+        // ROI Calculation
+        BigDecimal roi = BigDecimal.ZERO;
+        if (principal.compareTo(BigDecimal.ZERO) > 0) {
+            roi = finalReturn.divide(principal, 4, RoundingMode.HALF_UP).multiply(new BigDecimal("100"));
+        }
+
         return IsaBacktestResponse.builder()
                 .totalDividendIncome(totalDividendIncome)
                 .totalCapitalGains(totalCapitalGains)
@@ -151,6 +159,8 @@ public class IsaService {
                 .isaTotalTax(isaTax)
                 .taxSavings(taxSavings)
                 .finalReturn(finalReturn)
+                .principal(principal)
+                .roi(roi)
                 .build();
     }
 

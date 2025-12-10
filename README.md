@@ -41,7 +41,7 @@
 - **Frontend**: (TBD)
 - **Backend** : Java, Spring Boot, JPA
 - **Database** : MySQL
-- **External API** : 한국투자증권 API, OpenDart API, ChatGPT API
+- **External API** : 한국투자증권 API, OpenDart API
 
 ## 📅 개발 로드맵 (Roadmap)
 

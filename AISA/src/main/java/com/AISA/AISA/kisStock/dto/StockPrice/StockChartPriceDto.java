@@ -28,4 +28,20 @@ public class StockChartPriceDto {
 
     @JsonProperty("acml_vol")
     private String volume;
+
+    // USD Fields
+    @JsonProperty("stck_clpr_usd")
+    private String closePriceUsd;
+
+    @JsonProperty("stck_oprc_usd")
+    private String openPriceUsd;
+
+    @JsonProperty("stck_hgpr_usd")
+    private String highPriceUsd;
+
+    @JsonProperty("stck_lwpr_usd")
+    private String lowPriceUsd;
+
+    @JsonProperty("exchange_rate")
+    private String exchangeRate;
 }

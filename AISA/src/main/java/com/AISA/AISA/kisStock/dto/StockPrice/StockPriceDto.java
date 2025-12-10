@@ -16,4 +16,6 @@ public class StockPriceDto {
     private String changeRate;
     private String accumulatedVolume;
     private String openingPrice;
+    private String usdPrice;
+    private String exchangeRate;
 }

@@ -19,7 +19,7 @@ bin/
 
 ### IntelliJ IDEA ###
 .idea/
-out/
+/out/
 *.iml
 
 ### NetBeans ###

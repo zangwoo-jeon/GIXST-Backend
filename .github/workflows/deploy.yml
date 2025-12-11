@@ -94,10 +94,48 @@ jobs:
               -e SPRING_DATASOURCE_URL="jdbc:mysql://172.17.0.1:3306/aisa_portfolio?useUnicode=true&characterEncoding=utf8&allowPublicKeyRetrieval=true&useSSL=false" \
               -e SPRING_DATASOURCE_USERNAME="${{ secrets.DB_USERNAME }}" \
               -e SPRING_DATASOURCE_PASSWORD="${{ secrets.DB_PASSWORD }}" \
+              -e SPRING_JPA_HIBERNATE_DDL_AUTO="update" \
+              -e SPRING_JPA_SHOW_SQL="true" \
+              -e SPRING_JPA_PROPERTIES_HIBERNATE_FORMAT_SQL="true" \
+              \
+              -e KIS_BASE_URL="https://openapi.koreainvestment.com:9443" \
+              -e KIS_AUTH_URL="/oauth2/tokenP" \
               -e KIS_API_APPKEY="${{ secrets.KIS_APP_KEY }}" \
               -e KIS_API_APPSECRET="${{ secrets.KIS_APP_SECRET }}" \
+              -e KIS_PRICE_URL="/uapi/domestic-stock/v1/quotations/inquire-price" \
+              -e KIS_INDEX_PRICE_URL="/uapi/domestic-stock/v1/quotations/inquire-index-price" \
+              -e KIS_INDEX_CHART_URL="/uapi/domestic-stock/v1/quotations/inquire-index-daily-price" \
+              -e KIS_STOCK_CHART_URL="/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice" \
+              -e KIS_DIVIDEND_URL="/uapi/domestic-stock/v1/ksdinfo/dividend" \
+              -e KIS_OVERSEA_URL="/uapi/overseas-price/v1/quotations/inquire-daily-chartprice" \
+              -e KIS_VOLUME_RANK_URL="/uapi/domestic-stock/v1/quotations/volume-rank" \
+              -e KIS_DIVIDEND_RANK_URL="/uapi/domestic-stock/v1/ranking/dividend-rate" \
+              -e KIS_INCOME_STATEMENT_URL="/uapi/domestic-stock/v1/finance/income-statement" \
+              -e KIS_BALANCE_SHEET_URL="/uapi/domestic-stock/v1/finance/balance-sheet" \
+              -e KIS_FINANCIAL_RATIO_URL="/uapi/domestic-stock/v1/finance/financial-ratio" \
+              \
               -e JWT_SECRET="${{ secrets.JWT_SECRET }}" \
+              -e JWT_ACCESS_TOKEN_EXPIRATION_TIME="7200000" \
+              -e JWT_REFRESH_TOKEN_EXPIRATION_TIME="1209600000" \
+              -e ECOS_BASE_URL="http://ecos.bok.or.kr/api" \
               -e ECOS_API_KEY="${{ secrets.ECOS_API_KEY }}" \
+              \
+              -e SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GOOGLE_CLIENT_ID="${{ secrets.GOOGLE_CLIENT_ID }}" \
+              -e SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GOOGLE_CLIENT_SECRET="${{ secrets.GOOGLE_CLIENT_SECRET }}" \
+              -e SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GOOGLE_SCOPE="email,profile" \
+              \
+              -e SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_KAKAO_CLIENT_ID="${{ secrets.KAKAO_CLIENT_ID }}" \
+              -e SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_KAKAO_CLIENT_SECRET="${{ secrets.KAKAO_CLIENT_SECRET }}" \
+              -e SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_KAKAO_CLIENT_AUTHENTICATION_METHOD="client_secret_post" \
+              -e SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_KAKAO_AUTHORIZATION_GRANT_TYPE="authorization_code" \
+              -e SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_KAKAO_REDIRECT_URI="http://${{ secrets.GCP_SSH_HOST }}.nip.io:8080/login/oauth2/code/kakao" \
+              -e SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_KAKAO_SCOPE="account_email,profile_nickname" \
+              -e SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_KAKAO_CLIENT_NAME="Kakao" \
+              -e SPRING_SECURITY_OAUTH2_CLIENT_PROVIDER_KAKAO_AUTHORIZATION_URI="https://kauth.kakao.com/oauth/authorize" \
+              -e SPRING_SECURITY_OAUTH2_CLIENT_PROVIDER_KAKAO_TOKEN_URI="https://kauth.kakao.com/oauth/token" \
+              -e SPRING_SECURITY_OAUTH2_CLIENT_PROVIDER_KAKAO_USER_INFO_URI="https://kapi.kakao.com/v2/user/me" \
+              -e SPRING_SECURITY_OAUTH2_CLIENT_PROVIDER_KAKAO_USER_NAME_ATTRIBUTE="id" \
+              \
               $FULL_IMAGE_URI
 
             # 6. 불필요한(Dangling) 이미지 정리 (디스크 용량 확보)

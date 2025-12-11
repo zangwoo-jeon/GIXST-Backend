@@ -100,8 +100,8 @@ jobs:
               \
               -e KIS_BASE_URL="https://openapi.koreainvestment.com:9443" \
               -e KIS_AUTH_URL="/oauth2/tokenP" \
-              -e KIS_API_APPKEY="${{ secrets.KIS_APP_KEY }}" \
-              -e KIS_API_APPSECRET="${{ secrets.KIS_APP_SECRET }}" \
+              -e KIS_APPKEY="${{ secrets.KIS_APP_KEY }}" \
+              -e KIS_APPSECRET="${{ secrets.KIS_APP_SECRET }}" \
               -e KIS_PRICE_URL="/uapi/domestic-stock/v1/quotations/inquire-price" \
               -e KIS_INDEX_PRICE_URL="/uapi/domestic-stock/v1/quotations/inquire-index-price" \
               -e KIS_INDEX_CHART_URL="/uapi/domestic-stock/v1/quotations/inquire-index-daily-price" \

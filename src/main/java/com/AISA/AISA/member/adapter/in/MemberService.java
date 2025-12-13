@@ -7,6 +7,7 @@ import com.AISA.AISA.global.jwt.RefreshTokenRepository;
 import com.AISA.AISA.member.adapter.in.dto.LoginRequestDto;
 import com.AISA.AISA.member.adapter.in.dto.MemberSignupRequest;
 import com.AISA.AISA.member.adapter.in.dto.PasswordChangeRequest;
+import com.AISA.AISA.member.adapter.in.dto.DisplayNameChangeRequest;
 import com.AISA.AISA.global.jwt.dto.TokenResponseDto;
 import com.AISA.AISA.member.adapter.in.exception.MemberErrorCode;
 import com.AISA.AISA.member.adapter.out.dto.MemberResponse;
@@ -121,6 +122,21 @@ public class MemberService {
 
         // 비밀번호 변경
         member.changePassword(passwordEncoder.encode(newPassword));
+    }
+
+    @Transactional
+    public void changeDisplayName(UUID memberId, DisplayNameChangeRequest request) {
+        Member member = memberRepository.findById(memberId)
+                .orElseThrow(() -> new BusinessException(MemberErrorCode.MEMBER_NOT_FOUND));
+
+        String newDisplayName = request.getNewDisplayName();
+
+        // 닉네임 중복 체크
+        if (!member.getDisplayName().equals(newDisplayName)) {
+            checkDisplayNameDuplicate(newDisplayName);
+        }
+
+        member.changeDisplayName(newDisplayName);
     }
 
     @Transactional

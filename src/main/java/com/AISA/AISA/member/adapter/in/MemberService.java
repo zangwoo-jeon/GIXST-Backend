@@ -77,6 +77,12 @@ public class MemberService {
                 .orElseThrow(() -> new BusinessException(MemberErrorCode.MEMBER_NOT_FOUND));
     }
 
+    public MemberResponse findMemberByUserName(String userName) {
+        return memberRepository.findByUserName(userName)
+                .map(MemberResponse::new)
+                .orElseThrow(() -> new BusinessException(MemberErrorCode.MEMBER_NOT_FOUND));
+    }
+
     public List<MemberResponse> findAllMember() {
         return memberRepository.findAll().stream()
                 .map(MemberResponse::new)

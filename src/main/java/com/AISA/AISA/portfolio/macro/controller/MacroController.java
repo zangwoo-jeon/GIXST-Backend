@@ -42,10 +42,9 @@ public class MacroController {
     @PostMapping("/exchange-rate/init")
     @Operation(summary = "원/달러 환율 데이터 초기화/업데이트", description = "한국투자증권 API에서 원/달러 환율 데이터를 가져와 DB에 저장합니다. (대량 데이터 적재용)")
     public ResponseEntity<SuccessResponse<Void>> initExchangeRate(
-            @RequestParam String currencyCode,
             @RequestParam String startDate,
             @RequestParam String endDate) {
-        kisMacroService.fetchAndSaveExchangeRate(currencyCode, startDate, endDate);
+        kisMacroService.fetchAndSaveExchangeRate("FX@KRW", startDate, endDate);
         return ResponseEntity.ok(new SuccessResponse<>(true, "환율 데이터 저장 성공", null));
     }
 

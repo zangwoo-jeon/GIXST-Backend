@@ -56,6 +56,10 @@ public class Member {
         this.password = newPassword;
     }
 
+    public void changeDisplayName(String newDisplayName) {
+        this.displayName = newDisplayName;
+    }
+
     public void upgradeMembership(MembershipType membershipType) {
         this.membershipType = membershipType;
         this.subscriptionStartDate = LocalDateTime.now();

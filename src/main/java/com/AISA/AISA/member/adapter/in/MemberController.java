@@ -10,6 +10,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.security.Principal;
 import java.util.List;
 import java.util.UUID;
 
@@ -61,7 +62,7 @@ public class MemberController {
 
     @GetMapping("/members/me")
     @Operation(summary = "내 정보 조회", description = "현재 로그인한 회원의 정보를 조회합니다.")
-    public ResponseEntity<SuccessResponse<MemberResponse>> getMe(java.security.Principal principal) {
+    public ResponseEntity<SuccessResponse<MemberResponse>> getMe(Principal principal) {
         MemberResponse member = memberService.findMemberByUserName(principal.getName());
         return ResponseEntity.ok(new SuccessResponse<>(true, "내 정보 조회 성공", member));
     }
@@ -82,13 +83,24 @@ public class MemberController {
         return ResponseEntity.ok(new SuccessResponse<>(true, "회원 삭제 성공", null));
     }
 
-    @PatchMapping("/{memberId}/password")
-    @Operation(summary = "비밀번호 변경", description = "특정 회원의 비밀번호를 변경합니다.")
+    @PatchMapping("/members/me/password")
+    @Operation(summary = "비밀번호 변경", description = "로그인한 회원의 비밀번호를 변경합니다.")
     public ResponseEntity<SuccessResponse<Void>> changePassword(
-            @PathVariable UUID memberId,
+            Principal principal,
             @RequestBody PasswordChangeRequest request) {
-        memberService.changePassword(memberId, request);
+        MemberResponse member = memberService.findMemberByUserName(principal.getName());
+        memberService.changePassword(member.getMemberId(), request);
         return ResponseEntity.ok(new SuccessResponse<>(true, "비밀번호 변경 성공", null));
+    }
+
+    @PatchMapping("/members/me/displayName")
+    @Operation(summary = "닉네임 변경", description = "로그인한 회원의 닉네임을 변경합니다.")
+    public ResponseEntity<SuccessResponse<Void>> changeDisplayName(
+            Principal principal,
+            @RequestBody DisplayNameChangeRequest request) {
+        MemberResponse member = memberService.findMemberByUserName(principal.getName());
+        memberService.changeDisplayName(member.getMemberId(), request);
+        return ResponseEntity.ok(new SuccessResponse<>(true, "닉네임 변경 성공", null));
     }
 
 }

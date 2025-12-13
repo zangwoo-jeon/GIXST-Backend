@@ -5,6 +5,7 @@ import com.AISA.AISA.global.exception.BusinessException;
 import com.AISA.AISA.kisStock.Entity.stock.Stock;
 import com.AISA.AISA.kisStock.Entity.stock.StockDailyData;
 import com.AISA.AISA.kisStock.config.KisApiProperties;
+import com.AISA.AISA.kisStock.dto.VolumeRank.KisVolumeRankApiResponse;
 import com.AISA.AISA.kisStock.dto.VolumeRank.VolumeRankDto;
 import com.AISA.AISA.kisStock.dto.StockPrice.KisPriceApiResponse;
 import com.AISA.AISA.kisStock.dto.StockPrice.StockChartPriceDto;
@@ -443,6 +444,25 @@ public class KisStockService {
                 log.info("Completed batch historical stock data fetch.");
         }
 
+        public void fetchStocksHistoricalDataByRange(Long startId, Long endId, String startDateStr) {
+                log.info("Starting historical stock data fetch for stock_id range {} to {} from {}", startId, endId,
+                                startDateStr);
+                List<Stock> stocks = stockRepository.findAllByStockIdBetween(startId, endId);
+
+                for (Stock stock : stocks) {
+                        try {
+                                log.info("Updating data for stock: {} ({}) - ID: {}", stock.getStockName(),
+                                                stock.getStockCode(), stock.getStockId());
+                                fetchAndSaveHistoricalStockData(stock.getStockCode(), startDateStr);
+                                Thread.sleep(500);
+                        } catch (Exception e) {
+                                log.error("Failed to update stock: {} ({}) - {}", stock.getStockName(),
+                                                stock.getStockCode(), e.getMessage());
+                        }
+                }
+                log.info("Completed historical stock data fetch for range {} to {}.", startId, endId);
+        }
+
         private StockChartPriceDto convertToDto(StockDailyData entity) {
                 DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
                 return StockChartPriceDto.builder()
@@ -459,7 +479,7 @@ public class KisStockService {
                 String accessToken = kisAuthService.getAccessToken();
 
                 try {
-                        return webClient.get()
+                        KisVolumeRankApiResponse response = webClient.get()
                                         .uri(uriBuilder -> uriBuilder
                                                         .path(kisApiProperties.getVolumeRankUrl())
                                                         .queryParam("FID_COND_MRKT_DIV_CODE", "J")
@@ -480,8 +500,30 @@ public class KisStockService {
                                         .header("tr_id", "FHPST01710000")
                                         .header("custtype", "P")
                                         .retrieve()
-                                        .bodyToMono(VolumeRankDto.class)
+                                        .bodyToMono(KisVolumeRankApiResponse.class)
                                         .block();
+
+                        if (response == null || response.getOutput() == null) {
+                                return VolumeRankDto.builder().ranks(new ArrayList<>()).build();
+                        }
+
+                        List<VolumeRankDto.VolumeRankEntry> ranks = response.getOutput().stream()
+                                        .map(item -> VolumeRankDto.VolumeRankEntry.builder()
+                                                        .stockName(item.getStockName())
+                                                        .stockCode(item.getStockCode())
+                                                        .rank(item.getRank())
+                                                        .currentPrice(item.getCurrentPrice())
+                                                        .priceChangeSign(item.getPriceChangeSign())
+                                                        .priceChange(item.getPriceChange())
+                                                        .priceChangeRate(item.getPriceChangeRate())
+                                                        .accumulatedVolume(item.getAccumulatedVolume())
+                                                        .previousDayVolume(item.getPreviousDayVolume())
+                                                        .averageVolume(item.getAverageVolume())
+                                                        .build())
+                                        .collect(Collectors.toList());
+
+                        return VolumeRankDto.builder().ranks(ranks).build();
+
                 } catch (Exception e) {
                         log.error("Failed to fetch volume rank: {}", e.getMessage());
                         return null;

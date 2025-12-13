@@ -7,4 +7,6 @@ import java.util.Optional;
 
 public interface StockRepository extends JpaRepository<Stock, Long> {
     Optional<Stock> findByStockCode(String stockCode);
+
+    java.util.List<Stock> findAllByStockIdBetween(Long startId, Long endId);
 }

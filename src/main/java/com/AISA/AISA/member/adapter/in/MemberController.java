@@ -59,6 +59,13 @@ public class MemberController {
         return ResponseEntity.ok(new SuccessResponse<>(true, "전체 회원 조회 성공", members));
     }
 
+    @GetMapping("/members/me")
+    @Operation(summary = "내 정보 조회", description = "현재 로그인한 회원의 정보를 조회합니다.")
+    public ResponseEntity<SuccessResponse<MemberResponse>> getMe(java.security.Principal principal) {
+        MemberResponse member = memberService.findMemberByUserName(principal.getName());
+        return ResponseEntity.ok(new SuccessResponse<>(true, "내 정보 조회 성공", member));
+    }
+
     @GetMapping("/members/{memberId}")
     @Operation(summary = "특정 회원 조회", description = "특정 회원 정보를 조회합니다.")
     public ResponseEntity<SuccessResponse<MemberResponse>> getMemberById(

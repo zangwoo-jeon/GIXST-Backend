@@ -4,6 +4,7 @@ import com.AISA.AISA.global.response.SuccessResponse;
 import com.AISA.AISA.kisStock.enums.BondYield;
 
 import com.AISA.AISA.kisStock.kisService.KisMacroService;
+import com.AISA.AISA.portfolio.macro.dto.ExchangeRateStatusDto;
 import com.AISA.AISA.portfolio.macro.dto.MacroIndicatorDto;
 import com.AISA.AISA.portfolio.macro.service.EcosService;
 import com.AISA.AISA.portfolio.macro.service.MacroService;
@@ -37,6 +38,13 @@ public class MacroController {
             @RequestParam String endDate) {
         List<MacroIndicatorDto> data = kisMacroService.fetchExchangeRate("FX@KRW", startDate, endDate);
         return ResponseEntity.ok(new SuccessResponse<>(true, "환율 조회 성공", data));
+    }
+
+    @GetMapping("/exchange-rate/status")
+    @Operation(summary = "원/달러 환율 현재가 조회", description = "한국투자증권 API를 통해 실시간 원/달러 환율, 변동액, 등락률을 조회합니다.")
+    public ResponseEntity<SuccessResponse<ExchangeRateStatusDto>> getExchangeRateStatus() {
+        ExchangeRateStatusDto data = kisMacroService.getExchangeRateStatus();
+        return ResponseEntity.ok(new SuccessResponse<>(true, "환율 현재가 조회 성공", data));
     }
 
     @PostMapping("/exchange-rate/init")

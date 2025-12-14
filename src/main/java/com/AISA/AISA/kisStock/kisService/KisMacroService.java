@@ -4,6 +4,8 @@ import com.AISA.AISA.global.exception.BusinessException;
 import com.AISA.AISA.kisStock.config.KisApiProperties;
 import com.AISA.AISA.kisStock.dto.Macro.KisOverseasDailyPriceDto;
 import com.AISA.AISA.kisStock.dto.Macro.KisOverseasDailyPriceResponseDto;
+import com.AISA.AISA.kisStock.dto.Macro.KisOverseasIndexBasicInfoDto;
+import com.AISA.AISA.portfolio.macro.dto.ExchangeRateStatusDto;
 import com.AISA.AISA.kisStock.enums.BondYield;
 
 import com.AISA.AISA.kisStock.exception.KisApiErrorCode;
@@ -110,6 +112,17 @@ public class KisMacroService {
         return data.get(data.size() - 1).getValue().doubleValue();
     }
 
+    public ExchangeRateStatusDto getExchangeRateStatus() {
+        KisOverseasIndexBasicInfoDto latest = fetchExchangeRateBasicInfo("FX@KRW");
+
+        return ExchangeRateStatusDto.builder()
+                .date(latest.getDate())
+                .price(latest.getPrice())
+                .priceChange(latest.getPriceChange())
+                .changeRate(latest.getChangeRate())
+                .build();
+    }
+
     public Map<String, Double> getExchangeRateMap(String startDate, String endDate) {
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
         LocalDate start = LocalDate.parse(startDate, formatter);
@@ -213,6 +226,52 @@ public class KisMacroService {
         }
 
         return response.getDailyPriceList();
+    }
+
+    private KisOverseasIndexBasicInfoDto fetchExchangeRateBasicInfo(String symbol) {
+        String accessToken = kisAuthService.getAccessToken();
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
+        String today = LocalDate.now().format(formatter);
+
+        KisOverseasDailyPriceResponseDto response = webClient.get()
+                .uri(uriBuilder -> uriBuilder
+                        .path(kisApiProperties.getOverseaUrl())
+                        .queryParam("FID_COND_MRKT_DIV_CODE", "X")
+                        .queryParam("FID_INPUT_ISCD", symbol)
+                        .queryParam("FID_INPUT_DATE_1", today)
+                        .queryParam("FID_INPUT_DATE_2", today)
+                        .queryParam("FID_PERIOD_DIV_CODE", "D")
+                        .build())
+                .header("authorization", accessToken)
+                .header("appkey", kisApiProperties.getAppkey())
+                .header("appsecret", kisApiProperties.getAppsecret())
+                .header("tr_id", "FHKST03030100")
+                .header("custtype", "P")
+                .retrieve()
+                .bodyToMono(KisOverseasDailyPriceResponseDto.class)
+                .block();
+
+        if (response == null || !"0".equals(response.getReturnCode())) {
+            log.error("KIS API Error: RtCd={}, Msg={}",
+                    response != null ? response.getReturnCode() : "null",
+                    response != null ? response.getMessage() : "null response");
+            throw new BusinessException(KisApiErrorCode.STOCK_PRICE_FETCH_FAILED);
+        }
+
+        if (response.getOutput1() == null) {
+            throw new BusinessException(KisApiErrorCode.STOCK_PRICE_FETCH_FAILED);
+        }
+
+        // Output1 might not have date, so we can inject it or use what's available.
+        if (response.getOutput1().getDate() == null && response.getDailyPriceList() != null
+                && !response.getDailyPriceList().isEmpty()) {
+            // If output1 doesn't have date, try to get from output2(daily list) first item
+            response.getOutput1().setDate(response.getDailyPriceList().get(0).getDate());
+        } else if (response.getOutput1().getDate() == null) {
+            response.getOutput1().setDate(today);
+        }
+
+        return response.getOutput1();
     }
 
 }

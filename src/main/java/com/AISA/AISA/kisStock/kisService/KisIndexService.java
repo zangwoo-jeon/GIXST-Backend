@@ -473,7 +473,7 @@ public class KisIndexService {
 
         KisOverseasDailyPriceResponseDto response = webClient.get()
                 .uri(uriBuilder -> uriBuilder
-                        .path(kisApiProperties.getOverSeaUrl())
+                        .path(kisApiProperties.getOverseaUrl())
                         .queryParam("FID_COND_MRKT_DIV_CODE", marketDivCode)
                         .queryParam("FID_INPUT_ISCD", symbol)
                         .queryParam("FID_INPUT_DATE_1", startDate)
@@ -510,7 +510,7 @@ public class KisIndexService {
 
         KisOverseasDailyPriceResponseDto response = webClient.get()
                 .uri(uriBuilder -> uriBuilder
-                        .path(kisApiProperties.getOverSeaUrl()) // Use the same URL as history fetch (FHKST03030100)
+                        .path(kisApiProperties.getOverseaUrl()) // Use the same URL as history fetch (FHKST03030100)
                         .queryParam("FID_COND_MRKT_DIV_CODE", "N")
                         .queryParam("FID_INPUT_ISCD", symbol)
                         .queryParam("FID_INPUT_DATE_1", today)

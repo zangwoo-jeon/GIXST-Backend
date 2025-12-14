@@ -2,7 +2,7 @@ package com.AISA.AISA.portfolio.macro.controller;
 
 import com.AISA.AISA.global.response.SuccessResponse;
 import com.AISA.AISA.kisStock.enums.BondYield;
-import com.AISA.AISA.kisStock.enums.OverseasIndex;
+
 import com.AISA.AISA.kisStock.kisService.KisMacroService;
 import com.AISA.AISA.portfolio.macro.dto.MacroIndicatorDto;
 import com.AISA.AISA.portfolio.macro.service.EcosService;
@@ -109,28 +109,6 @@ public class MacroController {
             @RequestParam String endDate) {
         List<MacroIndicatorDto> ratioList = macroService.getKospiUsdRatio(startDate, endDate);
         return ResponseEntity.ok(new SuccessResponse<>(true, "달러 환산 코스피 조회 성공", ratioList));
-    }
-
-    @GetMapping("/index/{indexName}")
-    @Operation(summary = "해외 지수 조회", description = "주요 해외 지수(NASDAQ, SP500, NIKKEI, HANGSENG, EUROSTOXX50)를 조회합니다.")
-    public ResponseEntity<SuccessResponse<List<MacroIndicatorDto>>> getOverseasIndex(
-            @PathVariable String indexName,
-            @RequestParam String startDate,
-            @RequestParam String endDate) {
-        OverseasIndex index = OverseasIndex.valueOf(indexName.toUpperCase());
-        List<MacroIndicatorDto> data = kisMacroService.fetchOverseasIndex(index, startDate, endDate);
-        return ResponseEntity.ok(new SuccessResponse<>(true, index.getDescription() + " 조회 성공", data));
-    }
-
-    @PostMapping("/index/init")
-    @Operation(summary = "해외 지수 데이터 초기화/업데이트", description = "해외 지수 데이터(NASDAQ, SP500, NIKKEI, HANGSENG, EUROSTOXX50)를 KIS API에서 가져와 DB에 저장합니다.")
-    public ResponseEntity<SuccessResponse<Void>> initOverseasIndex(
-            @RequestParam String indexName,
-            @RequestParam String startDate,
-            @RequestParam String endDate) {
-        OverseasIndex index = OverseasIndex.valueOf(indexName.toUpperCase());
-        kisMacroService.fetchAndSaveOverseasIndex(index, startDate, endDate);
-        return ResponseEntity.ok(new SuccessResponse<>(true, index.getDescription() + " 데이터 저장 성공", null));
     }
 
     @GetMapping("/bond/{bondName}")

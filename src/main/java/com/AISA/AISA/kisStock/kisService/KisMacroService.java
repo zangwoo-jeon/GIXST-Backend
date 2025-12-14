@@ -5,7 +5,7 @@ import com.AISA.AISA.kisStock.config.KisApiProperties;
 import com.AISA.AISA.kisStock.dto.Macro.KisOverseasDailyPriceDto;
 import com.AISA.AISA.kisStock.dto.Macro.KisOverseasDailyPriceResponseDto;
 import com.AISA.AISA.kisStock.enums.BondYield;
-import com.AISA.AISA.kisStock.enums.OverseasIndex;
+
 import com.AISA.AISA.kisStock.exception.KisApiErrorCode;
 import com.AISA.AISA.kisStock.kisService.Auth.KisAuthService;
 import com.AISA.AISA.portfolio.macro.Entity.MacroDailyData;
@@ -40,16 +40,12 @@ public class KisMacroService {
     private static final String ITEM_CODE_USD = "0000001";
 
     // StatCode for Overseas Index (New constant)
-    private static final String STAT_CODE_OVERSEAS_INDEX = "KIS_OVERSEAS_INDEX";
+
     // StatCode for Bond Yield (New constant)
     private static final String STAT_CODE_BOND_YIELD = "KIS_BOND_YIELD";
 
     public List<MacroIndicatorDto> fetchExchangeRate(String currencyCode, String startDate, String endDate) {
         return fetchMacroData(STAT_CODE_EXCHANGE_RATE, ITEM_CODE_USD, "X", currencyCode, startDate, endDate);
-    }
-
-    public List<MacroIndicatorDto> fetchOverseasIndex(OverseasIndex index, String startDate, String endDate) {
-        return fetchMacroData(STAT_CODE_OVERSEAS_INDEX, index.getSymbol(), "N", index.getSymbol(), startDate, endDate);
     }
 
     public List<MacroIndicatorDto> fetchBondYield(BondYield bond, String startDate, String endDate) {
@@ -91,12 +87,6 @@ public class KisMacroService {
     @Transactional
     public void fetchAndSaveExchangeRate(String currencyCode, String startDateStr, String endDateStr) {
         fetchAndSaveMacroData(STAT_CODE_EXCHANGE_RATE, ITEM_CODE_USD, "X", currencyCode, startDateStr, endDateStr);
-    }
-
-    @Transactional
-    public void fetchAndSaveOverseasIndex(OverseasIndex index, String startDateStr, String endDateStr) {
-        fetchAndSaveMacroData(STAT_CODE_OVERSEAS_INDEX, index.getSymbol(), "N", index.getSymbol(), startDateStr,
-                endDateStr);
     }
 
     @Transactional

@@ -9,6 +9,14 @@ import com.AISA.AISA.kisStock.dto.Index.KisIndexChartApiResponse;
 import com.AISA.AISA.kisStock.exception.KisApiErrorCode;
 import com.AISA.AISA.kisStock.kisService.Auth.KisAuthService;
 import com.AISA.AISA.kisStock.repository.IndexDailyDataRepository;
+import com.AISA.AISA.kisStock.enums.OverseasIndex;
+import com.AISA.AISA.portfolio.macro.dto.MacroIndicatorDto;
+import com.AISA.AISA.portfolio.macro.repository.MacroDailyDataRepository;
+import com.AISA.AISA.portfolio.macro.Entity.MacroDailyData;
+import com.AISA.AISA.kisStock.dto.Macro.KisOverseasDailyPriceDto;
+import com.AISA.AISA.kisStock.dto.Macro.KisOverseasDailyPriceResponseDto;
+import com.AISA.AISA.kisStock.dto.Macro.KisOverseasIndexBasicInfoDto;
+import com.AISA.AISA.kisStock.dto.Index.OverseasIndexStatusDto;
 import com.AISA.AISA.global.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -32,6 +40,9 @@ public class KisIndexService {
     private final KisAuthService kisAuthService;
     private final KisApiProperties kisApiProperties;
     private final IndexDailyDataRepository indexDailyDataRepository;
+    private final MacroDailyDataRepository macroDailyDataRepository;
+
+    private static final String STAT_CODE_OVERSEAS_INDEX = "KIS_OVERSEAS_INDEX";
 
     @Transactional
     public void fetchAndSaveHistoricalData(String marketCode, String startDateStr) {
@@ -345,5 +356,196 @@ public class KisIndexService {
                 .priceList(chartPriceList)
                 .build();
 
+    }
+
+    public List<MacroIndicatorDto> fetchOverseasIndex(OverseasIndex index, String startDate, String endDate) {
+        return fetchOverseasMacroData(STAT_CODE_OVERSEAS_INDEX, index.getSymbol(), "N", index.getSymbol(), startDate,
+                endDate);
+    }
+
+    public OverseasIndexStatusDto getOverseasIndexStatus(OverseasIndex index) {
+        KisOverseasIndexBasicInfoDto latest = fetchOverseasIndexBasicInfo(index.getSymbol());
+
+        return OverseasIndexStatusDto.builder()
+                .date(latest.getDate())
+                .price(latest.getPrice())
+                .priceChange(latest.getPriceChange())
+                .changeRate(latest.getChangeRate())
+                .build();
+    }
+
+    @Transactional
+    public void fetchAndSaveOverseasIndex(OverseasIndex index, String startDateStr, String endDateStr) {
+        fetchAndSaveOverseasMacroData(STAT_CODE_OVERSEAS_INDEX, index.getSymbol(), "N", index.getSymbol(), startDateStr,
+                endDateStr);
+    }
+
+    private List<MacroIndicatorDto> fetchOverseasMacroData(String statCode, String itemCode, String marketDivCode,
+            String symbol, String startDate, String endDate) {
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
+        LocalDate start = LocalDate.parse(startDate, formatter);
+        LocalDate end = LocalDate.parse(endDate, formatter);
+
+        // 1. Try to fetch from DB
+        List<MacroDailyData> dbData = macroDailyDataRepository.findAllByStatCodeAndItemCodeAndDateBetweenOrderByDateAsc(
+                statCode, itemCode, start, end);
+
+        if (!dbData.isEmpty()) {
+            return dbData.stream()
+                    .map(entity -> new MacroIndicatorDto(
+                            entity.getDate().format(formatter),
+                            entity.getValue().toString()))
+                    .collect(Collectors.toList());
+        }
+
+        // 2. If DB is empty, fetch from API and save
+        fetchAndSaveOverseasMacroData(statCode, itemCode, marketDivCode, symbol, startDate, endDate);
+
+        // 3. Re-fetch from DB
+        dbData = macroDailyDataRepository.findAllByStatCodeAndItemCodeAndDateBetweenOrderByDateAsc(
+                statCode, itemCode, start, end);
+
+        return dbData.stream()
+                .map(entity -> new MacroIndicatorDto(
+                        entity.getDate().format(formatter),
+                        entity.getValue().toString()))
+                .collect(Collectors.toList());
+    }
+
+    private void fetchAndSaveOverseasMacroData(String statCode, String itemCode, String marketDivCode, String symbol,
+            String startDateStr, String endDateStr) {
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
+        LocalDate targetStartDate = LocalDate.parse(startDateStr, formatter);
+        LocalDate currentDate = LocalDate.parse(endDateStr, formatter);
+
+        log.info("Starting bulk fetch for {} ({}) from {} to {}", statCode, symbol, startDateStr, endDateStr);
+
+        while (!currentDate.isBefore(targetStartDate)) {
+            String currentDateStr = currentDate.format(formatter);
+            LocalDate queryStartDate = currentDate.minusDays(99); // 100 days limit (inclusive)
+            if (queryStartDate.isBefore(targetStartDate)) {
+                queryStartDate = targetStartDate;
+            }
+            String queryStartDateStr = queryStartDate.format(formatter);
+
+            log.info("Fetching data from {} to {}", queryStartDateStr, currentDateStr);
+
+            try {
+                List<KisOverseasDailyPriceDto> apiList = fetchOverseasFromApi(marketDivCode, symbol, queryStartDateStr,
+                        currentDateStr);
+
+                if (apiList != null && !apiList.isEmpty()) {
+                    for (KisOverseasDailyPriceDto dto : apiList) {
+                        LocalDate date = LocalDate.parse(dto.getDate(), formatter);
+
+                        boolean exists = macroDailyDataRepository
+                                .findAllByStatCodeAndItemCodeAndDateBetweenOrderByDateAsc(
+                                        statCode, itemCode, date, date)
+                                .stream().findAny().isPresent();
+
+                        if (!exists) {
+                            MacroDailyData entity = MacroDailyData.builder()
+                                    .statCode(statCode)
+                                    .itemCode(itemCode)
+                                    .date(date)
+                                    .value(new java.math.BigDecimal(dto.getClosePrice()))
+                                    .build();
+                            macroDailyDataRepository.save(entity);
+                        }
+                    }
+                }
+
+                // Move back
+                currentDate = queryStartDate.minusDays(1);
+                Thread.sleep(100); // Rate limit
+
+            } catch (Exception e) {
+                log.error("Error fetching macro data: {}", e.getMessage());
+                break; // Stop on error
+            }
+        }
+        log.info("Finished bulk fetch.");
+    }
+
+    private List<KisOverseasDailyPriceDto> fetchOverseasFromApi(String marketDivCode, String symbol, String startDate,
+            String endDate) {
+        String accessToken = kisAuthService.getAccessToken();
+
+        KisOverseasDailyPriceResponseDto response = webClient.get()
+                .uri(uriBuilder -> uriBuilder
+                        .path(kisApiProperties.getOverSeaUrl())
+                        .queryParam("FID_COND_MRKT_DIV_CODE", marketDivCode)
+                        .queryParam("FID_INPUT_ISCD", symbol)
+                        .queryParam("FID_INPUT_DATE_1", startDate)
+                        .queryParam("FID_INPUT_DATE_2", endDate)
+                        .queryParam("FID_PERIOD_DIV_CODE", "D")
+                        .build())
+                .header("authorization", accessToken)
+                .header("appkey", kisApiProperties.getAppkey())
+                .header("appsecret", kisApiProperties.getAppsecret())
+                .header("tr_id", "FHKST03030100")
+                .header("custtype", "P")
+                .retrieve()
+                .bodyToMono(KisOverseasDailyPriceResponseDto.class)
+                .block();
+
+        if (response == null || !"0".equals(response.getReturnCode())) {
+            log.error("KIS API Error: RtCd={}, Msg={}",
+                    response != null ? response.getReturnCode() : "null",
+                    response != null ? response.getMessage() : "null response");
+            throw new BusinessException(KisApiErrorCode.STOCK_PRICE_FETCH_FAILED);
+        }
+
+        return response.getDailyPriceList();
+    }
+
+    private KisOverseasIndexBasicInfoDto fetchOverseasIndexBasicInfo(String symbol) {
+        String accessToken = kisAuthService.getAccessToken();
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
+        String today = LocalDate.now().format(formatter); // For basic info, date range doesn't matter much as long as
+                                                          // it's valid?
+                                                          // Doc says FID_INPUT_DATE_1 and 2 are required.
+                                                          // Let's use today for both. Output1 should give 'current'
+                                                          // info.
+
+        KisOverseasDailyPriceResponseDto response = webClient.get()
+                .uri(uriBuilder -> uriBuilder
+                        .path(kisApiProperties.getOverSeaUrl()) // Use the same URL as history fetch (FHKST03030100)
+                        .queryParam("FID_COND_MRKT_DIV_CODE", "N")
+                        .queryParam("FID_INPUT_ISCD", symbol)
+                        .queryParam("FID_INPUT_DATE_1", today)
+                        .queryParam("FID_INPUT_DATE_2", today)
+                        .queryParam("FID_PERIOD_DIV_CODE", "D")
+                        .build())
+                .header("authorization", accessToken)
+                .header("appkey", kisApiProperties.getAppkey())
+                .header("appsecret", kisApiProperties.getAppsecret())
+                .header("tr_id", "FHKST03030100") // Use the correct TR ID
+                .header("custtype", "P")
+                .retrieve()
+                .bodyToMono(KisOverseasDailyPriceResponseDto.class)
+                .block();
+
+        if (response == null || !"0".equals(response.getReturnCode())) {
+            log.error("KIS API Error: RtCd={}, Msg={}",
+                    response != null ? response.getReturnCode() : "null",
+                    response != null ? response.getMessage() : "null response");
+            throw new BusinessException(KisApiErrorCode.STOCK_PRICE_FETCH_FAILED);
+        }
+
+        if (response.getOutput1() == null) {
+            throw new BusinessException(KisApiErrorCode.STOCK_PRICE_FETCH_FAILED);
+        }
+
+        // Output1 might not have date, so we can inject it or use what's available.
+        if (response.getOutput1().getDate() == null && response.getDailyPriceList() != null
+                && !response.getDailyPriceList().isEmpty()) {
+            // If output1 doesn't have date, try to get from output2(daily list) first item
+            response.getOutput1().setDate(response.getDailyPriceList().get(0).getDate());
+        } else if (response.getOutput1().getDate() == null) {
+            response.getOutput1().setDate(today);
+        }
+
+        return response.getOutput1();
     }
 }

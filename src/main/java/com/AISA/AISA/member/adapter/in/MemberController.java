@@ -83,6 +83,15 @@ public class MemberController {
         return ResponseEntity.ok(new SuccessResponse<>(true, "회원 삭제 성공", null));
     }
 
+    @DeleteMapping("/members/me")
+    @Operation(summary = "내 계정 삭제", description = "로그인한 회원의 계정을 삭제합니다.")
+    public ResponseEntity<SuccessResponse<Void>> deleteMe(
+            Principal principal) {
+        MemberResponse member = memberService.findMemberByUserName(principal.getName());
+        memberService.deleteMemberById(member.getMemberId());
+        return ResponseEntity.ok(new SuccessResponse<>(true, "회원 삭제 성공", null));
+    }
+
     @PatchMapping("/members/me/password")
     @Operation(summary = "비밀번호 변경", description = "로그인한 회원의 비밀번호를 변경합니다.")
     public ResponseEntity<SuccessResponse<Void>> changePassword(

@@ -55,6 +55,7 @@ public class MemberService {
                 .userName(request.getUserName())
                 .displayName(request.getDisplayName())
                 .password(passwordEncoder.encode(request.getPassword()))
+                .provider("local")
                 .build();
         return memberRepository.save(newMember);
     }

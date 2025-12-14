@@ -319,7 +319,7 @@ public class AnalysisService {
             } else {
                 // Overseas Index
                 OverseasIndex index = OverseasIndex.valueOf(code);
-                List<MacroIndicatorDto> data = kisMacroService.fetchOverseasIndex(index, startDate, endDate);
+                List<MacroIndicatorDto> data = kisIndexService.fetchOverseasIndex(index, startDate, endDate);
                 for (MacroIndicatorDto d : data) {
                     dataMap.put(LocalDate.parse(d.getDate(), FORMATTER), Double.parseDouble(d.getValue()));
                 }

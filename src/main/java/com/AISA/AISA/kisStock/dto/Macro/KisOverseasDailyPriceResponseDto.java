@@ -21,6 +21,9 @@ public class KisOverseasDailyPriceResponseDto {
     @JsonProperty("msg1")
     private String message; // 응답메세지
 
+    @JsonProperty("output1")
+    private KisOverseasIndexBasicInfoDto output1; // 기본정보
+
     @JsonProperty("output2")
     private List<KisOverseasDailyPriceDto> dailyPriceList; // 일자별 정보
 }

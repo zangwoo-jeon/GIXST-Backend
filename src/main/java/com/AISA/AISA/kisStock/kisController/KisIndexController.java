@@ -4,6 +4,11 @@ import com.AISA.AISA.global.response.SuccessResponse;
 import com.AISA.AISA.kisStock.dto.Index.IndexChartInfoDto;
 import com.AISA.AISA.kisStock.dto.Index.IndexChartResponseDto;
 import com.AISA.AISA.kisStock.kisService.KisIndexService;
+import com.AISA.AISA.kisStock.dto.Index.OverseasIndexStatusDto;
+
+import com.AISA.AISA.kisStock.enums.OverseasIndex;
+import com.AISA.AISA.portfolio.macro.dto.MacroIndicatorDto;
+import java.util.List;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -52,5 +57,36 @@ public class KisIndexController {
             @RequestParam String startDate) {
         kisIndexService.fetchAndSaveHistoricalData(marketCode, startDate);
         return ResponseEntity.ok(new SuccessResponse<>(true, "초기 데이터 구축 시작", null));
+    }
+
+    @GetMapping("/overseas/{indexName}")
+    @Operation(summary = "해외 지수 조회", description = "주요 해외 지수(NASDAQ, SP500, NIKKEI, HANGSENG, EUROSTOXX50)를 조회합니다.")
+    public ResponseEntity<SuccessResponse<List<MacroIndicatorDto>>> getOverseasIndex(
+            @PathVariable String indexName,
+            @RequestParam String startDate,
+            @RequestParam String endDate) {
+        OverseasIndex index = OverseasIndex.valueOf(indexName.toUpperCase());
+        List<MacroIndicatorDto> data = kisIndexService.fetchOverseasIndex(index, startDate, endDate);
+        return ResponseEntity.ok(new SuccessResponse<>(true, index.getDescription() + " 조회 성공", data));
+    }
+
+    @GetMapping("/overseas/{indexName}/status")
+    @Operation(summary = "해외 지수 현재가 조회", description = "해외 지수(NASDAQ, SP500, NIKKEI, HANGSENG, EUROSTOXX50)의 최신 종가를 KIS API에서 실시간으로 조회합니다.")
+    public ResponseEntity<SuccessResponse<OverseasIndexStatusDto>> getOverseasIndexStatus(
+            @PathVariable String indexName) {
+        OverseasIndex index = OverseasIndex.valueOf(indexName.toUpperCase());
+        OverseasIndexStatusDto data = kisIndexService.getOverseasIndexStatus(index);
+        return ResponseEntity.ok(new SuccessResponse<>(true, index.getDescription() + " 현재가 조회 성공", data));
+    }
+
+    @PostMapping("/overseas/init")
+    @Operation(summary = "해외 지수 데이터 초기화/업데이트", description = "해외 지수 데이터(NASDAQ, SP500, NIKKEI, HANGSENG, EUROSTOXX50)를 KIS API에서 가져와 DB에 저장합니다.")
+    public ResponseEntity<SuccessResponse<Void>> initOverseasIndex(
+            @RequestParam String indexName,
+            @RequestParam String startDate,
+            @RequestParam String endDate) {
+        OverseasIndex index = OverseasIndex.valueOf(indexName.toUpperCase());
+        kisIndexService.fetchAndSaveOverseasIndex(index, startDate, endDate);
+        return ResponseEntity.ok(new SuccessResponse<>(true, index.getDescription() + " 데이터 저장 성공", null));
     }
 }

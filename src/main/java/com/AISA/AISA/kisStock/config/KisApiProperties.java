@@ -17,7 +17,7 @@ public class KisApiProperties {
     private String indexChartUrl;
     private String stockChartUrl;
     private String dividendUrl;
-    private String overSeaUrl;
+    private String overseaUrl; // Renamed from overSeaUrl to match KIS_OVERSEA_URL
     private String volumeRankUrl;
     private String incomeStatementUrl;
     private String balanceSheetUrl;

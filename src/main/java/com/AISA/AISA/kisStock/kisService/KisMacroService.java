@@ -189,7 +189,7 @@ public class KisMacroService {
 
         KisOverseasDailyPriceResponseDto response = webClient.get()
                 .uri(uriBuilder -> uriBuilder
-                        .path(kisApiProperties.getOverSeaUrl())
+                        .path(kisApiProperties.getOverseaUrl())
                         .queryParam("FID_COND_MRKT_DIV_CODE", marketDivCode)
                         .queryParam("FID_INPUT_ISCD", symbol)
                         .queryParam("FID_INPUT_DATE_1", startDate)

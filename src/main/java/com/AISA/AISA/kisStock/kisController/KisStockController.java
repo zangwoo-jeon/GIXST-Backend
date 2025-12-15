@@ -4,6 +4,7 @@ import com.AISA.AISA.global.response.SuccessResponse;
 
 import com.AISA.AISA.kisStock.dto.StockPrice.StockChartResponseDto;
 import com.AISA.AISA.kisStock.dto.StockPrice.StockPriceDto;
+import com.AISA.AISA.kisStock.dto.StockSearchResponseDto;
 import com.AISA.AISA.kisStock.dto.VolumeRank.VolumeRankDto;
 import com.AISA.AISA.kisStock.kisService.KisStockService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -11,6 +12,8 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/stocks")
@@ -88,5 +91,14 @@ public class KisStockController {
         return ResponseEntity
                 .ok(new SuccessResponse<>(true, "ID 범위 주식 초기 데이터 구축 시작 (백그라운드 실행)",
                         "Started background task for range"));
+    }
+
+    @GetMapping("/search")
+    @Operation(summary = "주식 검색", description = "종목 코드 또는 종목명으로 주식을 검색합니다 (포함 검색).")
+    public ResponseEntity<SuccessResponse<List<StockSearchResponseDto>>> searchStocks(
+            @RequestParam String keyword) {
+        List<StockSearchResponseDto> result = kisStockService
+                .searchStocks(keyword);
+        return ResponseEntity.ok(new SuccessResponse<>(true, "주식 검색 성공", result));
     }
 }

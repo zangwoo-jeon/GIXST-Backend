@@ -5,6 +5,7 @@ import com.AISA.AISA.global.exception.BusinessException;
 import com.AISA.AISA.kisStock.Entity.stock.Stock;
 import com.AISA.AISA.kisStock.Entity.stock.StockDailyData;
 import com.AISA.AISA.kisStock.config.KisApiProperties;
+import com.AISA.AISA.kisStock.dto.StockSearchResponseDto;
 import com.AISA.AISA.kisStock.dto.VolumeRank.KisVolumeRankApiResponse;
 import com.AISA.AISA.kisStock.dto.VolumeRank.VolumeRankDto;
 import com.AISA.AISA.kisStock.dto.StockPrice.KisPriceApiResponse;
@@ -528,5 +529,16 @@ public class KisStockService {
                         log.error("Failed to fetch volume rank: {}", e.getMessage());
                         return null;
                 }
+        }
+
+        public List<StockSearchResponseDto> searchStocks(String keyword) {
+                List<Stock> stocks = stockRepository.findByStockCodeContainingOrStockNameContaining(keyword, keyword);
+                return stocks.stream()
+                                .map(stock -> StockSearchResponseDto.builder()
+                                                .stockCode(stock.getStockCode())
+                                                .stockName(stock.getStockName())
+                                                .marketName(stock.getMarketName())
+                                                .build())
+                                .collect(Collectors.toList());
         }
 }

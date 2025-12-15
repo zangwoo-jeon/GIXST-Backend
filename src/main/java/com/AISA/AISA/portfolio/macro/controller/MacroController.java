@@ -120,7 +120,7 @@ public class MacroController {
     }
 
     @GetMapping("/bond/{bondName}")
-    @Operation(summary = "채권 금리 조회", description = "주요 국채 금리(한국, 미국)를 조회합니다.")
+    @Operation(summary = "채권 금리 조회", description = "주요 국채 금리(한국, 미국)를 조회합니다. (가능한 bondName: KR_1Y, KR_3Y, KR_10Y, US_1Y, US_10Y, US_30Y)")
     public ResponseEntity<SuccessResponse<List<MacroIndicatorDto>>> getBondYield(
             @PathVariable String bondName,
             @RequestParam String startDate,
@@ -131,7 +131,7 @@ public class MacroController {
     }
 
     @PostMapping("/bond/init")
-    @Operation(summary = "채권 금리 데이터 초기화/업데이트", description = "채권 금리 데이터를 KIS API에서 가져와 DB에 저장합니다.")
+    @Operation(summary = "채권 금리 데이터 초기화/업데이트", description = "채권 금리 데이터를 KIS API에서 가져와 DB에 저장합니다. (가능한 bondName: KR_1Y, KR_3Y, KR_10Y, US_1Y, US_10Y, US_30Y)")
     public ResponseEntity<SuccessResponse<Void>> initBondYield(
             @RequestParam String bondName,
             @RequestParam String startDate,

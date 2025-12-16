@@ -115,7 +115,7 @@ jobs:
               -e KIS_FINANCIAL_RATIO_URL="/uapi/domestic-stock/v1/finance/financial-ratio" \
               \
               -e JWT_SECRET="${{ secrets.JWT_SECRET }}" \
-              -e JWT_ACCESS_TOKEN_EXPIRATION_TIME="7200000" \
+              -e JWT_ACCESS_TOKEN_EXPIRATION_TIME="21600000" \
               -e JWT_REFRESH_TOKEN_EXPIRATION_TIME="1209600000" \
               -e ECOS_BASE_URL="http://ecos.bok.or.kr/api" \
               -e ECOS_API_KEY="${{ secrets.ECOS_API_KEY }}" \

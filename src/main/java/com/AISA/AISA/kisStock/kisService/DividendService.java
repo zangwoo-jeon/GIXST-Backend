@@ -22,6 +22,8 @@ import com.AISA.AISA.kisStock.repository.StockDividendRankRepository;
 import com.AISA.AISA.kisStock.dto.DividendRank.DividendRankDto;
 import com.AISA.AISA.kisStock.kisService.KisStockService;
 import com.AISA.AISA.kisStock.dto.StockPrice.StockPriceDto;
+import com.AISA.AISA.kisStock.dto.StockPrice.StockChartResponseDto;
+import com.AISA.AISA.kisStock.dto.StockPrice.StockChartPriceDto;
 import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
@@ -40,11 +42,43 @@ public class DividendService {
         private final StockRepository stockRepository;
         private final StockDividendRankRepository stockDividendRankRepository;
         private final KisStockService kisStockService;
+        private final com.AISA.AISA.kisStock.repository.StockDividendRepository stockDividendRepository;
 
         public List<StockDividendInfoDto> getDividendInfo(
                         String stockCode,
                         String startDate,
                         String endDate) {
+
+                // 1. DB에서 먼저 조회
+                List<com.AISA.AISA.kisStock.Entity.stock.StockDividend> savedDividends = stockDividendRepository
+                                .findByStock_StockCodeAndRecordDateBetweenOrderByRecordDateDesc(stockCode, startDate,
+                                                endDate);
+
+                if (!savedDividends.isEmpty()) {
+                        // DB에 데이터가 있으면 API 호출 없이 반환 (단, 전체 기간 커버 여부는 간단히 startDate/endDate로 판단하거나,
+                        // 일단 데이터가 있으면 갱신하지 않는 정책으로 감. 더 정교하려면 비어있는 구간만 API 호출해야 함.)
+                        // 여기서는 "DB에 하나라도 있으면 API 호출 안함"으로 단순화할 수 있으나,
+                        // 사용자가 특정 연도 데이터를 원하는데 DB엔 작년것만 있으면 안됨.
+                        // 따라서, DB 조회 결과가 요청 기간을 충분히 커버하는지 체크하는게 좋지만,
+                        // KIS API 특성상 '결산배당', '중간배당' 등이 섞여서 기간 체크가 모호함.
+                        // -> 간단한 전략: DB 조회 결과가 있으면 그걸 반환. (데이터 누락 가능성 존재하나 속도 우선)
+                        // -> 더 나은 전략: DB 조회 결과가 비어있지 않으면 그대로 반환 (캐시처럼 사용).
+                        // 만약 사용자가 "최신 데이터 갱신"을 원하면 별도 API가 필요할 수 있음.
+                        // 우선은 "DB 조회 결과 존재 시 반환"으로 구현.
+
+                        return savedDividends.stream()
+                                        .map(entity -> StockDividendInfoDto.builder()
+                                                        .stockCode(entity.getStock().getStockCode())
+                                                        .stockName(entity.getStock().getStockName())
+                                                        .recordDate(entity.getRecordDate())
+                                                        .paymentDate(entity.getPaymentDate())
+                                                        .dividendAmount(entity.getDividendAmount())
+                                                        .dividendRate(entity.getDividendRate())
+                                                        .build())
+                                        .collect(Collectors.toList());
+                }
+
+                // 2. DB에 없으면 API 호출
                 String accessToken = kisAuthService.getAccessToken();
 
                 Stock stock = stockRepository.findByStockCode(stockCode)
@@ -54,40 +88,121 @@ public class DividendService {
                                 .uri(uriBuilder -> uriBuilder
                                                 .path(kisApiProperties.getDividendUrl())
                                                 .queryParam("CTS", "")
-                                                .queryParam("GB1", "0") // 0:배당전체, 1:결산배당, 2:중간배당
+                                                .queryParam("GB1", "0") // 0:배당전체
                                                 .queryParam("F_DT", startDate)
                                                 .queryParam("T_DT", endDate)
                                                 .queryParam("SHT_CD", stockCode)
                                                 .queryParam("HIGH_GB", "")
                                                 .build())
-                                .header("authorization", accessToken) // 접근 토큰
-                                .header("appKey", kisApiProperties.getAppkey()) // 앱키
-                                .header("appSecret", kisApiProperties.getAppsecret()) // 앱시크릿키
-                                .header("tr_id", "HHKDB669102C0") // 배당 조회용 tr_id
+                                .header("authorization", accessToken)
+                                .header("appKey", kisApiProperties.getAppkey())
+                                .header("appSecret", kisApiProperties.getAppsecret())
+                                .header("tr_id", "HHKDB669102C0")
                                 .retrieve()
-                                .bodyToMono(KisDividendApiResponse.class)// 서버에서 온 JSON을 DTO 클래스(KisPriceApiResponse)로
-                                                                         // 매핑
+                                .bodyToMono(KisDividendApiResponse.class)
                                 .onErrorMap(error -> {
                                         log.error("{}의 배당 정보을 불러오는 데 실패했습니다. 에러: {}", stockCode, error.getMessage());
                                         return new BusinessException(KisApiErrorCode.DIVIDEND_FETCH_FAILED);
                                 })
-                                .block(); // 동기식 객체로 변환
+                                .block();
 
                 if (apiResponse == null || !"0".equals(apiResponse.getRtCd()) || apiResponse.getOutput1() == null) {
                         log.warn("{}의 배당 정보가 없습니다.", stockCode);
                         return Collections.emptyList();
                 }
 
-                return apiResponse.getOutput1().stream()
+                List<StockDividendInfoDto> dtoList = apiResponse.getOutput1().stream()
                                 .map(apiDto -> StockDividendInfoDto.builder()
                                                 .stockCode(apiDto.getStockCode())
                                                 .stockName(apiDto.getStockName())
                                                 .recordDate(apiDto.getRecordDate())
                                                 .paymentDate(apiDto.getPaymentDate())
                                                 .dividendAmount(new BigDecimal(apiDto.getDividendAmount()))
-                                                .dividendRate(Double.parseDouble(apiDto.getDividendRate()))
+                                                .dividendRate(Double.parseDouble(apiDto.getDividendRate())) // API 값 (틀릴
+                                                                                                            // 수 있음)
                                                 .build())
                                 .collect(Collectors.toList());
+
+                // 3. 주가 정보 조회를 위한 기간 설정 (조회된 배당 내역의 기간을 커버하도록)
+                // dtoList가 비어있지 않다고 가정
+                if (!dtoList.isEmpty()) {
+                        try {
+                                String minDate = dtoList.get(dtoList.size() - 1).getRecordDate(); // 오래된 날짜
+                                String maxDate = dtoList.get(0).getRecordDate(); // 최근 날짜
+
+                                // 주말 등 고려하여 앞뒤로 여유 기간을 둠
+                                LocalDate minLocalDate = LocalDate
+                                                .parse(minDate, DateTimeFormatter.ofPattern("yyyyMMdd")).minusDays(7);
+                                LocalDate maxLocalDate = LocalDate
+                                                .parse(maxDate, DateTimeFormatter.ofPattern("yyyyMMdd")).plusDays(7);
+
+                                String queryStart = minLocalDate.format(DateTimeFormatter.ofPattern("yyyyMMdd"));
+                                String queryEnd = maxLocalDate.format(DateTimeFormatter.ofPattern("yyyyMMdd"));
+
+                                // 일별 주가 조회 (API 호출) - KisStockService에 getStockChart 메서드 활용
+                                StockChartResponseDto chartResponse = kisStockService.getStockChart(stockCode,
+                                                queryStart, queryEnd, "D");
+
+                                // 날짜별 종가 매핑 (빠른 검색을 위해 Map 사용)
+                                java.util.TreeMap<String, BigDecimal> priceMap = new java.util.TreeMap<>();
+                                if (chartResponse != null && chartResponse.getPriceList() != null) {
+                                        for (StockChartPriceDto p : chartResponse.getPriceList()) {
+                                                priceMap.put(p.getDate(), new BigDecimal(p.getClosePrice()));
+                                        }
+                                }
+
+                                // 4. 배당률 재계산 및 DB 저장
+                                List<com.AISA.AISA.kisStock.Entity.stock.StockDividend> entitiesToSave = new ArrayList<>();
+
+                                for (StockDividendInfoDto dto : dtoList) {
+                                        String recordDate = dto.getRecordDate();
+
+                                        // 해당 날짜의 종가 찾기 OR 가장 가까운 과거 날짜 찾기
+                                        java.util.Map.Entry<String, BigDecimal> entry = priceMap.floorEntry(recordDate);
+                                        BigDecimal closePrice = (entry != null) ? entry.getValue() : BigDecimal.ZERO;
+
+                                        if (closePrice.compareTo(BigDecimal.ZERO) > 0) {
+                                                // 배당률 = (배당금 / 주가) * 100
+                                                double calculatedRate = dto.getDividendAmount()
+                                                                .divide(closePrice, 4, java.math.RoundingMode.HALF_UP)
+                                                                .multiply(new BigDecimal(100))
+                                                                .doubleValue();
+
+                                                // DTO 업데이트
+                                                dto.setDividendRate(Double
+                                                                .parseDouble(String.format("%.2f", calculatedRate)));
+
+                                                // Entity 생성 (중복 체크)
+                                                if (!stockDividendRepository.existsByStock_StockCodeAndRecordDate(
+                                                                stockCode, recordDate)) {
+                                                        entitiesToSave.add(
+                                                                        com.AISA.AISA.kisStock.Entity.stock.StockDividend
+                                                                                        .builder()
+                                                                                        .stock(stock)
+                                                                                        .recordDate(recordDate)
+                                                                                        .paymentDate(dto.getPaymentDate())
+                                                                                        .dividendAmount(dto
+                                                                                                        .getDividendAmount())
+                                                                                        .dividendRate(dto
+                                                                                                        .getDividendRate())
+                                                                                        .stockPrice(closePrice)
+                                                                                        .build());
+                                                }
+                                        }
+                                }
+
+                                // 일괄 저장
+                                if (!entitiesToSave.isEmpty()) {
+                                        stockDividendRepository.saveAll(entitiesToSave);
+                                }
+
+                        } catch (Exception e) {
+                                log.warn("Failed to update dividend rates with historical prices: {}", e.getMessage());
+                                // 실패해도 원래 API 데이터는 반환
+                        }
+                }
+
+                return dtoList;
         }
 
         public DividendRankDto getDividendRank() {

@@ -5,8 +5,10 @@ import com.AISA.AISA.kisStock.Entity.stock.Stock;
 import com.AISA.AISA.kisStock.config.KisApiProperties;
 import com.AISA.AISA.kisStock.dto.Dividend.KisDividendApiResponse;
 import com.AISA.AISA.kisStock.dto.Dividend.StockDividendInfoDto;
+import com.AISA.AISA.kisStock.dto.Dividend.DividendDetailDto;
 import com.AISA.AISA.kisStock.exception.KisApiErrorCode;
 import com.AISA.AISA.kisStock.kisService.Auth.KisAuthService;
+import com.AISA.AISA.kisStock.kisService.KisInformationService;
 import com.AISA.AISA.kisStock.repository.StockRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -42,6 +44,7 @@ public class DividendService {
         private final StockRepository stockRepository;
         private final StockDividendRankRepository stockDividendRankRepository;
         private final KisStockService kisStockService;
+        private final KisInformationService kisInformationService;
         private final com.AISA.AISA.kisStock.repository.StockDividendRepository stockDividendRepository;
 
         public List<StockDividendInfoDto> getDividendInfo(
@@ -346,5 +349,95 @@ public class DividendService {
                 stockDividendRankRepository.deleteAll();
                 stockDividendRankRepository.saveAll(newRankList);
                 log.info("Refreshed Dividend Rank with {} stocks.", newRankList.size());
+        }
+
+        public DividendDetailDto getDividendDetail(String stockCode) {
+                // 1. 기간 설정 (최근 1년)
+                String endDate = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
+                String startDate = LocalDate.now().minusYears(1).format(DateTimeFormatter.ofPattern("yyyyMMdd"));
+
+                // 2. 배당 내역 조회 (getDividendInfo 활용 - 없으면 API 호출 및 저장됨)
+                List<StockDividendInfoDto> dividendList = getDividendInfo(stockCode, startDate, endDate);
+
+                // 3. DPS (주당배당금) 합계 계산
+                BigDecimal totalDividend = BigDecimal.ZERO;
+                String recentExDate = "-";
+
+                if (!dividendList.isEmpty()) {
+                        for (StockDividendInfoDto info : dividendList) {
+                                totalDividend = totalDividend.add(info.getDividendAmount());
+                        }
+                        recentExDate = dividendList.get(0).getRecordDate();
+                }
+
+                // 4. 배당 주기 판단
+                String frequency = "기타";
+                int count = dividendList.size();
+                if (count >= 4)
+                        frequency = "분기배당";
+                else if (count == 2)
+                        frequency = "반기배당";
+                else if (count == 1)
+                        frequency = "결산배당";
+                else if (count == 0)
+                        frequency = "배당없음";
+
+                // 5. 현재가 조회 (Yield 계산용)
+                String currentPriceStr = "0";
+                BigDecimal currentPrice = BigDecimal.ZERO;
+                try {
+                        StockPriceDto priceDto = kisStockService.getStockPrice(stockCode);
+                        if (priceDto != null) {
+                                currentPriceStr = priceDto.getStockPrice();
+                                currentPrice = new BigDecimal(currentPriceStr);
+                        }
+                } catch (Exception e) {
+                        log.warn("Failed to get stock price for {}: {}", stockCode, e.getMessage());
+                }
+
+                // 6. Yield 계산
+                String yield = "0";
+                if (currentPrice.compareTo(BigDecimal.ZERO) > 0) {
+                        yield = totalDividend.divide(currentPrice, 4, java.math.RoundingMode.HALF_UP)
+                                        .multiply(new BigDecimal(100))
+                                        .setScale(2, java.math.RoundingMode.HALF_UP)
+                                        .toString();
+                }
+
+                // 7. Payout Ratio (배당성향) 계산 (EPS 필요)
+                String payoutRatio = "0";
+                try {
+                        // "0": 연간
+                        List<com.AISA.AISA.kisStock.Entity.stock.StockFinancialRatio> ratios = kisInformationService
+                                        .fetchAndSaveFinancialRatio(stockCode, "0");
+
+                        // 최신 연간 EPS 가져오기
+                        // fetchAndSave... returns the list of saved/fetched entities.
+                        // But need to ensure we pick the latest one if multiple returned or sorted.
+                        // Assuming the API returns relevant latest data.
+                        if (!ratios.isEmpty()) {
+                                // Sort by stacYymm desc just in case
+                                ratios.sort((r1, r2) -> r2.getStacYymm().compareTo(r1.getStacYymm()));
+                                BigDecimal eps = ratios.get(0).getEps();
+
+                                if (eps != null && eps.compareTo(BigDecimal.ZERO) > 0) {
+                                        payoutRatio = totalDividend.divide(eps, 4, java.math.RoundingMode.HALF_UP)
+                                                        .multiply(new BigDecimal(100))
+                                                        .setScale(2, java.math.RoundingMode.HALF_UP)
+                                                        .toString();
+                                }
+                        }
+                } catch (Exception e) {
+                        log.warn("Failed to calc Payout Ratio for {}: {}", stockCode, e.getMessage());
+                }
+
+                return DividendDetailDto.builder()
+                                .stockCode(stockCode)
+                                .dividendYield(yield)
+                                .dividendPerShare(totalDividend.toString())
+                                .payoutRatio(payoutRatio)
+                                .dividendFrequency(frequency)
+                                .recentExDividendDate(recentExDate)
+                                .build();
         }
 }

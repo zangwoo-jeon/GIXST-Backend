@@ -67,6 +67,7 @@ public class DividendService {
                         // 우선은 "DB 조회 결과 존재 시 반환"으로 구현.
 
                         return savedDividends.stream()
+                                        .filter(entity -> entity.getDividendAmount().compareTo(BigDecimal.ZERO) > 0)
                                         .map(entity -> StockDividendInfoDto.builder()
                                                         .stockCode(entity.getStock().getStockCode())
                                                         .stockName(entity.getStock().getStockName())
@@ -112,6 +113,8 @@ public class DividendService {
                 }
 
                 List<StockDividendInfoDto> dtoList = apiResponse.getOutput1().stream()
+                                .filter(apiDto -> new BigDecimal(apiDto.getDividendAmount())
+                                                .compareTo(BigDecimal.ZERO) > 0)
                                 .map(apiDto -> StockDividendInfoDto.builder()
                                                 .stockCode(apiDto.getStockCode())
                                                 .stockName(apiDto.getStockName())

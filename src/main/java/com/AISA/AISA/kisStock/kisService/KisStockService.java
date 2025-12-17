@@ -27,9 +27,12 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
+import java.time.temporal.WeekFields;
 
 @Slf4j
 @Service
@@ -161,6 +164,9 @@ public class KisStockService {
                                                         .findAllByStock_StockCodeAndDateBetweenOrderByDateDesc(
                                                                         stockCode, targetStartDate,
                                                                         oldestApiDate.minusDays(1));
+
+                                        pastDataList = filterHistoricalData(pastDataList, dateType);
+
                                         dbPriceList = pastDataList.stream()
                                                         .map(this::convertToDto)
                                                         .collect(Collectors.toList());
@@ -169,6 +175,9 @@ public class KisStockService {
                                 List<StockDailyData> pastDataList = stockDailyDataRepository
                                                 .findAllByStock_StockCodeAndDateBetweenOrderByDateDesc(
                                                                 stockCode, targetStartDate, targetEndDate);
+
+                                pastDataList = filterHistoricalData(pastDataList, dateType);
+
                                 dbPriceList = pastDataList.stream()
                                                 .map(this::convertToDto)
                                                 .collect(Collectors.toList());
@@ -288,6 +297,9 @@ public class KisStockService {
                         List<StockDailyData> pastDataList = stockDailyDataRepository
                                         .findAllByStock_StockCodeAndDateBetweenOrderByDateDesc(
                                                         stockCode, targetStartDate, targetEndDate);
+
+                        pastDataList = filterHistoricalData(pastDataList, dateType);
+
                         List<StockChartPriceDto> dbPriceList = pastDataList.stream()
                                         .map(this::convertToDto)
                                         .collect(Collectors.toList());
@@ -462,6 +474,33 @@ public class KisStockService {
                         }
                 }
                 log.info("Completed historical stock data fetch for range {} to {}.", startId, endId);
+        }
+
+        private List<StockDailyData> filterHistoricalData(List<StockDailyData> dataList, String dateType) {
+                if ("D".equalsIgnoreCase(dateType)) {
+                        return dataList;
+                }
+
+                List<StockDailyData> filtered = new ArrayList<>();
+                Set<String> visitedPeriods = new HashSet<>();
+                DateTimeFormatter monthFormatter = DateTimeFormatter.ofPattern("yyyyMM");
+
+                for (StockDailyData data : dataList) {
+                        String key = "";
+                        if ("M".equalsIgnoreCase(dateType)) {
+                                key = data.getDate().format(monthFormatter);
+                        } else if ("W".equalsIgnoreCase(dateType)) {
+                                int year = data.getDate().get(WeekFields.ISO.weekBasedYear());
+                                int week = data.getDate().get(WeekFields.ISO.weekOfWeekBasedYear());
+                                key = year + "-W" + week;
+                        }
+
+                        if (!visitedPeriods.contains(key)) {
+                                filtered.add(data);
+                                visitedPeriods.add(key);
+                        }
+                }
+                return filtered;
         }
 
         private StockChartPriceDto convertToDto(StockDailyData entity) {

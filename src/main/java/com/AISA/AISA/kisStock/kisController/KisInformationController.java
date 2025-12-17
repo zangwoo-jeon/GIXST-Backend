@@ -5,6 +5,7 @@ import com.AISA.AISA.kisStock.dto.FinancialRank.BalanceSheetDto;
 import com.AISA.AISA.kisStock.dto.FinancialRank.FinancialStatementDto;
 import com.AISA.AISA.kisStock.dto.FinancialRank.KisIncomeStatementApiResponse;
 import com.AISA.AISA.kisStock.dto.FinancialRank.FinancialRatioRankDto;
+import com.AISA.AISA.kisStock.dto.FinancialRank.InvestmentMetricDto;
 import com.AISA.AISA.kisStock.kisService.KisInformationService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -131,6 +132,15 @@ public class KisInformationController {
         return ResponseEntity
                 .ok(new SuccessResponse<>(true, "재무비율 랭킹 조회 성공 (" + sort + ")",
                         kisInformationService.getFinancialRatioRank(sort, divCode)));
+    }
+
+    @GetMapping("/metrics/{stockCode}")
+    @Operation(summary = "특정 종목 투자 지표 조회", description = "특정 종목의 PER, PBR, PSR, EPS, ROE, BPS 정보를 조회합니다.")
+    public ResponseEntity<SuccessResponse<InvestmentMetricDto>> getInvestmentMetrics(
+            @PathVariable String stockCode) {
+        return ResponseEntity
+                .ok(new SuccessResponse<>(true, "투자 지표 조회 성공",
+                        kisInformationService.getInvestmentMetrics(stockCode)));
     }
 
     private long parseLongSafe(String value) {

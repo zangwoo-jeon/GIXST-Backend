@@ -5,6 +5,7 @@ import com.AISA.AISA.kisStock.Entity.stock.Stock;
 import com.AISA.AISA.kisStock.config.KisApiProperties;
 import com.AISA.AISA.kisStock.dto.FinancialRank.BalanceSheetDto;
 import com.AISA.AISA.kisStock.dto.FinancialRank.FinancialRankDto;
+import com.AISA.AISA.kisStock.dto.FinancialRank.InvestmentMetricDto;
 import com.AISA.AISA.kisStock.dto.FinancialRank.KisBalanceSheetApiResponse;
 import com.AISA.AISA.kisStock.dto.FinancialRank.KisIncomeStatementApiResponse;
 import com.AISA.AISA.kisStock.exception.KisApiErrorCode;
@@ -481,5 +482,56 @@ public class KisInformationService {
         } catch (NumberFormatException e) {
             return 0;
         }
+    }
+
+    public InvestmentMetricDto getInvestmentMetrics(String stockCode) {
+        // 1. Fetch latest financial ratio from API and save to DB
+        // Use "0" (Yearly) as default, can be parameterized if needed.
+        List<StockFinancialRatio> ratios = fetchAndSaveFinancialRatio(stockCode, "0");
+
+        if (ratios.isEmpty()) {
+            // Fallback to DB query if API fetch fails or returns empty (though fetchAndSave
+            // handles saving)
+            StockFinancialRatio latest = stockFinancialRatioRepository
+                    .findTop1ByStockCodeAndDivCodeOrderByStacYymmDesc(stockCode, "0");
+            if (latest != null) {
+                ratios = new ArrayList<>();
+                ratios.add(latest);
+            } else {
+                return InvestmentMetricDto.builder()
+                        .stockCode(stockCode)
+                        .stacYymm("")
+                        .per("0")
+                        .pbr("0")
+                        .psr("0")
+                        .eps("0")
+                        .roe("0")
+                        .bps("0")
+                        .build();
+            }
+        }
+
+        // 2. Get the latest one (fetchAndSaveFinancialRatio returns all items from API,
+        // usually sorted or we sort)
+        // API response order is not guaranteed, so sort by stacYymm desc
+        StockFinancialRatio latest = ratios.stream()
+                .sorted((o1, o2) -> o2.getStacYymm().compareTo(o1.getStacYymm()))
+                .findFirst()
+                .orElse(null);
+
+        if (latest == null) {
+            return InvestmentMetricDto.builder().stockCode(stockCode).build();
+        }
+
+        return InvestmentMetricDto.builder()
+                .stockCode(latest.getStockCode())
+                .stacYymm(latest.getStacYymm())
+                .per(latest.getPer() != null ? latest.getPer().toString() : "0")
+                .pbr(latest.getPbr() != null ? latest.getPbr().toString() : "0")
+                .psr(latest.getPsr() != null ? latest.getPsr().toString() : "0")
+                .eps(latest.getEps() != null ? latest.getEps().toString() : "0")
+                .roe(latest.getRoe() != null ? latest.getRoe().toString() : "0")
+                .bps(latest.getBps() != null ? latest.getBps().toString() : "0")
+                .build();
     }
 }

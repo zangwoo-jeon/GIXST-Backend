@@ -2,6 +2,7 @@ package com.AISA.AISA.portfolio.macro.service;
 
 import com.AISA.AISA.kisStock.dto.Index.IndexChartPriceDto;
 import com.AISA.AISA.kisStock.dto.Index.IndexChartResponseDto;
+import com.AISA.AISA.kisStock.enums.OverseasIndex;
 import com.AISA.AISA.kisStock.kisService.KisIndexService;
 import com.AISA.AISA.kisStock.kisService.KisMacroService;
 import com.AISA.AISA.portfolio.macro.dto.MacroIndicatorDto;
@@ -59,5 +60,82 @@ public class MacroService {
             }
         }
         return ratioList;
+    }
+
+    public List<MacroIndicatorDto> getKosdaqUsdRatio(String startDate, String endDate) {
+        // 1. Fetch KOSDAQ Data
+        IndexChartResponseDto kosdaqData = kisIndexService.getIndexChart("KOSDAQ", startDate, endDate, "D");
+        Map<String, BigDecimal> kosdaqMap = kosdaqData.getPriceList().stream()
+                .collect(Collectors.toMap(
+                        IndexChartPriceDto::getDate,
+                        dto -> new BigDecimal(dto.getPrice())));
+
+        // 2. Fetch Exchange Rate Data (from KIS API)
+        List<MacroIndicatorDto> exchangeRateData = kisMacroService.fetchExchangeRate("FX@KRW", startDate, endDate);
+        Map<String, BigDecimal> exchangeRateMap = exchangeRateData.stream()
+                .collect(Collectors.toMap(
+                        MacroIndicatorDto::getDate,
+                        dto -> new BigDecimal(dto.getValue())));
+
+        // 3. Calculate Ratio
+        List<MacroIndicatorDto> ratioList = new ArrayList<>();
+        List<String> sortedDates = new ArrayList<>(kosdaqMap.keySet());
+        Collections.sort(sortedDates);
+
+        for (String date : sortedDates) {
+            if (exchangeRateMap.containsKey(date)) {
+                BigDecimal kosdaq = kosdaqMap.get(date);
+                BigDecimal exchangeRate = exchangeRateMap.get(date);
+
+                if (exchangeRate.compareTo(BigDecimal.ZERO) > 0) {
+                    // Formula: KOSDAQ / (ExchangeRate / 1000)
+                    BigDecimal ratio = kosdaq.divide(
+                            exchangeRate.divide(new BigDecimal(1000), 4, RoundingMode.HALF_UP),
+                            2, RoundingMode.HALF_UP);
+
+                    ratioList.add(new MacroIndicatorDto(date, ratio.toString()));
+                }
+            }
+        }
+        return ratioList;
+    }
+
+    public List<MacroIndicatorDto> getWonConvertedOverseasIndex(String indexName, String startDate, String endDate) {
+        OverseasIndex overseasIndex = OverseasIndex
+                .valueOf(indexName.toUpperCase());
+
+        // 1. Fetch Overseas Index Data
+        List<MacroIndicatorDto> indexData = kisIndexService.fetchOverseasIndex(overseasIndex, startDate, endDate);
+        Map<String, BigDecimal> indexMap = indexData.stream()
+                .collect(Collectors.toMap(
+                        MacroIndicatorDto::getDate,
+                        dto -> new BigDecimal(dto.getValue())));
+
+        // 2. Fetch Exchange Rate Data (from KIS API)
+        List<MacroIndicatorDto> exchangeRateData = kisMacroService.fetchExchangeRate("FX@KRW", startDate, endDate);
+        Map<String, BigDecimal> exchangeRateMap = exchangeRateData.stream()
+                .collect(Collectors.toMap(
+                        MacroIndicatorDto::getDate,
+                        dto -> new BigDecimal(dto.getValue())));
+
+        // 3. Calculate Won Converted Value
+        List<MacroIndicatorDto> resultList = new ArrayList<>();
+        List<String> sortedDates = new ArrayList<>(indexMap.keySet());
+        Collections.sort(sortedDates);
+
+        for (String date : sortedDates) {
+            if (exchangeRateMap.containsKey(date)) {
+                BigDecimal indexValue = indexMap.get(date);
+                BigDecimal exchangeRate = exchangeRateMap.get(date);
+
+                if (exchangeRate.compareTo(BigDecimal.ZERO) > 0) {
+                    // Formula: IndexValue * (ExchangeRate / 1000)
+                    BigDecimal wonConvertedValue = indexValue.multiply(exchangeRate)
+                            .divide(new BigDecimal(1000), 2, RoundingMode.HALF_UP);
+                    resultList.add(new MacroIndicatorDto(date, wonConvertedValue.toString()));
+                }
+            }
+        }
+        return resultList;
     }
 }

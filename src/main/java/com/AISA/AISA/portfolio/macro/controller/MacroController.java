@@ -119,6 +119,15 @@ public class MacroController {
         return ResponseEntity.ok(new SuccessResponse<>(true, "달러 환산 코스피 조회 성공", ratioList));
     }
 
+    @GetMapping("/kosdaq-usd-ratio")
+    @Operation(summary = "달러 환산 코스닥 지수 조회", description = "코스닥 지수를 원/달러 환율로 나누어 달러 기준 가치를 계산합니다. (KOSDAQ / (환율 / 1000))")
+    public ResponseEntity<SuccessResponse<List<MacroIndicatorDto>>> getKosdaqUsdRatio(
+            @RequestParam String startDate,
+            @RequestParam String endDate) {
+        List<MacroIndicatorDto> ratioList = macroService.getKosdaqUsdRatio(startDate, endDate);
+        return ResponseEntity.ok(new SuccessResponse<>(true, "달러 환산 코스닥 조회 성공", ratioList));
+    }
+
     @GetMapping("/bond/{bondName}")
     @Operation(summary = "채권 금리 조회", description = "주요 국채 금리(한국, 미국)를 조회합니다. (가능한 bondName: KR_1Y, KR_3Y, KR_10Y, US_1Y, US_10Y, US_30Y)")
     public ResponseEntity<SuccessResponse<List<MacroIndicatorDto>>> getBondYield(
@@ -139,5 +148,15 @@ public class MacroController {
         BondYield bond = BondYield.valueOf(bondName.toUpperCase());
         kisMacroService.fetchAndSaveBondYield(bond, startDate, endDate);
         return ResponseEntity.ok(new SuccessResponse<>(true, bond.getDescription() + " 데이터 저장 성공", null));
+    }
+
+    @GetMapping("/overseas-index-krw/{indexName}")
+    @Operation(summary = "원화 환산 해외 지수 조회", description = "해외 지수(NASDAQ, SP500 등)를 원화 가치로 환산하여 조회합니다. (해외지수 * 환율)")
+    public ResponseEntity<SuccessResponse<List<MacroIndicatorDto>>> getOverseasIndexKrw(
+            @PathVariable String indexName,
+            @RequestParam String startDate,
+            @RequestParam String endDate) {
+        List<MacroIndicatorDto> data = macroService.getWonConvertedOverseasIndex(indexName, startDate, endDate);
+        return ResponseEntity.ok(new SuccessResponse<>(true, indexName + " 원화 환산 조회 성공", data));
     }
 }

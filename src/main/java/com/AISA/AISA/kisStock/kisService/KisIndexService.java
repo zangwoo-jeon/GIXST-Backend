@@ -1,6 +1,7 @@
 package com.AISA.AISA.kisStock.kisService;
 
 import com.AISA.AISA.kisStock.Entity.Index.IndexDailyData;
+import com.AISA.AISA.kisStock.Entity.Index.OverseasIndexDailyData;
 import com.AISA.AISA.kisStock.config.KisApiProperties;
 import com.AISA.AISA.kisStock.dto.Index.IndexChartInfoDto;
 import com.AISA.AISA.kisStock.dto.Index.IndexChartPriceDto;
@@ -10,9 +11,7 @@ import com.AISA.AISA.kisStock.exception.KisApiErrorCode;
 import com.AISA.AISA.kisStock.kisService.Auth.KisAuthService;
 import com.AISA.AISA.kisStock.repository.IndexDailyDataRepository;
 import com.AISA.AISA.kisStock.enums.OverseasIndex;
-import com.AISA.AISA.portfolio.macro.dto.MacroIndicatorDto;
-import com.AISA.AISA.portfolio.macro.repository.MacroDailyDataRepository;
-import com.AISA.AISA.portfolio.macro.Entity.MacroDailyData;
+import com.AISA.AISA.kisStock.repository.OverseasIndexDailyDataRepository;
 import com.AISA.AISA.kisStock.dto.Macro.KisOverseasDailyPriceDto;
 import com.AISA.AISA.kisStock.dto.Macro.KisOverseasDailyPriceResponseDto;
 import com.AISA.AISA.kisStock.dto.Macro.KisOverseasIndexBasicInfoDto;
@@ -40,9 +39,7 @@ public class KisIndexService {
     private final KisAuthService kisAuthService;
     private final KisApiProperties kisApiProperties;
     private final IndexDailyDataRepository indexDailyDataRepository;
-    private final MacroDailyDataRepository macroDailyDataRepository;
-
-    private static final String STAT_CODE_OVERSEAS_INDEX = "KIS_OVERSEAS_INDEX";
+    private final OverseasIndexDailyDataRepository overseasIndexDailyDataRepository;
 
     @Transactional
     public void fetchAndSaveHistoricalData(String marketCode, String startDateStr) {
@@ -289,6 +286,7 @@ public class KisIndexService {
                 .openPrice(entity.getOpeningPrice().toString())
                 .highPrice(entity.getHighPrice().toString())
                 .lowPrice(entity.getLowPrice().toString())
+                .volume(entity.getVolume() != null ? entity.getVolume().toString() : "0")
                 .build();
     }
 
@@ -358,9 +356,13 @@ public class KisIndexService {
 
     }
 
-    public List<MacroIndicatorDto> fetchOverseasIndex(OverseasIndex index, String startDate, String endDate) {
-        return fetchOverseasMacroData(STAT_CODE_OVERSEAS_INDEX, index.getSymbol(), "N", index.getSymbol(), startDate,
-                endDate);
+    // 변경: 반환 타입을 List<DTO>로 변경하지 않고, 아래에서 IndexChartPriceDto 등을 반환하도록 수정 예정이나
+    // 메서드 시그니처 변경 필요. 일단 내부 로직부터 변경.
+    // 하지만 Controller에서 List<MacroIndicatorDto>를 받고 있으므로, Controller 수정과 맞물려야 함.
+    // 일단 여기서는 IndexChartPriceDto (OHLC) 리스트를 반환하도록 변경하고 Controller도 수정하는게 맞음.
+    // 기존 DTO 재활용: IndexChartPriceDto
+    public List<IndexChartPriceDto> fetchOverseasIndex(OverseasIndex index, String startDate, String endDate) {
+        return fetchOverseasIndexData(index.getSymbol(), "N", index.getSymbol(), startDate, endDate);
     }
 
     public OverseasIndexStatusDto getOverseasIndexStatus(OverseasIndex index) {
@@ -376,53 +378,62 @@ public class KisIndexService {
 
     @Transactional
     public void fetchAndSaveOverseasIndex(OverseasIndex index, String startDateStr, String endDateStr) {
-        fetchAndSaveOverseasMacroData(STAT_CODE_OVERSEAS_INDEX, index.getSymbol(), "N", index.getSymbol(), startDateStr,
-                endDateStr);
+        fetchAndSaveOverseasIndexData(index.getSymbol(), "N", index.getSymbol(), startDateStr, endDateStr);
     }
 
-    private List<MacroIndicatorDto> fetchOverseasMacroData(String statCode, String itemCode, String marketDivCode,
+    private List<IndexChartPriceDto> fetchOverseasIndexData(String itemCode, String marketDivCode,
             String symbol, String startDate, String endDate) {
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
         LocalDate start = LocalDate.parse(startDate, formatter);
         LocalDate end = LocalDate.parse(endDate, formatter);
 
         // 1. Try to fetch from DB
-        List<MacroDailyData> dbData = macroDailyDataRepository.findAllByStatCodeAndItemCodeAndDateBetweenOrderByDateAsc(
-                statCode, itemCode, start, end);
+        List<OverseasIndexDailyData> dbData = overseasIndexDailyDataRepository
+                .findAllByMarketNameAndDateBetweenOrderByDateAsc(itemCode, start, end); // itemCode stores symbol/market
+                                                                                        // name
 
         if (!dbData.isEmpty()) {
             return dbData.stream()
-                    .map(entity -> new MacroIndicatorDto(
-                            entity.getDate().format(formatter),
-                            entity.getValue().toString()))
+                    .map(this::convertOverseasEntityToDto)
                     .collect(Collectors.toList());
         }
 
         // 2. If DB is empty, fetch from API and save
-        fetchAndSaveOverseasMacroData(statCode, itemCode, marketDivCode, symbol, startDate, endDate);
+        fetchAndSaveOverseasIndexData(itemCode, marketDivCode, symbol, startDate, endDate);
 
         // 3. Re-fetch from DB
-        dbData = macroDailyDataRepository.findAllByStatCodeAndItemCodeAndDateBetweenOrderByDateAsc(
-                statCode, itemCode, start, end);
+        dbData = overseasIndexDailyDataRepository.findAllByMarketNameAndDateBetweenOrderByDateAsc(
+                itemCode, start, end);
 
         return dbData.stream()
-                .map(entity -> new MacroIndicatorDto(
-                        entity.getDate().format(formatter),
-                        entity.getValue().toString()))
+                .map(this::convertOverseasEntityToDto)
                 .collect(Collectors.toList());
     }
 
-    private void fetchAndSaveOverseasMacroData(String statCode, String itemCode, String marketDivCode, String symbol,
+    private IndexChartPriceDto convertOverseasEntityToDto(
+            OverseasIndexDailyData entity) {
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
+        return IndexChartPriceDto.builder()
+                .date(entity.getDate().format(formatter))
+                .price(entity.getClosingPrice().toString())
+                .openPrice(entity.getOpeningPrice().toString())
+                .highPrice(entity.getHighPrice().toString())
+                .lowPrice(entity.getLowPrice().toString())
+                .volume(entity.getVolume() != null ? entity.getVolume().toString() : "0")
+                .build();
+    }
+
+    private void fetchAndSaveOverseasIndexData(String itemCode, String marketDivCode, String symbol,
             String startDateStr, String endDateStr) {
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
         LocalDate targetStartDate = LocalDate.parse(startDateStr, formatter);
         LocalDate currentDate = LocalDate.parse(endDateStr, formatter);
 
-        log.info("Starting bulk fetch for {} ({}) from {} to {}", statCode, symbol, startDateStr, endDateStr);
+        log.info("Starting bulk fetch for Oversea Index {} from {} to {}", symbol, startDateStr, endDateStr);
 
         while (!currentDate.isBefore(targetStartDate)) {
             String currentDateStr = currentDate.format(formatter);
-            LocalDate queryStartDate = currentDate.minusDays(99); // 100 days limit (inclusive)
+            LocalDate queryStartDate = currentDate.minusDays(99); // 100 days limit
             if (queryStartDate.isBefore(targetStartDate)) {
                 queryStartDate = targetStartDate;
             }
@@ -438,19 +449,24 @@ public class KisIndexService {
                     for (KisOverseasDailyPriceDto dto : apiList) {
                         LocalDate date = LocalDate.parse(dto.getDate(), formatter);
 
-                        boolean exists = macroDailyDataRepository
-                                .findAllByStatCodeAndItemCodeAndDateBetweenOrderByDateAsc(
-                                        statCode, itemCode, date, date)
-                                .stream().findAny().isPresent();
+                        boolean exists = overseasIndexDailyDataRepository
+                                .findByMarketNameAndDate(itemCode, date)
+                                .isPresent();
 
                         if (!exists) {
-                            MacroDailyData entity = MacroDailyData.builder()
-                                    .statCode(statCode)
-                                    .itemCode(itemCode)
+                            OverseasIndexDailyData entity = OverseasIndexDailyData
+                                    .builder()
+                                    .marketName(itemCode)
                                     .date(date)
-                                    .value(new java.math.BigDecimal(dto.getClosePrice()))
+                                    .closingPrice(new BigDecimal(dto.getClosePrice()))
+                                    .openingPrice(new BigDecimal(dto.getOpenPrice()))
+                                    .highPrice(new BigDecimal(dto.getHighPrice()))
+                                    .lowPrice(new BigDecimal(dto.getLowPrice()))
+                                    .volume(new BigDecimal(dto.getVolume()))
+                                    .priceChange(BigDecimal.ZERO) // API doesn't provide this in list
+                                    .changeRate(0.0) // API doesn't provide this in list
                                     .build();
-                            macroDailyDataRepository.save(entity);
+                            overseasIndexDailyDataRepository.save(entity);
                         }
                     }
                 }
@@ -460,7 +476,7 @@ public class KisIndexService {
                 Thread.sleep(100); // Rate limit
 
             } catch (Exception e) {
-                log.error("Error fetching macro data: {}", e.getMessage());
+                log.error("Error fetching overseas index data: {}", e.getMessage());
                 break; // Stop on error
             }
         }

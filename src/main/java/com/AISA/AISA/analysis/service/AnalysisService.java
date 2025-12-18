@@ -8,6 +8,7 @@ import com.AISA.AISA.kisStock.enums.OverseasIndex;
 import com.AISA.AISA.kisStock.kisService.KisMacroService;
 import com.AISA.AISA.kisStock.kisService.KisIndexService;
 import com.AISA.AISA.kisStock.repository.StockDailyDataRepository;
+import com.AISA.AISA.kisStock.dto.Index.IndexChartPriceDto;
 import com.AISA.AISA.portfolio.macro.dto.MacroIndicatorDto;
 import com.AISA.AISA.portfolio.macro.service.EcosService;
 import lombok.RequiredArgsConstructor;
@@ -319,9 +320,9 @@ public class AnalysisService {
             } else {
                 // Overseas Index
                 OverseasIndex index = OverseasIndex.valueOf(code);
-                List<MacroIndicatorDto> data = kisIndexService.fetchOverseasIndex(index, startDate, endDate);
-                for (MacroIndicatorDto d : data) {
-                    dataMap.put(LocalDate.parse(d.getDate(), FORMATTER), Double.parseDouble(d.getValue()));
+                List<IndexChartPriceDto> data = kisIndexService.fetchOverseasIndex(index, startDate, endDate);
+                for (IndexChartPriceDto d : data) {
+                    dataMap.put(LocalDate.parse(d.getDate(), FORMATTER), Double.parseDouble(d.getPrice()));
                 }
             }
         } else if ("EXCHANGE".equalsIgnoreCase(type)) {

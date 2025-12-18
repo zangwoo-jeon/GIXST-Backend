@@ -16,4 +16,5 @@ public class IndexChartPriceDto {
     private String highPrice;
     private String lowPrice;
     private String volume;
+    private String exchangeRate;
 }

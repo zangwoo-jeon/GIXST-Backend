@@ -7,6 +7,7 @@ import com.AISA.AISA.kisStock.dto.Macro.KisOverseasDailyPriceResponseDto;
 import com.AISA.AISA.kisStock.dto.Macro.KisOverseasIndexBasicInfoDto;
 import com.AISA.AISA.portfolio.macro.dto.ExchangeRateStatusDto;
 import com.AISA.AISA.kisStock.enums.BondYield;
+import com.AISA.AISA.kisStock.enums.ExchangeRateCode;
 
 import com.AISA.AISA.kisStock.exception.KisApiErrorCode;
 import com.AISA.AISA.kisStock.kisService.Auth.KisAuthService;
@@ -19,8 +20,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.reactive.function.client.WebClient;
 
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import java.math.BigDecimal;
 
 import java.util.List;
 import java.util.Map;
@@ -39,7 +42,6 @@ public class KisMacroService {
 
     // StatCode and ItemCode for Exchange Rate (Compatible with ECOS codes)
     private static final String STAT_CODE_EXCHANGE_RATE = "731Y001";
-    private static final String ITEM_CODE_USD = "0000001";
 
     // StatCode for Overseas Index (New constant)
 
@@ -47,7 +49,93 @@ public class KisMacroService {
     private static final String STAT_CODE_BOND_YIELD = "KIS_BOND_YIELD";
 
     public List<MacroIndicatorDto> fetchExchangeRate(String currencyCode, String startDate, String endDate) {
-        return fetchMacroData(STAT_CODE_EXCHANGE_RATE, ITEM_CODE_USD, "X", currencyCode, startDate, endDate);
+        ExchangeRateCode exchangeRateCode = ExchangeRateCode.findBySymbol(currencyCode);
+
+        // For calculated rates like HKD_KRW, EUR_KRW, we only fetch from DB
+        if (exchangeRateCode == ExchangeRateCode.HKD_KRW || exchangeRateCode == ExchangeRateCode.EUR_KRW) {
+            DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
+            LocalDate start = LocalDate.parse(startDate, formatter);
+            LocalDate end = LocalDate.parse(endDate, formatter);
+
+            List<MacroDailyData> dbData = macroDailyDataRepository
+                    .findAllByStatCodeAndItemCodeAndDateBetweenOrderByDateAsc(
+                            STAT_CODE_EXCHANGE_RATE, exchangeRateCode.getItemCode(), start, end);
+
+            return dbData.stream()
+                    .map(entity -> new MacroIndicatorDto(
+                            entity.getDate().format(formatter),
+                            entity.getValue().toString()))
+                    .collect(Collectors.toList());
+        }
+
+        return fetchMacroData(STAT_CODE_EXCHANGE_RATE, exchangeRateCode.getItemCode(), "X", currencyCode, startDate,
+                endDate);
+    }
+
+    @Transactional
+    public void calcAndSaveHkdKrwRate(String startDate, String endDate) {
+        calcAndSaveCrossRate(ExchangeRateCode.HKD, ExchangeRateCode.HKD_KRW, startDate, endDate);
+    }
+
+    @Transactional
+    public void calcAndSaveEurKrwRate(String startDate, String endDate) {
+        calcAndSaveCrossRate(ExchangeRateCode.EUR, ExchangeRateCode.EUR_KRW, startDate, endDate);
+    }
+
+    private void calcAndSaveCrossRate(ExchangeRateCode sourceCode, ExchangeRateCode targetCode, String startDate,
+            String endDate) {
+        // 1. Ensure we have sufficient data for USD/KRW and USD/Source
+        fetchAndSaveExchangeRate(ExchangeRateCode.USD.getSymbol(), startDate, endDate);
+        fetchAndSaveExchangeRate(sourceCode.getSymbol(), startDate, endDate);
+
+        // 2. Fetch data from Service (read from DB)
+        List<MacroIndicatorDto> usdKrwList = fetchExchangeRate(ExchangeRateCode.USD.getSymbol(), startDate, endDate);
+        List<MacroIndicatorDto> usdSourceList = fetchExchangeRate(sourceCode.getSymbol(), startDate, endDate);
+
+        Map<String, BigDecimal> usdKrwMap = usdKrwList.stream()
+                .collect(Collectors.toMap(MacroIndicatorDto::getDate, dto -> new BigDecimal(dto.getValue())));
+        Map<String, BigDecimal> usdSourceMap = usdSourceList.stream()
+                .collect(Collectors.toMap(MacroIndicatorDto::getDate, dto -> new BigDecimal(dto.getValue())));
+
+        // 3. Calculate and Save Cross Rate
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
+
+        for (String dateStr : usdKrwMap.keySet()) {
+            if (usdSourceMap.containsKey(dateStr)) {
+                LocalDate date = LocalDate.parse(dateStr, formatter);
+
+                // Check if already exists
+                boolean exists = macroDailyDataRepository.findAllByStatCodeAndItemCodeAndDateBetweenOrderByDateAsc(
+                        STAT_CODE_EXCHANGE_RATE, targetCode.getItemCode(), date, date).stream().findAny().isPresent();
+
+                if (!exists) {
+                    BigDecimal usdKrw = usdKrwMap.get(dateStr);
+                    BigDecimal usdSource = usdSourceMap.get(dateStr);
+
+                    if (usdSource.compareTo(BigDecimal.ZERO) > 0) {
+                        BigDecimal crossRate;
+                        // Determine calculation method based on Source Code
+                        if (sourceCode == ExchangeRateCode.EUR) {
+                            // EUR is quoted as EUR/USD (1 EUR = x USD)
+                            // Formula: EUR/KRW = (USD/KRW) * (EUR/USD)
+                            crossRate = usdKrw.multiply(usdSource).setScale(4, RoundingMode.HALF_UP);
+                        } else {
+                            // Others (like HKD) are quoted as USD/HKD (1 USD = x HKD)
+                            // Formula: HKD/KRW = (USD/KRW) / (USD/HKD)
+                            crossRate = usdKrw.divide(usdSource, 4, RoundingMode.HALF_UP);
+                        }
+
+                        MacroDailyData entity = MacroDailyData.builder()
+                                .statCode(STAT_CODE_EXCHANGE_RATE)
+                                .itemCode(targetCode.getItemCode())
+                                .date(date)
+                                .value(crossRate)
+                                .build();
+                        macroDailyDataRepository.save(entity);
+                    }
+                }
+            }
+        }
     }
 
     public List<MacroIndicatorDto> fetchBondYield(BondYield bond, String startDate, String endDate) {
@@ -88,7 +176,9 @@ public class KisMacroService {
 
     @Transactional
     public void fetchAndSaveExchangeRate(String currencyCode, String startDateStr, String endDateStr) {
-        fetchAndSaveMacroData(STAT_CODE_EXCHANGE_RATE, ITEM_CODE_USD, "X", currencyCode, startDateStr, endDateStr);
+        ExchangeRateCode exchangeRateCode = ExchangeRateCode.findBySymbol(currencyCode);
+        fetchAndSaveMacroData(STAT_CODE_EXCHANGE_RATE, exchangeRateCode.getItemCode(), "X", currencyCode, startDateStr,
+                endDateStr);
     }
 
     @Transactional
@@ -102,7 +192,7 @@ public class KisMacroService {
         LocalDate startDate = endDate.minusDays(7); // Check last 7 days for holidays/weekends
 
         List<MacroDailyData> data = macroDailyDataRepository.findAllByStatCodeAndItemCodeAndDateBetweenOrderByDateAsc(
-                STAT_CODE_EXCHANGE_RATE, ITEM_CODE_USD, startDate, endDate);
+                STAT_CODE_EXCHANGE_RATE, ExchangeRateCode.USD.getItemCode(), startDate, endDate);
 
         if (data.isEmpty()) {
             return null;
@@ -132,7 +222,7 @@ public class KisMacroService {
         LocalDate fetchStart = start.minusDays(7);
 
         List<MacroDailyData> data = macroDailyDataRepository.findAllByStatCodeAndItemCodeAndDateBetweenOrderByDateAsc(
-                STAT_CODE_EXCHANGE_RATE, ITEM_CODE_USD, fetchStart, end);
+                STAT_CODE_EXCHANGE_RATE, ExchangeRateCode.USD.getItemCode(), fetchStart, end);
 
         return data.stream()
                 .collect(Collectors.toMap(

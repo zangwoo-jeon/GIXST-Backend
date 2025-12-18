@@ -105,11 +105,11 @@ public class MacroService {
                 .valueOf(indexName.toUpperCase());
 
         // 1. Fetch Overseas Index Data
-        List<MacroIndicatorDto> indexData = kisIndexService.fetchOverseasIndex(overseasIndex, startDate, endDate);
+        List<IndexChartPriceDto> indexData = kisIndexService.fetchOverseasIndex(overseasIndex, startDate, endDate);
         Map<String, BigDecimal> indexMap = indexData.stream()
                 .collect(Collectors.toMap(
-                        MacroIndicatorDto::getDate,
-                        dto -> new BigDecimal(dto.getValue())));
+                        IndexChartPriceDto::getDate,
+                        dto -> new BigDecimal(dto.getPrice())));
 
         // 2. Fetch Exchange Rate Data (from KIS API)
         List<MacroIndicatorDto> exchangeRateData = kisMacroService.fetchExchangeRate("FX@KRW", startDate, endDate);

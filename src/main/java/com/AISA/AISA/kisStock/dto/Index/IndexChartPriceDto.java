@@ -5,7 +5,6 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-
 @Data
 @Builder
 @NoArgsConstructor
@@ -16,4 +15,5 @@ public class IndexChartPriceDto {
     private String openPrice;
     private String highPrice;
     private String lowPrice;
+    private String volume;
 }

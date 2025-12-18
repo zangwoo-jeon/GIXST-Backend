@@ -7,7 +7,7 @@ import com.AISA.AISA.kisStock.kisService.KisIndexService;
 import com.AISA.AISA.kisStock.dto.Index.OverseasIndexStatusDto;
 
 import com.AISA.AISA.kisStock.enums.OverseasIndex;
-import com.AISA.AISA.portfolio.macro.dto.MacroIndicatorDto;
+import com.AISA.AISA.kisStock.dto.Index.IndexChartPriceDto; // [NEW] added
 import java.util.List;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -61,12 +61,12 @@ public class KisIndexController {
 
     @GetMapping("/overseas/{indexName}")
     @Operation(summary = "해외 지수 조회", description = "주요 해외 지수(NASDAQ, SP500, NIKKEI, HANGSENG, EUROSTOXX50)를 조회합니다.")
-    public ResponseEntity<SuccessResponse<List<MacroIndicatorDto>>> getOverseasIndex(
+    public ResponseEntity<SuccessResponse<List<IndexChartPriceDto>>> getOverseasIndex(
             @PathVariable String indexName,
             @RequestParam String startDate,
             @RequestParam String endDate) {
         OverseasIndex index = OverseasIndex.valueOf(indexName.toUpperCase());
-        List<MacroIndicatorDto> data = kisIndexService.fetchOverseasIndex(index, startDate, endDate);
+        List<IndexChartPriceDto> data = kisIndexService.fetchOverseasIndex(index, startDate, endDate);
         return ResponseEntity.ok(new SuccessResponse<>(true, index.getDescription() + " 조회 성공", data));
     }
 

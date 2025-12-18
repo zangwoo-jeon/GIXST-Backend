@@ -28,6 +28,7 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -195,35 +196,43 @@ public class KisIndexService {
                 String oldestApiDateStr = filteredApiList.get(filteredApiList.size() - 1).getDate();
                 LocalDate oldestApiDate = LocalDate.parse(oldestApiDateStr, formatter);
 
+                // API 데이터에 이미 포함된 기간(월/주) 수집
+                Set<String> coveredPeriods = getCoveredPeriods(filteredApiList, dateType);
+
                 if (oldestApiDate.isAfter(targetStartDate)) {
                     List<IndexDailyData> pastDataList = indexDailyDataRepository
                             .findAllByMarketNameAndDateBetweenOrderByDateDesc(
                                     marketCode, targetStartDate,
                                     oldestApiDate.minusDays(1));
 
-                    dbPriceList = pastDataList.stream()
+                    // dateType에 따른 필터링 적용 (M: 월별, W: 주별) + 중복 제외
+                    List<IndexDailyData> filteredPastDataList = filterDataByDateType(pastDataList, dateType,
+                            coveredPeriods);
+
+                    dbPriceList = filteredPastDataList.stream()
                             .map(this::convertToDto)
                             .collect(Collectors.toList());
                 }
             } else {
-                // API 데이터가 startDate 범위에 하나도 없으면 (API가 너무 미래 데이터만 줬거나 등)
-                // DB에서 전체 범위 조회 시도 (API가 준 데이터의 가장 오래된 날짜보다 더 과거를 요청했을 수 있음)
-                // 하지만 fetchIndexChartFromApi는 endDate 기준 100개를 주므로,
-                // endDate가 startDate보다 훨씬 미래라면 API 데이터가 startDate를 커버하지 못할 수 있음.
-                // 이 경우 API 데이터 전체(100개) + 그 이전 DB 데이터를 합쳐야 하는데,
-                // 여기서는 단순하게 "API가 커버하지 못하는 영역"을 DB에서 가져오는 로직으로 처리
-
-                // API가 반환한 가장 오래된 날짜 확인
+                // API 데이터가 startDate 범위에 하나도 없는 경우
                 String apiOldestRaw = apiResponse.getPriceList()
                         .get(apiResponse.getPriceList().size() - 1).getDate();
                 LocalDate apiOldestDate = LocalDate.parse(apiOldestRaw, formatter);
+
+                // API 원본 데이터 기준으로 커버된 기간 확인 (filteredApiList는 비어있을 수 있으므로)
+                Set<String> coveredPeriods = getCoveredPeriods(apiResponse.getPriceList(), dateType);
 
                 if (apiOldestDate.isAfter(targetStartDate)) {
                     List<IndexDailyData> pastDataList = indexDailyDataRepository
                             .findAllByMarketNameAndDateBetweenOrderByDateDesc(
                                     marketCode, targetStartDate,
                                     apiOldestDate.minusDays(1));
-                    dbPriceList = pastDataList.stream()
+
+                    // dateType에 따른 필터링 적용
+                    List<IndexDailyData> filteredPastDataList = filterDataByDateType(pastDataList, dateType,
+                            coveredPeriods);
+
+                    dbPriceList = filteredPastDataList.stream()
                             .map(this::convertToDto)
                             .collect(Collectors.toList());
                 }
@@ -563,5 +572,86 @@ public class KisIndexService {
         }
 
         return response.getOutput1();
+    }
+
+    private Set<String> getCoveredPeriods(List<IndexChartPriceDto> dtoList, String dateType) {
+        Set<String> periods = new java.util.HashSet<>();
+        if (dtoList == null || dtoList.isEmpty()) {
+            return periods;
+        }
+
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
+        java.time.temporal.WeekFields weekFields = java.time.temporal.WeekFields.ISO;
+
+        for (IndexChartPriceDto dto : dtoList) {
+            LocalDate date = LocalDate.parse(dto.getDate(), formatter);
+            if ("M".equalsIgnoreCase(dateType)) {
+                periods.add(date.format(DateTimeFormatter.ofPattern("yyyyMM")));
+            } else if ("W".equalsIgnoreCase(dateType)) {
+                int year = date.get(weekFields.weekBasedYear());
+                int week = date.get(weekFields.weekOfWeekBasedYear());
+                periods.add(year + "-" + week);
+            }
+        }
+        return periods;
+    }
+
+    // dateType에 따라 데이터를 필터링하는 헬퍼 메서드 (중복 제외 포함)
+    private List<IndexDailyData> filterDataByDateType(List<IndexDailyData> dataList, String dateType,
+            Set<String> excludedPeriods) {
+        if (dataList == null || dataList.isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        // 일별(D)이면 필터링 없이 그대로 반환
+        if ("D".equalsIgnoreCase(dateType)) {
+            return dataList;
+        }
+
+        List<IndexDailyData> result = new ArrayList<>();
+
+        // 월별(M) 처리
+        if ("M".equalsIgnoreCase(dateType)) {
+            String lastMonth = null;
+            for (IndexDailyData data : dataList) {
+                String currentMonth = data.getDate().format(DateTimeFormatter.ofPattern("yyyyMM"));
+
+                // 제외해야 할 월이면 건너뜀
+                if (excludedPeriods != null && excludedPeriods.contains(currentMonth)) {
+                    continue;
+                }
+
+                if (!currentMonth.equals(lastMonth)) {
+                    result.add(data);
+                    lastMonth = currentMonth;
+                }
+            }
+            return result;
+        }
+
+        // 주별(W) 처리
+        if ("W".equalsIgnoreCase(dateType)) {
+            java.time.temporal.WeekFields weekFields = java.time.temporal.WeekFields.ISO;
+            String lastWeek = null;
+
+            for (IndexDailyData data : dataList) {
+                int year = data.getDate().get(weekFields.weekBasedYear());
+                int week = data.getDate().get(weekFields.weekOfWeekBasedYear());
+                String currentWeek = year + "-" + week;
+
+                // 제외해야 할 주차면 건너뜀
+                if (excludedPeriods != null && excludedPeriods.contains(currentWeek)) {
+                    continue;
+                }
+
+                if (!currentWeek.equals(lastWeek)) {
+                    result.add(data);
+                    lastWeek = currentWeek;
+                }
+            }
+            return result;
+        }
+
+        return dataList;
     }
 }

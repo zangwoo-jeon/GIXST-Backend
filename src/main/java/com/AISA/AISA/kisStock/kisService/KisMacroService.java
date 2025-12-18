@@ -263,11 +263,17 @@ public class KisMacroService {
                                 .stream().findAny().isPresent();
 
                         if (!exists) {
+                            BigDecimal value = new java.math.BigDecimal(dto.getClosePrice());
+                            // 엔화일 경우 100을 곱해서 저장 (100엔 단위)
+                            if ("FX@KRWJS".equals(symbol)) {
+                                value = value.multiply(new BigDecimal(100));
+                            }
+
                             MacroDailyData entity = MacroDailyData.builder()
                                     .statCode(statCode)
                                     .itemCode(itemCode)
                                     .date(date)
-                                    .value(new java.math.BigDecimal(dto.getClosePrice()))
+                                    .value(value)
                                     .build();
                             macroDailyDataRepository.save(entity);
                         }

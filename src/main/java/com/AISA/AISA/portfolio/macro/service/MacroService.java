@@ -100,16 +100,18 @@ public class MacroService {
         return ratioList;
     }
 
-    public List<MacroIndicatorDto> getWonConvertedOverseasIndex(String indexName, String startDate, String endDate) {
-        OverseasIndex overseasIndex = OverseasIndex
-                .valueOf(indexName.toUpperCase());
+    public List<IndexChartPriceDto> getWonConvertedOverseasIndex(String indexName, String startDate, String endDate) {
+        if (!"NASDAQ".equalsIgnoreCase(indexName) && !"SP500".equalsIgnoreCase(indexName)) {
+            throw new IllegalArgumentException("원화 환산은 NASDAQ과 S&P500 지수만 지원합니다.");
+        }
+        OverseasIndex overseasIndex = OverseasIndex.valueOf(indexName.toUpperCase());
 
         // 1. Fetch Overseas Index Data
         List<IndexChartPriceDto> indexData = kisIndexService.fetchOverseasIndex(overseasIndex, startDate, endDate);
-        Map<String, BigDecimal> indexMap = indexData.stream()
+        Map<String, IndexChartPriceDto> indexMap = indexData.stream()
                 .collect(Collectors.toMap(
                         IndexChartPriceDto::getDate,
-                        dto -> new BigDecimal(dto.getPrice())));
+                        dto -> dto));
 
         // 2. Fetch Exchange Rate Data (from KIS API)
         List<MacroIndicatorDto> exchangeRateData = kisMacroService.fetchExchangeRate("FX@KRW", startDate, endDate);
@@ -119,20 +121,38 @@ public class MacroService {
                         dto -> new BigDecimal(dto.getValue())));
 
         // 3. Calculate Won Converted Value
-        List<MacroIndicatorDto> resultList = new ArrayList<>();
+        List<IndexChartPriceDto> resultList = new ArrayList<>();
         List<String> sortedDates = new ArrayList<>(indexMap.keySet());
         Collections.sort(sortedDates);
 
         for (String date : sortedDates) {
             if (exchangeRateMap.containsKey(date)) {
-                BigDecimal indexValue = indexMap.get(date);
+                IndexChartPriceDto indexDto = indexMap.get(date);
+                BigDecimal indexValue = new BigDecimal(indexDto.getPrice());
                 BigDecimal exchangeRate = exchangeRateMap.get(date);
 
                 if (exchangeRate.compareTo(BigDecimal.ZERO) > 0) {
-                    // Formula: IndexValue * (ExchangeRate / 1000)
+                    // Formula: (IndexValue * ExchangeRate) / 1000
                     BigDecimal wonConvertedValue = indexValue.multiply(exchangeRate)
                             .divide(new BigDecimal(1000), 2, RoundingMode.HALF_UP);
-                    resultList.add(new MacroIndicatorDto(date, wonConvertedValue.toString()));
+
+                    // Converted OHLC (assuming simple multiplication for all)
+                    BigDecimal open = new BigDecimal(indexDto.getOpenPrice()).multiply(exchangeRate)
+                            .divide(new BigDecimal(1000), 2, RoundingMode.HALF_UP);
+                    BigDecimal high = new BigDecimal(indexDto.getHighPrice()).multiply(exchangeRate)
+                            .divide(new BigDecimal(1000), 2, RoundingMode.HALF_UP);
+                    BigDecimal low = new BigDecimal(indexDto.getLowPrice()).multiply(exchangeRate)
+                            .divide(new BigDecimal(1000), 2, RoundingMode.HALF_UP);
+
+                    resultList.add(IndexChartPriceDto.builder()
+                            .date(date)
+                            .price(wonConvertedValue.toString())
+                            .openPrice(open.toString())
+                            .highPrice(high.toString())
+                            .lowPrice(low.toString())
+                            .volume(indexDto.getVolume())
+                            .exchangeRate(exchangeRate.toString())
+                            .build());
                 }
             }
         }

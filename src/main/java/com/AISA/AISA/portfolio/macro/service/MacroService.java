@@ -5,6 +5,7 @@ import com.AISA.AISA.kisStock.dto.Index.IndexChartResponseDto;
 import com.AISA.AISA.kisStock.enums.OverseasIndex;
 import com.AISA.AISA.kisStock.kisService.KisIndexService;
 import com.AISA.AISA.kisStock.kisService.KisMacroService;
+import com.AISA.AISA.kisStock.enums.ExchangeRateCode;
 import com.AISA.AISA.portfolio.macro.dto.MacroIndicatorDto;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -101,10 +102,20 @@ public class MacroService {
     }
 
     public List<IndexChartPriceDto> getWonConvertedOverseasIndex(String indexName, String startDate, String endDate) {
-        if (!"NASDAQ".equalsIgnoreCase(indexName) && !"SP500".equalsIgnoreCase(indexName)) {
-            throw new IllegalArgumentException("원화 환산은 NASDAQ과 S&P500 지수만 지원합니다.");
-        }
         OverseasIndex overseasIndex = OverseasIndex.valueOf(indexName.toUpperCase());
+        String currencyCode;
+
+        if (overseasIndex == OverseasIndex.NASDAQ || overseasIndex == OverseasIndex.SP500) {
+            currencyCode = ExchangeRateCode.USD.getSymbol();
+        } else if (overseasIndex == OverseasIndex.NIKKEI) {
+            currencyCode = ExchangeRateCode.JPY.getSymbol();
+        } else if (overseasIndex == OverseasIndex.HANGSENG) {
+            currencyCode = ExchangeRateCode.HKD_KRW.getSymbol();
+        } else if (overseasIndex == OverseasIndex.EUROSTOXX50) {
+            currencyCode = ExchangeRateCode.EUR_KRW.getSymbol();
+        } else {
+            throw new IllegalArgumentException("원화 환산은 NASDAQ, S&P500, NIKKEI, HANGSENG, EUROSTOXX50 지수만 지원합니다.");
+        }
 
         // 1. Fetch Overseas Index Data
         List<IndexChartPriceDto> indexData = kisIndexService.fetchOverseasIndex(overseasIndex, startDate, endDate);
@@ -114,7 +125,7 @@ public class MacroService {
                         dto -> dto));
 
         // 2. Fetch Exchange Rate Data (from KIS API)
-        List<MacroIndicatorDto> exchangeRateData = kisMacroService.fetchExchangeRate("FX@KRW", startDate, endDate);
+        List<MacroIndicatorDto> exchangeRateData = kisMacroService.fetchExchangeRate(currencyCode, startDate, endDate);
         Map<String, BigDecimal> exchangeRateMap = exchangeRateData.stream()
                 .collect(Collectors.toMap(
                         MacroIndicatorDto::getDate,

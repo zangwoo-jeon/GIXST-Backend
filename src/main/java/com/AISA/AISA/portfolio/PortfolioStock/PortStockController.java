@@ -48,8 +48,8 @@ public class PortStockController {
     }
 
     @GetMapping("/{portId}")
-    @Operation(summary = "포트폴리오 종목 조회", description = "특정 포트폴리오에 포함된 종목 목록을 조회합니다.")
-    public ResponseEntity<SuccessResponse<List<PortStockResponse>>> getPortStocks(
+    @Operation(summary = "포트폴리오 종목 조회", description = "특정 포트폴리오에 포함된 종목 목록을 조회합니다. (평가금액, 수익률 등 포함)")
+    public ResponseEntity<SuccessResponse<PortfolioReturnResponse>> getPortStocks(
             @PathVariable UUID portId) {
         return ResponseEntity.ok(new SuccessResponse<>(true, "포트폴리오 종목 조회 성공", portStockService.getPortStocks(portId)));
     }

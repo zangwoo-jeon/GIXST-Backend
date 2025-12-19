@@ -7,7 +7,11 @@ import lombok.NoArgsConstructor;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
+import com.AISA.AISA.portfolio.PortfolioStock.PortStock;
+
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 @Entity
@@ -32,6 +36,9 @@ public class Portfolio {
 
     @Column(name = "main_portfolio")
     private boolean mainPort = false;
+
+    @OneToMany(mappedBy = "portfolio", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<PortStock> portStocks = new ArrayList<>();
 
     public Portfolio(UUID memberId, String portName) {
         this.memberId = memberId;

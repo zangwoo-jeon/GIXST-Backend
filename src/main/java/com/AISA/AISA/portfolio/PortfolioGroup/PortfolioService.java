@@ -8,8 +8,12 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.AISA.AISA.portfolio.PortfolioGroup.dto.PortfolioResponse;
+
 import java.util.List;
 import java.util.UUID;
+
+import static java.util.stream.Collectors.toList;
 
 import com.AISA.AISA.member.adapter.in.Member;
 import com.AISA.AISA.member.adapter.in.MemberRepository;
@@ -22,12 +26,16 @@ public class PortfolioService {
     private final PortfolioRepository portfolioRepository;
     private final MemberRepository memberRepository;
 
-    public List<Portfolio> findPortfolios(String username) {
+    public List<PortfolioResponse> findPortfolios(String username) {
         if (username == null) {
-            return portfolioRepository.findAll();
+            return portfolioRepository.findAll().stream()
+                    .map(PortfolioResponse::new)
+                    .collect(toList());
         }
         Member member = getMemberByUsername(username);
-        return portfolioRepository.findByMemberId(member.getMemberId());
+        return portfolioRepository.findByMemberId(member.getMemberId()).stream()
+                .map(PortfolioResponse::new)
+                .collect(toList());
     }
 
     @Transactional

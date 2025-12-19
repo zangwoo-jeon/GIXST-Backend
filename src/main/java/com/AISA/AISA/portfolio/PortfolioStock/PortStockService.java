@@ -139,17 +139,29 @@ public class PortStockService {
         List<PortStockResponse> enrichedStocks = portStocks.stream()
                 .map(portStock -> {
                     BigDecimal currentPrice = BigDecimal.ZERO;
+                    BigDecimal dailyProfit = BigDecimal.ZERO;
+                    BigDecimal dailyChangeRate = BigDecimal.ZERO;
+
                     try {
                         StockPriceDto stockPriceDto = kisStockService
                                 .getStockPrice(portStock.getStock().getStockCode());
                         if (stockPriceDto != null && stockPriceDto.getStockPrice() != null) {
                             currentPrice = new BigDecimal(stockPriceDto.getStockPrice());
+
+                            if (stockPriceDto.getPriceChange() != null) {
+                                BigDecimal priceChange = new BigDecimal(stockPriceDto.getPriceChange());
+                                dailyProfit = priceChange.multiply(BigDecimal.valueOf(portStock.getQuantity()));
+                            }
+
+                            if (stockPriceDto.getChangeRate() != null) {
+                                dailyChangeRate = new BigDecimal(stockPriceDto.getChangeRate());
+                            }
                         }
                     } catch (Exception e) {
                         // API 호출 실패 시 0으로 처리, 로그 필요 시 추가
                         log.error("Error fetching price for stock {}: ", portStock.getStock().getStockCode(), e);
                     }
-                    return new PortStockResponse(portStock, currentPrice);
+                    return new PortStockResponse(portStock, currentPrice, dailyProfit, dailyChangeRate);
                 })
                 .sorted((a, b) -> a.getSequence().compareTo(b.getSequence()))
                 .collect(toList());

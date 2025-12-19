@@ -21,6 +21,8 @@ public class PortStockResponse {
     private BigDecimal totalValue;
     private BigDecimal profit;
     private BigDecimal profitRate;
+    private BigDecimal dailyProfit;
+    private BigDecimal dailyChangeRate;
 
     public PortStockResponse(PortStock portStock) {
         this.portStockId = portStock.getId();
@@ -31,9 +33,12 @@ public class PortStockResponse {
         this.sequence = portStock.getSequence();
     }
 
-    public PortStockResponse(PortStock portStock, BigDecimal currentPrice) {
+    public PortStockResponse(PortStock portStock, BigDecimal currentPrice, BigDecimal dailyProfit,
+            BigDecimal dailyChangeRate) {
         this(portStock);
         this.currentPrice = currentPrice;
+        this.dailyProfit = dailyProfit;
+        this.dailyChangeRate = dailyChangeRate;
 
         if (currentPrice != null) {
             this.totalValue = currentPrice.multiply(BigDecimal.valueOf(this.quantity));

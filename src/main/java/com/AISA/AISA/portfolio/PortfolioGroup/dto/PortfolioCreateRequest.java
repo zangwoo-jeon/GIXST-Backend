@@ -8,6 +8,5 @@ import java.util.UUID;
 @Getter
 @NoArgsConstructor
 public class PortfolioCreateRequest {
-    private UUID memberId;
     private String portName;
 }

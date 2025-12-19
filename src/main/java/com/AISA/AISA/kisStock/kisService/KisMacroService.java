@@ -202,14 +202,88 @@ public class KisMacroService {
         return data.get(data.size() - 1).getValue().doubleValue();
     }
 
-    public ExchangeRateStatusDto getExchangeRateStatus() {
-        KisOverseasIndexBasicInfoDto latest = fetchExchangeRateBasicInfo("FX@KRW");
+    public ExchangeRateStatusDto getExchangeRateStatus(ExchangeRateCode code) {
+        if (code == ExchangeRateCode.HKD_KRW) {
+            return calculateCrossRateStatus(ExchangeRateCode.USD, ExchangeRateCode.HKD, false);
+        } else if (code == ExchangeRateCode.EUR_KRW) {
+            return calculateCrossRateStatus(ExchangeRateCode.USD, ExchangeRateCode.EUR, true);
+        }
+
+        KisOverseasIndexBasicInfoDto latest = fetchExchangeRateBasicInfo(code.getSymbol());
+        BigDecimal price = new BigDecimal(latest.getPrice());
+        BigDecimal change = new BigDecimal(latest.getPriceChange());
+        BigDecimal rate = new BigDecimal(latest.getChangeRate());
+
+        // JPY Adjustment (1 unit -> 100 units)
+        if (code == ExchangeRateCode.JPY) {
+            price = price.multiply(new BigDecimal("100"));
+            change = change.multiply(new BigDecimal("100"));
+        }
 
         return ExchangeRateStatusDto.builder()
                 .date(latest.getDate())
-                .price(latest.getPrice())
-                .priceChange(latest.getPriceChange())
-                .changeRate(latest.getChangeRate())
+                .price(price.toPlainString())
+                .priceChange(change.toPlainString())
+                .changeRate(rate.toPlainString())
+                .build();
+    }
+
+    public ExchangeRateStatusDto getExchangeRateStatus() {
+        return getExchangeRateStatus(ExchangeRateCode.USD);
+    }
+
+    private ExchangeRateStatusDto calculateCrossRateStatus(ExchangeRateCode usdkrwCode, ExchangeRateCode sourceCode,
+            boolean isMultiply) {
+        // 1. Fetch Basic Info
+        KisOverseasIndexBasicInfoDto usdKrwInfo = fetchExchangeRateBasicInfo(usdkrwCode.getSymbol());
+        KisOverseasIndexBasicInfoDto sourceInfo = fetchExchangeRateBasicInfo(sourceCode.getSymbol());
+
+        BigDecimal usdKrwPrice = new BigDecimal(usdKrwInfo.getPrice());
+        BigDecimal usdKrwChangeRate = new BigDecimal(usdKrwInfo.getChangeRate());
+
+        BigDecimal sourcePrice = new BigDecimal(sourceInfo.getPrice());
+        BigDecimal sourceChangeRate = new BigDecimal(sourceInfo.getChangeRate());
+
+        // 2. Calculate Current Price
+        BigDecimal currentPrice;
+        if (isMultiply) {
+            // EUR/KRW = USD/KRW * EUR/USD
+            currentPrice = usdKrwPrice.multiply(sourcePrice);
+        } else {
+            // HKD/KRW = USD/KRW / (USD/HKD)
+            currentPrice = usdKrwPrice.divide(sourcePrice, 2, RoundingMode.HALF_UP);
+        }
+
+        // 3. Calculate Previous Close Price to derive Change
+        BigDecimal usdKrwPrev = usdKrwPrice.divide(
+                BigDecimal.ONE.add(usdKrwChangeRate.divide(new BigDecimal("100"), 4, RoundingMode.HALF_UP)),
+                4, RoundingMode.HALF_UP);
+
+        BigDecimal sourcePrev = sourcePrice.divide(
+                BigDecimal.ONE.add(sourceChangeRate.divide(new BigDecimal("100"), 4, RoundingMode.HALF_UP)),
+                4, RoundingMode.HALF_UP);
+
+        BigDecimal prevPrice;
+        if (isMultiply) {
+            prevPrice = usdKrwPrev.multiply(sourcePrev);
+        } else {
+            prevPrice = usdKrwPrev.divide(sourcePrev, 4, RoundingMode.HALF_UP);
+        }
+
+        // 4. Calculate Change and Rate
+        BigDecimal change = currentPrice.subtract(prevPrice).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal changeRate = BigDecimal.ZERO;
+
+        if (prevPrice.compareTo(BigDecimal.ZERO) != 0) {
+            changeRate = change.divide(prevPrice, 4, RoundingMode.HALF_UP).multiply(new BigDecimal("100"))
+                    .setScale(2, RoundingMode.HALF_UP);
+        }
+
+        return ExchangeRateStatusDto.builder()
+                .date(usdKrwInfo.getDate()) // Use USD/KRW date
+                .price(currentPrice.toPlainString())
+                .priceChange(change.toPlainString())
+                .changeRate(changeRate.toPlainString())
                 .build();
     }
 

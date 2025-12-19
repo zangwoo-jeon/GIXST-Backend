@@ -2,6 +2,7 @@ package com.AISA.AISA.portfolio.macro.controller;
 
 import com.AISA.AISA.global.response.SuccessResponse;
 import com.AISA.AISA.kisStock.enums.BondYield;
+import com.AISA.AISA.kisStock.enums.ExchangeRateCode;
 
 import com.AISA.AISA.kisStock.kisService.KisMacroService;
 import com.AISA.AISA.portfolio.macro.dto.ExchangeRateStatusDto;
@@ -75,6 +76,13 @@ public class MacroController {
         return ResponseEntity.ok(new SuccessResponse<>(true, "원/엔 환율 데이터 저장 성공", null));
     }
 
+    @GetMapping("/exchange-rate/jpy/status")
+    @Operation(summary = "원/엔(100엔) 환율 현재가 조회", description = "한국투자증권 API를 통해 실시간 원/엔(100엔) 환율을 조회합니다.")
+    public ResponseEntity<SuccessResponse<ExchangeRateStatusDto>> getJpyExchangeRateStatus() {
+        ExchangeRateStatusDto data = kisMacroService.getExchangeRateStatus(ExchangeRateCode.JPY);
+        return ResponseEntity.ok(new SuccessResponse<>(true, "원/엔 환율 현재가 조회 성공", data));
+    }
+
     @GetMapping("/exchange-rate/hkd")
     @Operation(summary = "홍콩달러/달러 환율 조회", description = "한국투자증권 API를 통해 달러 대비 홍콩달러(USD/HKD) 환율을 조회합니다.")
     public ResponseEntity<SuccessResponse<List<MacroIndicatorDto>>> getHkdExchangeRate(
@@ -103,6 +111,13 @@ public class MacroController {
         return ResponseEntity.ok(new SuccessResponse<>(true, "홍콩달러/원 환율 조회 성공", data));
     }
 
+    @GetMapping("/exchange-rate/hkd/krw/status")
+    @Operation(summary = "홍콩달러/원 환율 현재가 조회", description = "USD/KRW, USD/HKD 실시간 데이터를 이용하여 홍콩달러/원 현재가를 계산하여 조회합니다.")
+    public ResponseEntity<SuccessResponse<ExchangeRateStatusDto>> getHkdKrwExchangeRateStatus() {
+        ExchangeRateStatusDto data = kisMacroService.getExchangeRateStatus(ExchangeRateCode.HKD_KRW);
+        return ResponseEntity.ok(new SuccessResponse<>(true, "홍콩달러/원 환율 현재가 조회 성공", data));
+    }
+
     @PostMapping("/exchange-rate/hkd/krw/init")
     @Operation(summary = "홍콩달러/원 환율 데이터 초기화/업데이트", description = "USD/KRW, USD/HKD 데이터를 이용하여 HKD/KRW 환율을 계산하고 DB에 저장합니다.")
     public ResponseEntity<SuccessResponse<Void>> initHkdKrwExchangeRate(
@@ -128,6 +143,13 @@ public class MacroController {
             @RequestParam String endDate) {
         List<MacroIndicatorDto> data = kisMacroService.fetchExchangeRate("EUR/KRW", startDate, endDate);
         return ResponseEntity.ok(new SuccessResponse<>(true, "유로/원 환율 조회 성공", data));
+    }
+
+    @GetMapping("/exchange-rate/eur/krw/status")
+    @Operation(summary = "유로/원 환율 현재가 조회", description = "USD/KRW, USD/EUR 실시간 데이터를 이용하여 유로/원 현재가를 계산하여 조회합니다.")
+    public ResponseEntity<SuccessResponse<ExchangeRateStatusDto>> getEurKrwExchangeRateStatus() {
+        ExchangeRateStatusDto data = kisMacroService.getExchangeRateStatus(ExchangeRateCode.EUR_KRW);
+        return ResponseEntity.ok(new SuccessResponse<>(true, "유로/원 환율 현재가 조회 성공", data));
     }
 
     @PostMapping("/exchange-rate/eur/krw/init")

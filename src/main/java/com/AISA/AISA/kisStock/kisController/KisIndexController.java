@@ -101,4 +101,22 @@ public class KisIndexController {
         return ResponseEntity.ok(new SuccessResponse<>(true, indexName + " 원화 환산 조회 성공", data));
     }
 
+    @GetMapping("/kospi-usd-ratio")
+    @Operation(summary = "달러 환산 코스피 지수 조회", description = "코스피 지수를 원/달러 환율로 나누어 달러 기준 가치를 계산합니다. (KOSPI / (환율 / 1000))")
+    public ResponseEntity<SuccessResponse<List<IndexChartPriceDto>>> getKospiUsdRatio(
+            @RequestParam String startDate,
+            @RequestParam String endDate) {
+        List<IndexChartPriceDto> ratioList = kisIndexService.getKospiUsdRatio(startDate, endDate);
+        return ResponseEntity.ok(new SuccessResponse<>(true, "달러 환산 코스피 조회 성공", ratioList));
+    }
+
+    @GetMapping("/kosdaq-usd-ratio")
+    @Operation(summary = "달러 환산 코스닥 지수 조회", description = "코스닥 지수를 원/달러 환율로 나누어 달러 기준 가치를 계산합니다. (KOSDAQ / (환율 / 1000))")
+    public ResponseEntity<SuccessResponse<List<IndexChartPriceDto>>> getKosdaqUsdRatio(
+            @RequestParam String startDate,
+            @RequestParam String endDate) {
+        List<IndexChartPriceDto> ratioList = kisIndexService.getKosdaqUsdRatio(startDate, endDate);
+        return ResponseEntity.ok(new SuccessResponse<>(true, "달러 환산 코스닥 조회 성공", ratioList));
+    }
+
 }

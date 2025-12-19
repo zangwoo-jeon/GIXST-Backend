@@ -21,6 +21,10 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import com.AISA.AISA.portfolio.macro.dto.MacroIndicatorDto;
+import java.util.Collections;
+import java.util.Map;
+import java.math.RoundingMode;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import java.math.BigDecimal;
@@ -41,6 +45,7 @@ public class KisIndexService {
     private final KisApiProperties kisApiProperties;
     private final IndexDailyDataRepository indexDailyDataRepository;
     private final OverseasIndexDailyDataRepository overseasIndexDailyDataRepository;
+    private final KisMacroService kisMacroService;
 
     @Transactional
     public void fetchAndSaveHistoricalData(String marketCode, String startDateStr) {
@@ -653,5 +658,103 @@ public class KisIndexService {
         }
 
         return dataList;
+    }
+
+    public List<IndexChartPriceDto> getKospiUsdRatio(String startDate, String endDate) {
+        // 1. Fetch KOSPI Data
+        IndexChartResponseDto kospiData = getIndexChart("KOSPI", startDate, endDate, "D");
+        Map<String, IndexChartPriceDto> kospiMap = kospiData.getPriceList().stream()
+                .collect(Collectors.toMap(
+                        IndexChartPriceDto::getDate,
+                        dto -> dto));
+
+        // 2. Fetch Exchange Rate Data (from KIS API)
+        List<MacroIndicatorDto> exchangeRateData = kisMacroService.fetchExchangeRate("FX@KRW", startDate, endDate);
+        Map<String, BigDecimal> exchangeRateMap = exchangeRateData.stream()
+                .collect(Collectors.toMap(
+                        MacroIndicatorDto::getDate,
+                        dto -> new BigDecimal(dto.getValue())));
+
+        // 3. Calculate Ratio
+        List<IndexChartPriceDto> ratioList = new ArrayList<>();
+        List<String> sortedDates = new ArrayList<>(kospiMap.keySet());
+        Collections.sort(sortedDates);
+
+        for (String date : sortedDates) {
+            if (exchangeRateMap.containsKey(date)) {
+                IndexChartPriceDto kospiDto = kospiMap.get(date);
+                BigDecimal exchangeRate = exchangeRateMap.get(date);
+
+                if (exchangeRate.compareTo(BigDecimal.ZERO) > 0) {
+                    BigDecimal divisor = exchangeRate.divide(new BigDecimal(1000), 4, RoundingMode.HALF_UP);
+
+                    // Formula: KOSPI / (ExchangeRate / 1000)
+                    BigDecimal open = new BigDecimal(kospiDto.getOpenPrice()).divide(divisor, 2, RoundingMode.HALF_UP);
+                    BigDecimal high = new BigDecimal(kospiDto.getHighPrice()).divide(divisor, 2, RoundingMode.HALF_UP);
+                    BigDecimal low = new BigDecimal(kospiDto.getLowPrice()).divide(divisor, 2, RoundingMode.HALF_UP);
+                    BigDecimal close = new BigDecimal(kospiDto.getPrice()).divide(divisor, 2, RoundingMode.HALF_UP);
+
+                    ratioList.add(IndexChartPriceDto.builder()
+                            .date(date)
+                            .price(close.toString())
+                            .openPrice(open.toString())
+                            .highPrice(high.toString())
+                            .lowPrice(low.toString())
+                            .volume(kospiDto.getVolume())
+                            .exchangeRate(exchangeRate.toString())
+                            .build());
+                }
+            }
+        }
+        return ratioList;
+    }
+
+    public List<IndexChartPriceDto> getKosdaqUsdRatio(String startDate, String endDate) {
+        // 1. Fetch KOSDAQ Data
+        IndexChartResponseDto kosdaqData = getIndexChart("KOSDAQ", startDate, endDate, "D");
+        Map<String, IndexChartPriceDto> kosdaqMap = kosdaqData.getPriceList().stream()
+                .collect(Collectors.toMap(
+                        IndexChartPriceDto::getDate,
+                        dto -> dto));
+
+        // 2. Fetch Exchange Rate Data (from KIS API)
+        List<MacroIndicatorDto> exchangeRateData = kisMacroService.fetchExchangeRate("FX@KRW", startDate, endDate);
+        Map<String, BigDecimal> exchangeRateMap = exchangeRateData.stream()
+                .collect(Collectors.toMap(
+                        MacroIndicatorDto::getDate,
+                        dto -> new BigDecimal(dto.getValue())));
+
+        // 3. Calculate Ratio
+        List<IndexChartPriceDto> ratioList = new ArrayList<>();
+        List<String> sortedDates = new ArrayList<>(kosdaqMap.keySet());
+        Collections.sort(sortedDates);
+
+        for (String date : sortedDates) {
+            if (exchangeRateMap.containsKey(date)) {
+                IndexChartPriceDto kosdaqDto = kosdaqMap.get(date);
+                BigDecimal exchangeRate = exchangeRateMap.get(date);
+
+                if (exchangeRate.compareTo(BigDecimal.ZERO) > 0) {
+                    BigDecimal divisor = exchangeRate.divide(new BigDecimal(1000), 4, RoundingMode.HALF_UP);
+
+                    // Formula: KOSDAQ / (ExchangeRate / 1000)
+                    BigDecimal open = new BigDecimal(kosdaqDto.getOpenPrice()).divide(divisor, 2, RoundingMode.HALF_UP);
+                    BigDecimal high = new BigDecimal(kosdaqDto.getHighPrice()).divide(divisor, 2, RoundingMode.HALF_UP);
+                    BigDecimal low = new BigDecimal(kosdaqDto.getLowPrice()).divide(divisor, 2, RoundingMode.HALF_UP);
+                    BigDecimal close = new BigDecimal(kosdaqDto.getPrice()).divide(divisor, 2, RoundingMode.HALF_UP);
+
+                    ratioList.add(IndexChartPriceDto.builder()
+                            .date(date)
+                            .price(close.toString())
+                            .openPrice(open.toString())
+                            .highPrice(high.toString())
+                            .lowPrice(low.toString())
+                            .volume(kosdaqDto.getVolume())
+                            .exchangeRate(exchangeRate.toString())
+                            .build());
+                }
+            }
+        }
+        return ratioList;
     }
 }

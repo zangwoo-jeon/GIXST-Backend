@@ -5,6 +5,7 @@ import com.AISA.AISA.kisStock.enums.BondYield;
 
 import com.AISA.AISA.kisStock.kisService.KisMacroService;
 import com.AISA.AISA.portfolio.macro.dto.ExchangeRateStatusDto;
+import com.AISA.AISA.kisStock.dto.Index.IndexChartPriceDto;
 import com.AISA.AISA.portfolio.macro.dto.MacroIndicatorDto;
 import com.AISA.AISA.portfolio.macro.service.EcosService;
 import com.AISA.AISA.portfolio.macro.service.MacroService;
@@ -192,23 +193,7 @@ public class MacroController {
         return ResponseEntity.ok(new SuccessResponse<>(true, "CPI 데이터 저장 성공", null));
     }
 
-    @GetMapping("/kospi-usd-ratio")
-    @Operation(summary = "달러 환산 코스피 지수 조회", description = "코스피 지수를 원/달러 환율로 나누어 달러 기준 가치를 계산합니다. (KOSPI / (환율 / 1000))")
-    public ResponseEntity<SuccessResponse<List<MacroIndicatorDto>>> getKospiUsdRatio(
-            @RequestParam String startDate,
-            @RequestParam String endDate) {
-        List<MacroIndicatorDto> ratioList = macroService.getKospiUsdRatio(startDate, endDate);
-        return ResponseEntity.ok(new SuccessResponse<>(true, "달러 환산 코스피 조회 성공", ratioList));
-    }
-
-    @GetMapping("/kosdaq-usd-ratio")
-    @Operation(summary = "달러 환산 코스닥 지수 조회", description = "코스닥 지수를 원/달러 환율로 나누어 달러 기준 가치를 계산합니다. (KOSDAQ / (환율 / 1000))")
-    public ResponseEntity<SuccessResponse<List<MacroIndicatorDto>>> getKosdaqUsdRatio(
-            @RequestParam String startDate,
-            @RequestParam String endDate) {
-        List<MacroIndicatorDto> ratioList = macroService.getKosdaqUsdRatio(startDate, endDate);
-        return ResponseEntity.ok(new SuccessResponse<>(true, "달러 환산 코스닥 조회 성공", ratioList));
-    }
+    // Endpoints moved to KisIndexController
 
     @GetMapping("/bond/{bondName}")
     @Operation(summary = "채권 금리 조회", description = "주요 국채 금리(한국, 미국)를 조회합니다. (가능한 bondName: KR_1Y, KR_3Y, KR_10Y, US_1Y, US_10Y, US_30Y)")

@@ -8,6 +8,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
+import java.util.UUID;
 
 @Entity
 @Getter
@@ -16,7 +17,7 @@ import java.math.BigDecimal;
 public class PortStock {
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
-    private java.util.UUID id;
+    private UUID id;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "port_id", nullable = false)

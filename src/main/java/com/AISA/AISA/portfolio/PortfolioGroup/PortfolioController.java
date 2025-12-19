@@ -3,6 +3,7 @@ package com.AISA.AISA.portfolio.PortfolioGroup;
 import com.AISA.AISA.global.response.SuccessResponse;
 import com.AISA.AISA.portfolio.PortfolioGroup.dto.PortfolioCreateRequest;
 import com.AISA.AISA.portfolio.PortfolioGroup.dto.PortfolioNameUpdateRequest;
+import com.AISA.AISA.portfolio.PortfolioGroup.dto.PortfolioResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -21,9 +22,9 @@ public class PortfolioController {
 
     @GetMapping("/list")
     @Operation(summary = "포트폴리오 조회", description = "로그인한 사용자의 포트폴리오 목록을 조회합니다.")
-    public ResponseEntity<SuccessResponse<List<Portfolio>>> getPortfolios(
+    public ResponseEntity<SuccessResponse<List<PortfolioResponse>>> getPortfolios(
             java.security.Principal principal) {
-        List<Portfolio> portfolios = portfolioService.findPortfolios(principal.getName());
+        List<PortfolioResponse> portfolios = portfolioService.findPortfolios(principal.getName());
         return ResponseEntity.ok(new SuccessResponse<>(true, "포트폴리오 목록 조회 성공", portfolios));
 
     }

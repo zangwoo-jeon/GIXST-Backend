@@ -2,6 +2,7 @@ package com.AISA.AISA.portfolio.PortfolioStock;
 
 import com.AISA.AISA.kisStock.Entity.stock.Stock;
 import com.AISA.AISA.portfolio.PortfolioGroup.Portfolio;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -21,6 +22,7 @@ public class PortStock {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "port_id", nullable = false)
+    @JsonIgnore
     private Portfolio portfolio;
 
     @ManyToOne(fetch = FetchType.LAZY)

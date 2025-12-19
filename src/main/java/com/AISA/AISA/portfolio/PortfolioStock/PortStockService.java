@@ -10,6 +10,7 @@ import com.AISA.AISA.portfolio.PortfolioGroup.PortfolioRepository;
 import com.AISA.AISA.portfolio.PortfolioGroup.exception.PortfolioErrorCode;
 import com.AISA.AISA.portfolio.PortfolioStock.dto.*;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -23,6 +24,7 @@ import static java.util.stream.Collectors.toList;
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
+@Slf4j
 public class PortStockService {
     private final PortStockRepository portStockRepository;
     private final PortfolioRepository portfolioRepository;
@@ -134,7 +136,7 @@ public class PortStockService {
 
         List<PortStock> portStocks = portStockRepository.findByPortfolio_PortIdOrderBySequenceAsc(portId);
 
-        List<PortStockResponse> enrichedStocks = portStocks.parallelStream()
+        List<PortStockResponse> enrichedStocks = portStocks.stream()
                 .map(portStock -> {
                     BigDecimal currentPrice = BigDecimal.ZERO;
                     try {
@@ -145,6 +147,7 @@ public class PortStockService {
                         }
                     } catch (Exception e) {
                         // API 호출 실패 시 0으로 처리, 로그 필요 시 추가
+                        log.error("Error fetching price for stock {}: ", portStock.getStock().getStockCode(), e);
                     }
                     return new PortStockResponse(portStock, currentPrice);
                 })

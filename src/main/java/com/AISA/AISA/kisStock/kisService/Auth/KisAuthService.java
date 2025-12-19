@@ -34,14 +34,23 @@ public class KisAuthService {
     private final WebClient webClient;
 
     public String getAccessToken() {
-        // 토큰이 없거나 만료되면 새로 발급
-        if (accessToken == null || tokenExpiresAt == null ||
-                LocalDateTime.now().isAfter(tokenExpiresAt)) {
-            log.info("토큰이 없거나 만들어지지 않았습니다. 토큰을 발급합니다.");
+        // 1차 체크 (락 없이)
+        if (accessToken != null && tokenExpiresAt != null && LocalDateTime.now().isBefore(tokenExpiresAt)) {
+            log.debug("기존의 액세스 토큰을 재사용합니다.");
+            return accessToken;
+        }
+
+        // 동기화 블록 (락 획득)
+        synchronized (this) {
+            // 2차 체크 (다른 스레드가 이미 갱신했는지 확인)
+            if (accessToken != null && tokenExpiresAt != null && LocalDateTime.now().isBefore(tokenExpiresAt)) {
+                log.debug("다른 스레드에 의해 갱신된 토큰을 사용합니다.");
+                return accessToken;
+            }
+
+            log.info("토큰이 없거나 만료되었습니다. 토큰을 발급합니다.");
             return refreshAccessToken();
         }
-        log.debug("기존의 액세스 토큰을 재사용합니다.");
-        return accessToken;
     }
 
     private String refreshAccessToken() {

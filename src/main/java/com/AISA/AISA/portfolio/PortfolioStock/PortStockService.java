@@ -128,39 +128,33 @@ public class PortStockService {
         }
     }
 
-    public List<PortStockResponse> getPortStocks(UUID portId) {
-        if (!portfolioRepository.existsById(portId)) {
-            throw new BusinessException(PortfolioErrorCode.PORTFOLIO_NOT_FOUND);
-        }
-        return portStockRepository.findByPortfolio_PortIdOrderBySequenceAsc(portId).stream()
-                .map(PortStockResponse::new)
-                .collect(toList());
-    }
-
-    public PortfolioReturnResponse getPortfolioReturn(UUID portId) {
+    public PortfolioReturnResponse getPortStocks(UUID portId) {
         Portfolio portfolio = portfolioRepository.findById(portId)
                 .orElseThrow(() -> new BusinessException(PortfolioErrorCode.PORTFOLIO_NOT_FOUND));
 
         List<PortStock> portStocks = portStockRepository.findByPortfolio_PortIdOrderBySequenceAsc(portId);
 
-        List<PortStockReturnResponse> stockReturns = portStocks.stream()
+        List<PortStockResponse> enrichedStocks = portStocks.parallelStream()
                 .map(portStock -> {
+                    BigDecimal currentPrice = BigDecimal.ZERO;
                     try {
-                        // KIS API를 통해 현재가 조회
                         StockPriceDto stockPriceDto = kisStockService
                                 .getStockPrice(portStock.getStock().getStockCode());
-                        BigDecimal currentPrice = new BigDecimal(stockPriceDto.getStockPrice());
-                        return new PortStockReturnResponse(portStock,
-                                currentPrice);
+                        if (stockPriceDto != null && stockPriceDto.getStockPrice() != null) {
+                            currentPrice = new BigDecimal(stockPriceDto.getStockPrice());
+                        }
                     } catch (Exception e) {
-                        // API 호출 실패 시 현재가를 0으로 처리하거나 예외 처리 (여기서는 0으로 처리하여 전체 로직이 깨지지 않도록 함)
-                        // 실제 운영 환경에서는 로그를 남기고 사용자에게 알리는 것이 좋음
-                        return new PortStockReturnResponse(portStock,
-                                BigDecimal.ZERO);
+                        // API 호출 실패 시 0으로 처리, 로그 필요 시 추가
                     }
+                    return new PortStockResponse(portStock, currentPrice);
                 })
+                .sorted((a, b) -> a.getSequence().compareTo(b.getSequence()))
                 .collect(toList());
 
-        return new PortfolioReturnResponse(portfolio, stockReturns);
+        return new PortfolioReturnResponse(portfolio, enrichedStocks);
+    }
+
+    public PortfolioReturnResponse getPortfolioReturn(UUID portId) {
+        return getPortStocks(portId);
     }
 }

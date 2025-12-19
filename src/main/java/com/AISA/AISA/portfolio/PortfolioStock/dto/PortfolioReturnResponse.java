@@ -18,19 +18,19 @@ public class PortfolioReturnResponse {
     private BigDecimal totalInvestmentAmount; // 총 매수금액
     private BigDecimal totalProfitOrLoss; // 총 평가손익
     private BigDecimal totalReturnRate; // 총 수익률
-    private List<PortStockReturnResponse> stockReturns;
+    private List<PortStockResponse> portStocks;
 
-    public PortfolioReturnResponse(Portfolio portfolio, List<PortStockReturnResponse> stockReturns) {
+    public PortfolioReturnResponse(Portfolio portfolio, List<PortStockResponse> portStocks) {
         this.portId = portfolio.getPortId();
         this.portName = portfolio.getPortName();
-        this.stockReturns = stockReturns;
+        this.portStocks = portStocks;
 
-        this.totalValue = stockReturns.stream()
-                .map(PortStockReturnResponse::getTotalValue)
+        this.totalValue = portStocks.stream()
+                .map(stock -> stock.getTotalValue() != null ? stock.getTotalValue() : BigDecimal.ZERO)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-        this.totalInvestmentAmount = stockReturns.stream()
-                .map(PortStockReturnResponse::getInvestmentAmount)
+        this.totalInvestmentAmount = portStocks.stream()
+                .map(stock -> stock.getAveragePrice().multiply(BigDecimal.valueOf(stock.getQuantity())))
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         this.totalProfitOrLoss = this.totalValue.subtract(this.totalInvestmentAmount);

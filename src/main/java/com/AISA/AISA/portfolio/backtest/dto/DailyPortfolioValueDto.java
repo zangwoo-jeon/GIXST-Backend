@@ -16,4 +16,5 @@ public class DailyPortfolioValueDto {
     private BigDecimal totalValue;
     private Double dailyReturnRate;
     private BigDecimal adjustedValue; // New field for correlation analysis (pure performance index)
+    private BigDecimal balance; // Cash balance (e.g., for stocks not yet listed)
 }

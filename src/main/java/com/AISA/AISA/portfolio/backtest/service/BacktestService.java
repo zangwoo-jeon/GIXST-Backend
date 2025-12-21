@@ -51,7 +51,7 @@ public class BacktestService {
         // If we want to support "Initial Capital" for existing portfolios, we would
         // need to simulate buying.
         // For now, we keep the original behavior: simulate the *existing* holdings.
-        return runBacktestSimulation(stockQuantityMap, startDateStr, endDateStr, portId, null);
+        return runBacktestSimulation(stockQuantityMap, startDateStr, endDateStr, portId, null, null);
     }
 
     @Transactional(readOnly = true)
@@ -67,7 +67,7 @@ public class BacktestService {
         }
 
         BacktestResultDto comparisonResult = runBacktestSimulation(comparisonStockMap, requestDto.getStartDate(),
-                requestDto.getEndDate(), null, null);
+                requestDto.getEndDate(), null, null, null);
 
         return BacktestCompareResultDto.builder()
                 .targetPortfolioResult(targetResult)
@@ -87,6 +87,7 @@ public class BacktestService {
 
         for (StrategyBacktestRequestDto strategyDto : requestDto.getStrategies()) {
             Map<Stock, BigDecimal> strategyQuantities = new HashMap<>();
+            Map<String, BigDecimal> allocatedCapitalMap = new HashMap<>();
 
             // 1. Resolve stocks and weights
             Map<Stock, BigDecimal> weights = new HashMap<>();
@@ -127,17 +128,20 @@ public class BacktestService {
                     // Quantity = Allocated / Price
                     BigDecimal quantity = allocatedCapital.divide(price, 4, RoundingMode.HALF_UP);
                     strategyQuantities.put(stock, quantity);
+                    allocatedCapitalMap.put(stock.getStockCode(), allocatedCapital);
                 } else {
                     // Handle missing price? Skip or throw?
                     // For now, if no price found in window, quantity is 0
                     log.warn("No start price found for stock {} within 7 days of {}", stock.getStockCode(), startDate);
                     strategyQuantities.put(stock, BigDecimal.ZERO);
+                    allocatedCapitalMap.put(stock.getStockCode(), initialCapital.multiply(weightPercent)
+                            .divide(BigDecimal.valueOf(100), 4, RoundingMode.HALF_UP));
                 }
             }
 
             // 3. Run Simulation
             BacktestResultDto result = runBacktestSimulation(strategyQuantities, startDateStr, endDateStr, null,
-                    initialCapital);
+                    initialCapital, allocatedCapitalMap);
 
             results.add(MultiStrategyBacktestResultDto.StrategyBacktestResultDto.builder()
                     .strategyName(strategyDto.getStrategyName())
@@ -151,7 +155,8 @@ public class BacktestService {
     }
 
     private BacktestResultDto runBacktestSimulation(Map<Stock, BigDecimal> stockQuantityMap, String startDateStr,
-            String endDateStr, UUID portId, BigDecimal initialCapitalOverride) {
+            String endDateStr, UUID portId, BigDecimal initialCapitalOverride,
+            Map<String, BigDecimal> allocatedCapitalMap) {
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
         LocalDate startDate = LocalDate.parse(startDateStr, formatter);
         LocalDate endDate = LocalDate.parse(endDateStr, formatter);
@@ -194,6 +199,12 @@ public class BacktestService {
         Map<String, BigDecimal> codeQuantityMap = stockQuantityMap.entrySet().stream()
                 .collect(Collectors.toMap(e -> e.getKey().getStockCode(), Map.Entry::getValue));
 
+        // Mutable map for remaining allocated capital
+        Map<String, BigDecimal> remainingCapitalMap = new HashMap<>();
+        if (allocatedCapitalMap != null) {
+            remainingCapitalMap.putAll(allocatedCapitalMap);
+        }
+
         for (LocalDate date : sortedDates) {
             List<StockDailyData> dailyDataList = dataByDate.get(date);
 
@@ -202,11 +213,28 @@ public class BacktestService {
             }
 
             BigDecimal currentTotalValue = BigDecimal.ZERO;
+            BigDecimal currentBalance = BigDecimal.ZERO;
+
             for (String stockCode : codeQuantityMap.keySet()) {
-                BigDecimal price = currentPrices.getOrDefault(stockCode, BigDecimal.ZERO);
-                BigDecimal quantity = codeQuantityMap.get(stockCode);
-                currentTotalValue = currentTotalValue.add(price.multiply(quantity));
+                BigDecimal price = currentPrices.get(stockCode);
+
+                // If price exists and is > 0, it means it's trading
+                if (price != null && price.compareTo(BigDecimal.ZERO) > 0) {
+                    BigDecimal quantity = codeQuantityMap.get(stockCode);
+                    currentTotalValue = currentTotalValue.add(price.multiply(quantity));
+                } else {
+                    // Not trading yet (or missing data).
+                    // If we have an allocated capital record, treat it as Cash Balance.
+                    if (allocatedCapitalMap != null && allocatedCapitalMap.containsKey(stockCode)) {
+                        currentBalance = currentBalance.add(allocatedCapitalMap.get(stockCode));
+                    }
+                    // If no allocated capital map provided (e.g. existing portfolio), we do nothing
+                    // (value is 0)
+                }
             }
+
+            // Total Value = Stock Value + Cash Balance
+            currentTotalValue = currentTotalValue.add(currentBalance);
 
             Double dailyReturnRate = 0.0;
             if (!prevPrices.isEmpty()) {
@@ -235,7 +263,8 @@ public class BacktestService {
                     date.format(formatter),
                     currentTotalValue,
                     dailyReturnPercent,
-                    currentAdjustedValue));
+                    currentAdjustedValue,
+                    currentBalance));
 
             prevPrices = new HashMap<>(currentPrices);
 

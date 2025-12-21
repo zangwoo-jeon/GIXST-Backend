@@ -97,46 +97,20 @@ public class BacktestService {
                 weights.put(stock, assetDto.getWeight());
             }
 
-            // 2. Determine Initial Quantities based on Prices at StartDate
-            // We need to find the first trading day on or after startDate for each stock
-            // Optimization: We could fetch a small window of data around startDate
-            LocalDate searchEndDate = startDate.plusDays(7); // Look ahead 1 week for first price
-            List<Stock> stockList = new ArrayList<>(weights.keySet());
-
-            List<StockDailyData> startPeriodData = stockDailyDataRepository
-                    .findAllByStockInAndDateBetweenOrderByDateAsc(
-                            stockList, startDate, searchEndDate);
-
-            Map<String, BigDecimal> startPrices = new HashMap<>();
-            for (StockDailyData data : startPeriodData) {
-                // Since it's ordered by Date ASC, the first entry for each stock is the
-                // earliest available
-                if (!startPrices.containsKey(data.getStock().getStockCode())) {
-                    startPrices.put(data.getStock().getStockCode(), data.getClosingPrice());
-                }
-            }
-
+            // 2. Pre-allocate Capital (Lazy Buying Mode)
+            // Instead of finding price immediately, we allocate capital to each stock
+            // and let the simulation loop "buy" when the price first appears.
             for (Map.Entry<Stock, BigDecimal> entry : weights.entrySet()) {
                 Stock stock = entry.getKey();
                 BigDecimal weightPercent = entry.getValue();
-                BigDecimal price = startPrices.get(stock.getStockCode());
 
-                if (price != null && price.compareTo(BigDecimal.ZERO) > 0) {
-                    // Allocated Capital = InitialCapital * (Weight / 100)
-                    BigDecimal allocatedCapital = initialCapital.multiply(weightPercent).divide(BigDecimal.valueOf(100),
-                            4, RoundingMode.HALF_UP);
-                    // Quantity = Allocated / Price
-                    BigDecimal quantity = allocatedCapital.divide(price, 4, RoundingMode.HALF_UP);
-                    strategyQuantities.put(stock, quantity);
-                    allocatedCapitalMap.put(stock.getStockCode(), allocatedCapital);
-                } else {
-                    // Handle missing price? Skip or throw?
-                    // For now, if no price found in window, quantity is 0
-                    log.warn("No start price found for stock {} within 7 days of {}", stock.getStockCode(), startDate);
-                    strategyQuantities.put(stock, BigDecimal.ZERO);
-                    allocatedCapitalMap.put(stock.getStockCode(), initialCapital.multiply(weightPercent)
-                            .divide(BigDecimal.valueOf(100), 4, RoundingMode.HALF_UP));
-                }
+                // Allocated Capital = InitialCapital * (Weight / 100)
+                BigDecimal allocatedCapital = initialCapital.multiply(weightPercent).divide(BigDecimal.valueOf(100),
+                        4, RoundingMode.HALF_UP);
+
+                // Initial Quantity is 0. Will be bought in simulation.
+                strategyQuantities.put(stock, BigDecimal.ZERO);
+                allocatedCapitalMap.put(stock.getStockCode(), allocatedCapital);
             }
 
             // 3. Run Simulation
@@ -218,18 +192,28 @@ public class BacktestService {
             for (String stockCode : codeQuantityMap.keySet()) {
                 BigDecimal price = currentPrices.get(stockCode);
 
-                // If price exists and is > 0, it means it's trading
+                // --- Lazy Buying Logic ---
+                // If we have 0 quantity but hold allocated capital, and price exists -> BUY
+                BigDecimal quantity = codeQuantityMap.get(stockCode);
+                if (quantity.compareTo(BigDecimal.ZERO) == 0
+                        && remainingCapitalMap.containsKey(stockCode)
+                        && price != null && price.compareTo(BigDecimal.ZERO) > 0) {
+
+                    BigDecimal capitalToInvest = remainingCapitalMap.get(stockCode);
+                    quantity = capitalToInvest.divide(price, 4, RoundingMode.HALF_UP);
+
+                    codeQuantityMap.put(stockCode, quantity); // Update quantity
+                    remainingCapitalMap.remove(stockCode); // Capital used
+                }
+
+                // --- Valuation ---
                 if (price != null && price.compareTo(BigDecimal.ZERO) > 0) {
-                    BigDecimal quantity = codeQuantityMap.get(stockCode);
-                    currentTotalValue = currentTotalValue.add(price.multiply(quantity));
-                } else {
-                    // Not trading yet (or missing data).
-                    // If we have an allocated capital record, treat it as Cash Balance.
-                    if (allocatedCapitalMap != null && allocatedCapitalMap.containsKey(stockCode)) {
-                        currentBalance = currentBalance.add(allocatedCapitalMap.get(stockCode));
-                    }
-                    // If no allocated capital map provided (e.g. existing portfolio), we do nothing
-                    // (value is 0)
+                    currentTotalValue = currentTotalValue.add(price.multiply(codeQuantityMap.get(stockCode)));
+                }
+
+                // If still not bought (capital remains), add to balance
+                if (remainingCapitalMap.containsKey(stockCode)) {
+                    currentBalance = currentBalance.add(remainingCapitalMap.get(stockCode));
                 }
             }
 

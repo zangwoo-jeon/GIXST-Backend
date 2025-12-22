@@ -243,6 +243,45 @@ public class AnalysisService {
                 .build();
     }
 
+    public Map<Integer, Double> calculateMultiWindowRollingCorrelation(Map<LocalDate, Double> series1,
+            Map<LocalDate, Double> series2, List<Integer> windows) {
+        Map<Integer, Double> result = new HashMap<>();
+        List<LocalDate> commonDates = new ArrayList<>();
+        for (LocalDate date : series1.keySet()) {
+            if (series2.containsKey(date)) {
+                commonDates.add(date);
+            }
+        }
+        Collections.sort(commonDates);
+
+        if (commonDates.size() < 2) {
+            for (int w : windows)
+                result.put(w, 0.0);
+            return result;
+        }
+
+        List<Double> returns1 = calculateLogReturns(series1, commonDates);
+        List<Double> returns2 = calculateLogReturns(series2, commonDates);
+
+        PearsonsCorrelation pc = new PearsonsCorrelation();
+        int totalPoints = returns1.size();
+
+        for (int window : windows) {
+            if (totalPoints < window) {
+                result.put(window, 0.0); // Not enough data
+                continue;
+            }
+            // Get last 'window' points
+            double[] w1 = returns1.subList(totalPoints - window, totalPoints).stream().mapToDouble(Double::doubleValue)
+                    .toArray();
+            double[] w2 = returns2.subList(totalPoints - window, totalPoints).stream().mapToDouble(Double::doubleValue)
+                    .toArray();
+            double corr = pc.correlation(w1, w2);
+            result.put(window, corr);
+        }
+        return result;
+    }
+
     private CorrelationResultDto calculateAutoLagCorrelation(List<Double> returns1, List<Double> returns2,
             List<String> dates, String asset1Code, String asset2Code) {
         int bestLag = 0;
@@ -481,5 +520,25 @@ public class AnalysisService {
         return "CPI".equalsIgnoreCase(assetType) ||
                 "M2".equalsIgnoreCase(assetType) ||
                 "BASE_RATE".equalsIgnoreCase(assetType);
+    }
+
+    public double calculateCAGR(Map<LocalDate, Double> series) {
+        if (series == null || series.size() < 2)
+            return 0.0;
+
+        List<LocalDate> sortedDates = new ArrayList<>(series.keySet());
+        Collections.sort(sortedDates);
+
+        LocalDate startDate = sortedDates.get(0);
+        LocalDate endDate = sortedDates.get(sortedDates.size() - 1);
+
+        double startValue = series.get(startDate);
+        double endValue = series.get(endDate);
+
+        double years = java.time.temporal.ChronoUnit.DAYS.between(startDate, endDate) / 365.25;
+        if (years < 0.1)
+            return 0.0; // Too short period
+
+        return Math.pow(endValue / startValue, 1.0 / years) - 1.0;
     }
 }

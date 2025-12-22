@@ -26,5 +26,9 @@ public class DiagnosisResultDto {
         private double mdd; // Maximum Drawdown
         private String correlationTrend; // "Increasing", "Decreasing", "Stable"
         private String scenarioAnalysis; // e.g., "Adding 5% reduces risk by 0.2%"
+
+        // Advanced Metrics
+        private double beta; // Sensitivity
+        private double downsideCorrelation; // Crisis Correlation
     }
 }

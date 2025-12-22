@@ -541,4 +541,75 @@ public class AnalysisService {
 
         return Math.pow(endValue / startValue, 1.0 / years) - 1.0;
     }
+
+    public double calculateBeta(Map<LocalDate, Double> portfolioSeries, Map<LocalDate, Double> factorSeries) {
+        List<LocalDate> commonDates = new ArrayList<>();
+        for (LocalDate date : portfolioSeries.keySet()) {
+            if (factorSeries.containsKey(date)) {
+                commonDates.add(date);
+            }
+        }
+        Collections.sort(commonDates);
+
+        if (commonDates.size() < 30) // Minimum data requirement
+            return 0.0;
+
+        List<Double> portReturns = calculateLogReturns(portfolioSeries, commonDates);
+        List<Double> factorReturns = calculateLogReturns(factorSeries, commonDates);
+
+        double[] rP = portReturns.stream().mapToDouble(Double::doubleValue).toArray();
+        double[] rF = factorReturns.stream().mapToDouble(Double::doubleValue).toArray();
+
+        PearsonsCorrelation pc = new PearsonsCorrelation();
+        double correlation = pc.correlation(rP, rF);
+
+        DescriptiveStatistics statsP = new DescriptiveStatistics();
+        portReturns.forEach(statsP::addValue);
+        double volP = statsP.getStandardDeviation();
+
+        DescriptiveStatistics statsF = new DescriptiveStatistics();
+        factorReturns.forEach(statsF::addValue);
+        double volF = statsF.getStandardDeviation();
+
+        if (volF == 0)
+            return 0.0;
+
+        // Beta = Correlation * (Vol_Portfolio / Vol_Factor)
+        return correlation * (volP / volF);
+    }
+
+    public double calculateDownsideCorrelation(Map<LocalDate, Double> portfolioSeries,
+            Map<LocalDate, Double> factorSeries, double dropThreshold) {
+        List<LocalDate> commonDates = new ArrayList<>();
+        for (LocalDate date : portfolioSeries.keySet()) {
+            if (factorSeries.containsKey(date)) {
+                commonDates.add(date);
+            }
+        }
+        Collections.sort(commonDates);
+
+        List<Double> portReturns = calculateLogReturns(portfolioSeries, commonDates);
+        List<Double> factorReturns = calculateLogReturns(factorSeries, commonDates);
+
+        List<Double> downP = new ArrayList<>();
+        List<Double> downF = new ArrayList<>();
+
+        // Filter: Include ONLY when Factor Return < dropThreshold (e.g. -0.01 for -1%)
+        // Or simple 'Negative Returns' if threshold is 0
+        for (int i = 0; i < factorReturns.size(); i++) {
+            if (factorReturns.get(i) < dropThreshold) {
+                downP.add(portReturns.get(i));
+                downF.add(factorReturns.get(i));
+            }
+        }
+
+        if (downF.size() < 5)
+            return 0.0; // Not enough downside samples
+
+        double[] dP = downP.stream().mapToDouble(Double::doubleValue).toArray();
+        double[] dF = downF.stream().mapToDouble(Double::doubleValue).toArray();
+
+        PearsonsCorrelation pc = new PearsonsCorrelation();
+        return pc.correlation(dP, dF);
+    }
 }

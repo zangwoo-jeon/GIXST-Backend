@@ -54,4 +54,13 @@ public class DividendController {
         return ResponseEntity.ok(new SuccessResponse<>(true, "배당률 순위 조회 성공", rank));
     }
 
+    @GetMapping("/calendar")
+    @Operation(summary = "배당 캘린더 조회", description = "특정 월에 배당락일이 포함된 종목들의 리스트를 조회합니다. (Frontend 필터링용 전체 데이터 반환)")
+    public ResponseEntity<SuccessResponse<List<StockDividendInfoDto>>> getDividendCalendar(
+            @RequestParam int year,
+            @RequestParam int month) {
+        List<StockDividendInfoDto> dividends = dividendService.getDividendCalendar(year, month);
+        return ResponseEntity.ok(new SuccessResponse<>(true, "배당 캘린더 조회 성공", dividends));
+    }
+
 }

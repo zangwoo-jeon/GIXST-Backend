@@ -1,6 +1,7 @@
 package com.AISA.AISA.kisStock.kisController;
 
 import com.AISA.AISA.global.response.SuccessResponse;
+import com.AISA.AISA.kisStock.dto.Dividend.DividendCalendarRequestDto;
 import com.AISA.AISA.kisStock.dto.Dividend.StockDividendInfoDto;
 import com.AISA.AISA.kisStock.dto.Dividend.DividendDetailDto;
 import com.AISA.AISA.kisStock.dto.DividendRank.DividendRankDto;
@@ -61,6 +62,14 @@ public class DividendController {
             @RequestParam int month) {
         List<StockDividendInfoDto> dividends = dividendService.getDividendCalendar(year, month);
         return ResponseEntity.ok(new SuccessResponse<>(true, "배당 캘린더 조회 성공", dividends));
+    }
+
+    @GetMapping("/calendar/list")
+    @Operation(summary = "내 포트폴리오 배당 캘린더 조회", description = "내 포트폴리오에 포함된 종목들의 특정 월 배당 정보를 조회합니다.")
+    public ResponseEntity<SuccessResponse<List<StockDividendInfoDto>>> getPortfolioDividendCalendar(
+            @ModelAttribute DividendCalendarRequestDto request) {
+        List<StockDividendInfoDto> dividends = dividendService.getPortfolioDividendCalendar(request);
+        return ResponseEntity.ok(new SuccessResponse<>(true, "내 포트폴리오 배당 캘린더 조회 성공", dividends));
     }
 
 }

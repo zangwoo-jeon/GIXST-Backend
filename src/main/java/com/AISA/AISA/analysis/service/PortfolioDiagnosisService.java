@@ -135,7 +135,8 @@ public class PortfolioDiagnosisService {
             sb.append("- ").append(sig).append("\n");
         }
 
-        sb.append("\n위 분석 결과를 바탕으로 고객에게 전달할 포트폴리오 진단 리포트를 작성해주세요. (경어체 사용)");
+        sb.append("\n위 분석 결과를 바탕으로 고객에게 전달할 포트폴리오 진단 리포트를 작성해주세요. (경어체 사용)\n");
+        sb.append("주의: '포트폴리오 진단 리포트', '발신', '수신', '날짜' 등의 헤더 정보는 제외하고, 바로 '### 1. 종합 평가'부터 시작하세요.");
         return sb.toString();
     }
 

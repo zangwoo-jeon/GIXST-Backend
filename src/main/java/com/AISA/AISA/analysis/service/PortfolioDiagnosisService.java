@@ -109,34 +109,33 @@ public class PortfolioDiagnosisService {
 
     private String createPrompt(List<DiagnosisResultDto.FactorAnalysisResult> results, List<String> rawSignals) {
         StringBuilder sb = new StringBuilder();
-        sb.append("당신은 전문적인 PB(Private Banker)입니다. 아래의 포트폴리오 진단 데이터를 바탕으로 고객에게 3가지 핵심 조언을 해주세요.\n");
-        sb.append("어조는 정중하고 전문적이어야 하며, 구체적인 수치보다는 인과관계와 방향성 위주로 설명해주세요.\n\n");
+        sb.append("당신은 '전문 투자 포트폴리오 분석가'입니다. 아래 데이터를 바탕으로 사용자의 포트폴리오를 냉철하고 객관적으로 분석해주세요.\n\n");
 
-        sb.append("### ⚠️ 분석 가이드라인 (반드시 준수)\n");
-        sb.append(
-                "1. **국채 금리 해석**: 데이터에 포함된 '국채'는 가격이 아니라 '금리(Yield)'입니다. 따라서 포트폴리오(가격)와 상관계수가 음수(-)라면, 이는 금리 하락 시 채권 가격이 상승하여 이익을 얻는 '긍정적 헷지' 상태임을 의미합니다. 절대 '무관하다'고 하지 말고 '금리 위험에 대한 민감도'로 설명하세요.\n");
-        sb.append(
-                "2. **환율 쿠션 효과 (Currency Cushion)**: 해외 자산(예: 나스닥)의 상관계수가 낮게(0.3 미만) 나온다면, 이는 '환율 효과' 때문일 가능성이 높습니다. (달러 강세 시 원화 기준 가치 방어). 단, 이 효과는 양날의 검입니다. 'Risk-off 시에는 방어가 되지만, Risk-on 및 달러 약세 시에는 수익률을 깎아먹을 수 있음'을 반드시 경고하세요.\n");
-        sb.append("3. **고급 지표(Advanced Metrics) 활용**: \n");
-        sb.append("   - **베타(Beta)**: 1.0을 크게 상회하면 '시장 민감도가 높아 레버리지 위험이 있음'을 경고하세요.\n");
-        sb.append("   - **하락장 상관계수(Downside Corr)**: 평소 상관계수가 낮아도 하락장 상관계수가 높다면 '위기 시 같이 무너지는 가짜 분산'임을 지적하세요.\n");
-        sb.append("   - **수익 기여(Contribution)**: 상관계수는 낮지만 수익률(CAGR)이 높은 자산은 '숨겨진 효자 종목'으로 칭찬해주세요.\n\n");
+        sb.append("[작성 가이드]\n");
+        sb.append("1. **어조**: 비유나 은유를 최대한 배제하고, 금융 전문가로서 담백하고 알기 쉽게 설명하세요.\n");
+        sb.append("2. **구조**: \n");
+        sb.append("   - **종합 평가**: 포트폴리오의 전반적인 성격을 요약 (안정형/공격형 등)\n");
+        sb.append("   - **장점**: 데이터에 기반한 긍정적인 요소 (예: 낮은 변동성, 하락장 방어력 등)\n");
+        sb.append("   - **단점 및 위험 요인**: 주의가 필요한 요소 (예: 특정 자산군 쏠림, 높은 시장 민감도 등)\n");
+        sb.append("   - **개선 제안**: 구체적인 보완 방법 제시\n");
+        sb.append("3. **분석 기준**: 제공된 '진단 데이터'의 수치(상관계수, 베타, 하락장 상관계수, 변동성 등)를 근거로 사용하세요.\n");
+        sb.append("4. **용어 설명**: 일반인이 이해하기 어려운 전문 용어는 쉽게 풀어서 설명하세요.\n\n");
 
-        sb.append("### --- 진단 데이터 ---\n");
+        sb.append("[진단 데이터]\n");
         for (DiagnosisResultDto.FactorAnalysisResult res : results) {
-            sb.append(String.format("- %s: 상관계수 %.2f | 베타: %.2f | 하락장상관: %.2f | 변동성 %.2f%% | MDD %.2f%%\n",
+            sb.append(String.format("- %s: 상관계수 %.2f | 베타: %.2f | 하락장상관: %.2f | 변동성 %.2f%%\n",
                     res.getFactorName(), res.getCorrelation(), res.getBeta(), res.getDownsideCorrelation(),
-                    res.getVolatility() * 100, res.getMdd() * 100));
+                    res.getVolatility() * 100));
             if (res.getScenarioAnalysis() != null && !"N/A".equals(res.getScenarioAnalysis())) {
                 sb.append(String.format("  > 특이사항: %s\n", res.getScenarioAnalysis()));
             }
         }
-        sb.append("\n### --- 감지된 신호 (Raw Signals) ---\n");
+        sb.append("\n[기술적 시그널]\n");
         for (String sig : rawSignals) {
             sb.append("- ").append(sig).append("\n");
         }
 
-        sb.append("\n위 데이터를 종합하여, 고객 자산의 건전성을 평가하고 구체적인 행동 가이드를 제시해주세요. (서론 생략하고 본론만 작성)");
+        sb.append("\n위 분석 결과를 바탕으로 고객에게 전달할 포트폴리오 진단 리포트를 작성해주세요. (경어체 사용)");
         return sb.toString();
     }
 

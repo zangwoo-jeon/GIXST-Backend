@@ -24,7 +24,7 @@ public class GeminiService {
     @Value("${google.ai.studio.api-key}")
     private String geminiApiKey;
 
-    private static final String GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
+    private static final String GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent";
 
     public String generateAdvice(String context) {
         WebClient webClient = WebClient.create();

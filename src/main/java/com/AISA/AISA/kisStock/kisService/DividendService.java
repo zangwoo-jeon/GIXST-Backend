@@ -116,17 +116,35 @@ public class DividendService {
                 }
 
                 List<StockDividendInfoDto> dtoList = apiResponse.getOutput1().stream()
-                                .filter(apiDto -> new BigDecimal(apiDto.getDividendAmount())
-                                                .compareTo(BigDecimal.ZERO) > 0)
-                                .map(apiDto -> StockDividendInfoDto.builder()
-                                                .stockCode(apiDto.getStockCode())
-                                                .stockName(apiDto.getStockName())
-                                                .recordDate(apiDto.getRecordDate())
-                                                .paymentDate(apiDto.getPaymentDate())
-                                                .dividendAmount(new BigDecimal(apiDto.getDividendAmount()))
-                                                .dividendRate(Double.parseDouble(apiDto.getDividendRate())) // API 값 (틀릴
-                                                                                                            // 수 있음)
-                                                .build())
+                                .filter(apiDto -> {
+                                        try {
+                                                return apiDto.getDividendAmount() != null
+                                                                && !apiDto.getDividendAmount().isEmpty()
+                                                                && new BigDecimal(apiDto.getDividendAmount())
+                                                                                .compareTo(BigDecimal.ZERO) > 0;
+                                        } catch (NumberFormatException e) {
+                                                return false;
+                                        }
+                                })
+                                .map(apiDto -> {
+                                        double rate = 0.0;
+                                        try {
+                                                if (apiDto.getDividendRate() != null
+                                                                && !apiDto.getDividendRate().isEmpty()) {
+                                                        rate = Double.parseDouble(apiDto.getDividendRate());
+                                                }
+                                        } catch (NumberFormatException e) {
+                                                // Ignore invalid rate
+                                        }
+                                        return StockDividendInfoDto.builder()
+                                                        .stockCode(apiDto.getStockCode())
+                                                        .stockName(apiDto.getStockName())
+                                                        .recordDate(apiDto.getRecordDate())
+                                                        .paymentDate(apiDto.getPaymentDate())
+                                                        .dividendAmount(new BigDecimal(apiDto.getDividendAmount()))
+                                                        .dividendRate(rate)
+                                                        .build();
+                                })
                                 .collect(Collectors.toList());
 
                 // 3. 주가 정보 조회를 위한 기간 설정 (조회된 배당 내역의 기간을 커버하도록)

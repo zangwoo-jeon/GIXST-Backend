@@ -67,101 +67,120 @@ public class IsaService {
                 .build();
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public IsaBacktestResponse calculateIsaBenefitsByBacktest(IsaBacktestRequest request) {
-        UUID portId = request.getPortId();
-        String startDateStr = request.getStartDate();
-        String endDateStr = request.getEndDate();
-        IsaAccountType accountType = request.getAccountType();
+        log.info("Starting ISA Backtest Calculation for PortId: {}", request.getPortId());
+        try {
+            UUID portId = request.getPortId();
+            String startDateStr = request.getStartDate();
+            String endDateStr = request.getEndDate();
+            IsaAccountType accountType = request.getAccountType();
 
-        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
-        LocalDate startDate = LocalDate.parse(startDateStr, formatter);
-        LocalDate endDate = LocalDate.parse(endDateStr, formatter);
+            DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
+            LocalDate startDate = LocalDate.parse(startDateStr, formatter);
+            LocalDate endDate = LocalDate.parse(endDateStr, formatter);
 
-        List<PortStock> portStocks = portStockRepository.findByPortfolio_PortId(portId);
-        if (portStocks.isEmpty()) {
-            throw new BusinessException(PortfolioErrorCode.PORTFOLIO_NOT_FOUND);
-        }
+            log.info("Parsed Dates - Start: {}, End: {}", startDate, endDate);
 
-        BigDecimal totalDividendIncome = BigDecimal.ZERO;
-        BigDecimal totalCapitalGains = BigDecimal.ZERO; // PnL (Price Return)
-        BigDecimal principal = BigDecimal.ZERO; // Total Initial Investment
-
-        // For Normal Account Tax Calculation
-        BigDecimal normalDividendTax = BigDecimal.ZERO;
-        BigDecimal normalCapitalGainsTax = BigDecimal.ZERO;
-
-        for (PortStock portStock : portStocks) {
-            Stock stock = portStock.getStock();
-            BigDecimal quantity = new BigDecimal(portStock.getQuantity());
-
-            // 1. Calculate Price Return (PnL)
-            BigDecimal startPrice = getPriceAtDate(stock, startDate);
-            BigDecimal endPrice = getPriceAtDate(stock, endDate);
-            BigDecimal pnlPerShare = endPrice.subtract(startPrice);
-            BigDecimal totalPnl = pnlPerShare.multiply(quantity);
-
-            totalCapitalGains = totalCapitalGains.add(totalPnl);
-            principal = principal.add(startPrice.multiply(quantity));
-
-            // Normal Account Tax on PnL
-            if (stock.getStockType() == StockType.FOREIGN_ETF && totalPnl.compareTo(BigDecimal.ZERO) > 0) {
-                // Domestic Listed Foreign ETF: 15.4% tax on gains
-                normalCapitalGainsTax = normalCapitalGainsTax.add(totalPnl.multiply(NORMAL_TAX_RATE));
+            List<PortStock> portStocks = portStockRepository.findByPortfolio_PortId(portId);
+            if (portStocks.isEmpty()) {
+                throw new BusinessException(PortfolioErrorCode.PORTFOLIO_NOT_FOUND);
             }
-            // Domestic Stock: 0% tax on gains
 
-            // 2. Calculate Dividend Income
-            List<StockDividendInfoDto> dividends = dividendService.getDividendInfo(stock.getStockCode(), startDateStr,
-                    endDateStr);
-            BigDecimal dividendPerShare = dividends.stream()
-                    .map(StockDividendInfoDto::getDividendAmount)
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
-            BigDecimal totalDividend = dividendPerShare.multiply(quantity);
+            BigDecimal totalDividendIncome = BigDecimal.ZERO;
+            BigDecimal totalCapitalGains = BigDecimal.ZERO; // PnL (Price Return)
+            BigDecimal principal = BigDecimal.ZERO; // Total Initial Investment
 
-            totalDividendIncome = totalDividendIncome.add(totalDividend);
+            // For Normal Account Tax Calculation
+            BigDecimal normalDividendTax = BigDecimal.ZERO;
+            BigDecimal normalCapitalGainsTax = BigDecimal.ZERO;
 
-            // Normal Account Tax on Dividends (15.4%)
-            normalDividendTax = normalDividendTax.add(totalDividend.multiply(NORMAL_TAX_RATE));
-        }
+            for (PortStock portStock : portStocks) {
+                Stock stock = portStock.getStock();
+                BigDecimal quantity = new BigDecimal(portStock.getQuantity());
 
-        // 3. Calculate Taxes
-        // Normal Account Total Tax
-        BigDecimal normalTotalTax = normalDividendTax.add(normalCapitalGainsTax).setScale(0, RoundingMode.DOWN);
+                // 1. Calculate Price Return (PnL)
+                BigDecimal startPrice = getPriceAtDate(stock, startDate);
+                BigDecimal endPrice = getPriceAtDate(stock, endDate);
 
-        // ISA Account Tax (Loss Offsetting)
-        // Net Income = Dividend Income + Capital Gains (can be negative)
-        BigDecimal isaNetIncome = totalDividendIncome.add(totalCapitalGains);
+                BigDecimal pnlPerShare = endPrice.subtract(startPrice);
+                BigDecimal totalPnl = pnlPerShare.multiply(quantity);
 
-        // If Net Income is negative, Tax is 0
-        BigDecimal isaTax = BigDecimal.ZERO;
-        if (isaNetIncome.compareTo(BigDecimal.ZERO) > 0) {
-            BigDecimal taxFreeLimit = accountType.getTaxFreeLimit();
-            if (isaNetIncome.compareTo(taxFreeLimit) > 0) {
-                BigDecimal taxableIncome = isaNetIncome.subtract(taxFreeLimit);
-                isaTax = taxableIncome.multiply(ISA_REDUCED_TAX_RATE).setScale(0, RoundingMode.DOWN);
+                totalCapitalGains = totalCapitalGains.add(totalPnl);
+                principal = principal.add(startPrice.multiply(quantity));
+
+                // Normal Account Tax on PnL
+                if (stock.getStockType() == StockType.FOREIGN_ETF && totalPnl.compareTo(BigDecimal.ZERO) > 0) {
+                    // Domestic Listed Foreign ETF: 15.4% tax on gains
+                    normalCapitalGainsTax = normalCapitalGainsTax.add(totalPnl.multiply(NORMAL_TAX_RATE));
+                }
+                // Domestic Stock: 0% tax on gains
+
+                // 2. Calculate Dividend Income
+                BigDecimal totalDividend = BigDecimal.ZERO;
+                try {
+                    List<StockDividendInfoDto> dividends = dividendService.getDividendInfo(stock.getStockCode(),
+                            startDateStr, endDateStr);
+                    BigDecimal dividendPerShare = dividends.stream()
+                            .map(StockDividendInfoDto::getDividendAmount)
+                            .reduce(BigDecimal.ZERO, BigDecimal::add);
+                    totalDividend = dividendPerShare.multiply(quantity);
+                } catch (Exception e) {
+                    log.warn("Failed to fetch dividend info for {}: {}", stock.getStockCode(), e.getMessage());
+                    // Proceed with 0 dividend
+                }
+
+                totalDividendIncome = totalDividendIncome.add(totalDividend);
+
+                // Normal Account Tax on Dividends (15.4%)
+                normalDividendTax = normalDividendTax.add(totalDividend.multiply(NORMAL_TAX_RATE));
             }
+
+            // 3. Calculate Taxes
+            // Normal Account Total Tax
+            BigDecimal normalTotalTax = normalDividendTax.add(normalCapitalGainsTax).setScale(0, RoundingMode.DOWN);
+
+            // ISA Account Tax (Loss Offsetting)
+            // Net Income = Dividend Income + Capital Gains (can be negative)
+            BigDecimal isaNetIncome = totalDividendIncome.add(totalCapitalGains);
+
+            // If Net Income is negative, Tax is 0
+            BigDecimal isaTax = BigDecimal.ZERO;
+            if (isaNetIncome.compareTo(BigDecimal.ZERO) > 0) {
+                BigDecimal taxFreeLimit = accountType.getTaxFreeLimit();
+                if (isaNetIncome.compareTo(taxFreeLimit) > 0) {
+                    BigDecimal taxableIncome = isaNetIncome.subtract(taxFreeLimit);
+                    isaTax = taxableIncome.multiply(ISA_REDUCED_TAX_RATE).setScale(0, RoundingMode.DOWN);
+                }
+            }
+
+            BigDecimal taxSavings = normalTotalTax.subtract(isaTax);
+            BigDecimal finalReturn = totalCapitalGains.add(totalDividendIncome).subtract(isaTax);
+
+            // ROI Calculation
+            BigDecimal roi = BigDecimal.ZERO;
+            if (principal.compareTo(BigDecimal.ZERO) > 0) {
+                roi = finalReturn.divide(principal, 4, RoundingMode.HALF_UP).multiply(new BigDecimal("100"));
+            }
+
+            log.info("Calculation Completed. Savings: {}", taxSavings);
+
+            return IsaBacktestResponse.builder()
+                    .totalDividendIncome(totalDividendIncome)
+                    .totalCapitalGains(totalCapitalGains)
+                    .normalTotalTax(normalTotalTax)
+                    .isaTotalTax(isaTax)
+                    .taxSavings(taxSavings)
+                    .finalReturn(finalReturn)
+                    .principal(principal)
+                    .roi(roi)
+                    .build();
+        } catch (BusinessException be) {
+            throw be;
+        } catch (Exception e) {
+            log.error("Error in calculateIsaBenefitsByBacktest: ", e);
+            throw new RuntimeException(e);
         }
-
-        BigDecimal taxSavings = normalTotalTax.subtract(isaTax);
-        BigDecimal finalReturn = totalCapitalGains.add(totalDividendIncome).subtract(isaTax);
-
-        // ROI Calculation
-        BigDecimal roi = BigDecimal.ZERO;
-        if (principal.compareTo(BigDecimal.ZERO) > 0) {
-            roi = finalReturn.divide(principal, 4, RoundingMode.HALF_UP).multiply(new BigDecimal("100"));
-        }
-
-        return IsaBacktestResponse.builder()
-                .totalDividendIncome(totalDividendIncome)
-                .totalCapitalGains(totalCapitalGains)
-                .normalTotalTax(normalTotalTax)
-                .isaTotalTax(isaTax)
-                .taxSavings(taxSavings)
-                .finalReturn(finalReturn)
-                .principal(principal)
-                .roi(roi)
-                .build();
     }
 
     private BigDecimal getPriceAtDate(Stock stock, LocalDate date) {

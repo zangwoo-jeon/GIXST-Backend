@@ -3,22 +3,29 @@ package com.AISA.AISA.kisStock.kisService;
 import com.AISA.AISA.global.exception.BusinessException;
 import com.AISA.AISA.kisStock.Entity.stock.Stock;
 import com.AISA.AISA.kisStock.Entity.stock.StockDividend;
+import com.AISA.AISA.kisStock.Entity.stock.StockFinancialRatio;
 import com.AISA.AISA.kisStock.config.KisApiProperties;
+import com.AISA.AISA.kisStock.dto.Dividend.DividendCalendarRequestDto;
 import com.AISA.AISA.kisStock.dto.Dividend.KisDividendApiResponse;
 import com.AISA.AISA.kisStock.dto.Dividend.StockDividendInfoDto;
 import com.AISA.AISA.kisStock.dto.Dividend.DividendDetailDto;
 import com.AISA.AISA.kisStock.exception.KisApiErrorCode;
 import com.AISA.AISA.kisStock.kisService.Auth.KisAuthService;
 import com.AISA.AISA.kisStock.kisService.KisInformationService;
+import com.AISA.AISA.kisStock.repository.StockDividendRepository;
 import com.AISA.AISA.kisStock.repository.StockRepository;
+import com.AISA.AISA.portfolio.PortfolioStock.PortStock;
+import com.AISA.AISA.portfolio.PortfolioStock.PortStockRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map.Entry;
 import java.util.stream.Collectors;
 import com.AISA.AISA.kisStock.Entity.stock.StockDividendRank;
 import com.AISA.AISA.kisStock.repository.StockDividendRankRepository;
@@ -46,7 +53,8 @@ public class DividendService {
         private final StockDividendRankRepository stockDividendRankRepository;
         private final KisStockService kisStockService;
         private final KisInformationService kisInformationService;
-        private final com.AISA.AISA.kisStock.repository.StockDividendRepository stockDividendRepository;
+        private final StockDividendRepository stockDividendRepository;
+        private final PortStockRepository portStockRepository;
 
         public List<StockDividendInfoDto> getDividendInfo(
                         String stockCode,
@@ -183,13 +191,13 @@ public class DividendService {
                                         String recordDate = dto.getRecordDate();
 
                                         // 해당 날짜의 종가 찾기 OR 가장 가까운 과거 날짜 찾기
-                                        java.util.Map.Entry<String, BigDecimal> entry = priceMap.floorEntry(recordDate);
+                                        Entry<String, BigDecimal> entry = priceMap.floorEntry(recordDate);
                                         BigDecimal closePrice = (entry != null) ? entry.getValue() : BigDecimal.ZERO;
 
                                         if (closePrice.compareTo(BigDecimal.ZERO) > 0) {
                                                 // 배당률 = (배당금 / 주가) * 100
                                                 double calculatedRate = dto.getDividendAmount()
-                                                                .divide(closePrice, 4, java.math.RoundingMode.HALF_UP)
+                                                                .divide(closePrice, 4, RoundingMode.HALF_UP)
                                                                 .multiply(new BigDecimal(100))
                                                                 .doubleValue();
 
@@ -322,7 +330,7 @@ public class DividendService {
 
                                 // 4. Calculate Yield
                                 // Yield = (Dividend / Price) * 100
-                                double yield = totalDividend.divide(currentPrice, 4, java.math.RoundingMode.HALF_UP)
+                                double yield = totalDividend.divide(currentPrice, 4, RoundingMode.HALF_UP)
                                                 .multiply(new BigDecimal(100)).doubleValue();
 
                                 // Add to list (without saving currentPrice)
@@ -417,9 +425,9 @@ public class DividendService {
                 // 6. Yield 계산
                 String yield = "0";
                 if (currentPrice.compareTo(BigDecimal.ZERO) > 0) {
-                        yield = totalDividend.divide(currentPrice, 4, java.math.RoundingMode.HALF_UP)
+                        yield = totalDividend.divide(currentPrice, 4, RoundingMode.HALF_UP)
                                         .multiply(new BigDecimal(100))
-                                        .setScale(2, java.math.RoundingMode.HALF_UP)
+                                        .setScale(2, RoundingMode.HALF_UP)
                                         .toString();
                 }
 
@@ -427,7 +435,7 @@ public class DividendService {
                 String payoutRatio = "0";
                 try {
                         // "0": 연간
-                        List<com.AISA.AISA.kisStock.Entity.stock.StockFinancialRatio> ratios = kisInformationService
+                        List<StockFinancialRatio> ratios = kisInformationService
                                         .fetchAndSaveFinancialRatio(stockCode, "0");
 
                         // 최신 연간 EPS 가져오기
@@ -440,9 +448,9 @@ public class DividendService {
                                 BigDecimal eps = ratios.get(0).getEps();
 
                                 if (eps != null && eps.compareTo(BigDecimal.ZERO) > 0) {
-                                        payoutRatio = totalDividend.divide(eps, 4, java.math.RoundingMode.HALF_UP)
+                                        payoutRatio = totalDividend.divide(eps, 4, RoundingMode.HALF_UP)
                                                         .multiply(new BigDecimal(100))
-                                                        .setScale(2, java.math.RoundingMode.HALF_UP)
+                                                        .setScale(2, RoundingMode.HALF_UP)
                                                         .toString();
                                 }
                         }
@@ -473,6 +481,46 @@ public class DividendService {
                                 .findByRecordDateBetweenOrderByRecordDateAsc(startDate, endDate);
 
                 // 3. DTO 변환
+                return dividends.stream()
+                                .map(entity -> StockDividendInfoDto.builder()
+                                                .stockCode(entity.getStock().getStockCode())
+                                                .stockName(entity.getStock().getStockName())
+                                                .recordDate(entity.getRecordDate())
+                                                .paymentDate(entity.getPaymentDate())
+                                                .dividendAmount(entity.getDividendAmount())
+                                                .dividendRate(entity.getDividendRate())
+                                                .build())
+                                .distinct()
+                                .collect(Collectors.toList());
+        }
+
+        public List<StockDividendInfoDto> getPortfolioDividendCalendar(
+                        DividendCalendarRequestDto request) {
+                // 1. 포트폴리오 내 종목 조회
+                List<PortStock> portStocks = portStockRepository
+                                .findByPortfolio_PortId(request.getPortId());
+
+                if (portStocks.isEmpty()) {
+                        return Collections.emptyList();
+                }
+
+                List<String> stockCodes = portStocks.stream()
+                                .map(ps -> ps.getStock().getStockCode())
+                                .collect(Collectors.toList());
+
+                // 2. 해당 월의 시작일과 종료일 계산
+                LocalDate firstDay = LocalDate.of(request.getYear(), request.getMonth(), 1);
+                LocalDate lastDay = firstDay.withDayOfMonth(firstDay.lengthOfMonth());
+
+                String startDate = firstDay.format(DateTimeFormatter.ofPattern("yyyyMMdd"));
+                String endDate = lastDay.format(DateTimeFormatter.ofPattern("yyyyMMdd"));
+
+                // 3. DB에서 해당 기간 및 종목들에 해당하는 배당 정보 조회
+                List<StockDividend> dividends = stockDividendRepository
+                                .findByStock_StockCodeInAndRecordDateBetweenOrderByRecordDateAsc(stockCodes, startDate,
+                                                endDate);
+
+                // 4. DTO 변환 & distinct
                 return dividends.stream()
                                 .map(entity -> StockDividendInfoDto.builder()
                                                 .stockCode(entity.getStock().getStockCode())

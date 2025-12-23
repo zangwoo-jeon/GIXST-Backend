@@ -14,4 +14,7 @@ public interface StockDividendRepository extends JpaRepository<StockDividend, Lo
     boolean existsByStock_StockCodeAndRecordDate(String stockCode, String recordDate);
 
     List<StockDividend> findByRecordDateBetweenOrderByRecordDateAsc(String startDate, String endDate);
+
+    List<StockDividend> findByStock_StockCodeInAndRecordDateBetweenOrderByRecordDateAsc(List<String> stockCodes,
+            String startDate, String endDate);
 }

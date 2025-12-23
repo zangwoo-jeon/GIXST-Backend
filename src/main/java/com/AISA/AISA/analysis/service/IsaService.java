@@ -91,30 +91,20 @@ public class IsaService {
             BigDecimal totalCapitalGains = BigDecimal.ZERO; // PnL (Price Return)
             BigDecimal principal = BigDecimal.ZERO; // Total Initial Investment
 
-            // For Normal Account Tax Calculation
-            BigDecimal normalDividendTax = BigDecimal.ZERO;
-            BigDecimal normalCapitalGainsTax = BigDecimal.ZERO;
-
             for (PortStock portStock : portStocks) {
                 Stock stock = portStock.getStock();
                 BigDecimal quantity = new BigDecimal(portStock.getQuantity());
 
-                // 1. Calculate Price Return (PnL)
+                // 1. Calculate Price Return (PnL) - For Total Return Calculation Only (Not for
+                // Tax)
                 BigDecimal startPrice = getPriceAtDate(stock, startDate);
                 BigDecimal endPrice = getPriceAtDate(stock, endDate);
 
                 BigDecimal pnlPerShare = endPrice.subtract(startPrice);
                 BigDecimal totalPnl = pnlPerShare.multiply(quantity);
 
-                totalCapitalGains = totalCapitalGains.add(totalPnl);
                 principal = principal.add(startPrice.multiply(quantity));
-
-                // Normal Account Tax on PnL
-                if (stock.getStockType() == StockType.FOREIGN_ETF && totalPnl.compareTo(BigDecimal.ZERO) > 0) {
-                    // Domestic Listed Foreign ETF: 15.4% tax on gains
-                    normalCapitalGainsTax = normalCapitalGainsTax.add(totalPnl.multiply(NORMAL_TAX_RATE));
-                }
-                // Domestic Stock: 0% tax on gains
+                totalCapitalGains = totalCapitalGains.add(totalPnl);
 
                 // 2. Calculate Dividend Income
                 BigDecimal totalDividend = BigDecimal.ZERO;
@@ -127,37 +117,35 @@ public class IsaService {
                     totalDividend = dividendPerShare.multiply(quantity);
                 } catch (Exception e) {
                     log.warn("Failed to fetch dividend info for {}: {}", stock.getStockCode(), e.getMessage());
-                    // Proceed with 0 dividend
                 }
 
                 totalDividendIncome = totalDividendIncome.add(totalDividend);
-
-                // Normal Account Tax on Dividends (15.4%)
-                normalDividendTax = normalDividendTax.add(totalDividend.multiply(NORMAL_TAX_RATE));
             }
 
-            // 3. Calculate Taxes
-            // Normal Account Total Tax
-            BigDecimal normalTotalTax = normalDividendTax.add(normalCapitalGainsTax).setScale(0, RoundingMode.DOWN);
+            // 3. Calculate Taxes (Simplified Rule: Dividend Income Only)
 
-            // ISA Account Tax (Loss Offsetting)
-            // Net Income = Dividend Income + Capital Gains (can be negative)
-            BigDecimal isaNetIncome = totalDividendIncome.add(totalCapitalGains);
+            // --- Normal Account ---
+            // Dividend Tax: 15.4% on all dividends
+            BigDecimal normalTotalTax = totalDividendIncome.multiply(NORMAL_TAX_RATE).setScale(0, RoundingMode.DOWN);
 
-            // If Net Income is negative, Tax is 0
+            // --- ISA Account ---
+            // Tax Free Limit -> 9.9% Tax on excess Dividend Income
+            BigDecimal isaTaxableIncome = totalDividendIncome;
             BigDecimal isaTax = BigDecimal.ZERO;
-            if (isaNetIncome.compareTo(BigDecimal.ZERO) > 0) {
-                BigDecimal taxFreeLimit = accountType.getTaxFreeLimit();
-                if (isaNetIncome.compareTo(taxFreeLimit) > 0) {
-                    BigDecimal taxableIncome = isaNetIncome.subtract(taxFreeLimit);
-                    isaTax = taxableIncome.multiply(ISA_REDUCED_TAX_RATE).setScale(0, RoundingMode.DOWN);
-                }
+            BigDecimal taxFreeLimit = accountType.getTaxFreeLimit();
+
+            if (isaTaxableIncome.compareTo(taxFreeLimit) > 0) {
+                BigDecimal excessIncome = isaTaxableIncome.subtract(taxFreeLimit);
+                isaTax = excessIncome.multiply(ISA_REDUCED_TAX_RATE).setScale(0, RoundingMode.DOWN);
+            } else {
+                isaTax = BigDecimal.ZERO;
             }
 
             BigDecimal taxSavings = normalTotalTax.subtract(isaTax);
+
+            // Final Return = Capital Gains + Dividend Income - ISA Tax
             BigDecimal finalReturn = totalCapitalGains.add(totalDividendIncome).subtract(isaTax);
 
-            // ROI Calculation
             BigDecimal roi = BigDecimal.ZERO;
             if (principal.compareTo(BigDecimal.ZERO) > 0) {
                 roi = finalReturn.divide(principal, 4, RoundingMode.HALF_UP).multiply(new BigDecimal("100"));

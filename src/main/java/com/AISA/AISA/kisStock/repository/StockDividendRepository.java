@@ -2,6 +2,7 @@ package com.AISA.AISA.kisStock.repository;
 
 import com.AISA.AISA.kisStock.Entity.stock.StockDividend;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -17,4 +18,16 @@ public interface StockDividendRepository extends JpaRepository<StockDividend, Lo
 
     List<StockDividend> findByStock_StockCodeInAndRecordDateBetweenOrderByRecordDateAsc(List<String> stockCodes,
             String startDate, String endDate);
+
+    @org.springframework.data.jpa.repository.Query("SELECT d FROM StockDividend d WHERE d.stock.stockCode IN :stockCodes AND "
+            +
+            "((d.recordDate BETWEEN :recordStart AND :recordEnd) OR " +
+            "(d.paymentDate BETWEEN :paymentStart AND :paymentEnd)) " +
+            "ORDER BY d.recordDate ASC")
+    List<StockDividend> findDividendsByStockCodesAndDateRange(
+            @Param("stockCodes") List<String> stockCodes,
+            @Param("recordStart") String recordStart,
+            @Param("recordEnd") String recordEnd,
+            @Param("paymentStart") String paymentStart,
+            @Param("paymentEnd") String paymentEnd);
 }

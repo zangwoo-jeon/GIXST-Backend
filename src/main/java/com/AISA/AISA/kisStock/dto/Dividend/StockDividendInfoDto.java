@@ -15,4 +15,6 @@ public class StockDividendInfoDto {
     private BigDecimal dividendAmount;
     private Double dividendRate;
     private String paymentDate;
+    private BigDecimal totalExpectedDividend; // 포트폴리오 조회 시: 보유 수량 * 배당금
+    private Integer quantity; // 포트폴리오 보유 수량
 }

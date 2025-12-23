@@ -6,6 +6,7 @@ import com.AISA.AISA.kisStock.Entity.stock.StockDividend;
 import com.AISA.AISA.kisStock.Entity.stock.StockFinancialRatio;
 import com.AISA.AISA.kisStock.config.KisApiProperties;
 import com.AISA.AISA.kisStock.dto.Dividend.DividendCalendarRequestDto;
+import com.AISA.AISA.kisStock.dto.Dividend.DividendCalendarResponseDto;
 import com.AISA.AISA.kisStock.dto.Dividend.KisDividendApiResponse;
 import com.AISA.AISA.kisStock.dto.Dividend.StockDividendInfoDto;
 import com.AISA.AISA.kisStock.dto.Dividend.DividendDetailDto;
@@ -25,7 +26,9 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Map.Entry;
+import java.util.TreeMap;
 import java.util.stream.Collectors;
 import com.AISA.AISA.kisStock.Entity.stock.StockDividendRank;
 import com.AISA.AISA.kisStock.repository.StockDividendRankRepository;
@@ -177,7 +180,7 @@ public class DividendService {
                                                 queryStart, queryEnd, "D");
 
                                 // 날짜별 종가 매핑 (빠른 검색을 위해 Map 사용)
-                                java.util.TreeMap<String, BigDecimal> priceMap = new java.util.TreeMap<>();
+                                TreeMap<String, BigDecimal> priceMap = new java.util.TreeMap<>();
                                 if (chartResponse != null && chartResponse.getPriceList() != null) {
                                         for (StockChartPriceDto p : chartResponse.getPriceList()) {
                                                 priceMap.put(p.getDate(), new BigDecimal(p.getClosePrice()));
@@ -494,19 +497,28 @@ public class DividendService {
                                 .collect(Collectors.toList());
         }
 
-        public List<StockDividendInfoDto> getPortfolioDividendCalendar(
+        public DividendCalendarResponseDto getPortfolioDividendCalendar(
                         DividendCalendarRequestDto request) {
-                // 1. 포트폴리오 내 종목 조회
+                // 1. 포트폴리오 내 종목 조회 및 수량매핑
                 List<PortStock> portStocks = portStockRepository
                                 .findByPortfolio_PortId(request.getPortId());
 
                 if (portStocks.isEmpty()) {
-                        return Collections.emptyList();
+                        return DividendCalendarResponseDto.builder()
+                                        .dividends(Collections.emptyList())
+                                        .totalMonthlyDividend(BigDecimal.ZERO)
+                                        .build();
                 }
 
-                List<String> stockCodes = portStocks.stream()
-                                .map(ps -> ps.getStock().getStockCode())
-                                .collect(Collectors.toList());
+                // 종목코드 -> 수량 Map 생성
+                Map<String, Integer> stockQuantityMap = portStocks.stream()
+                                .collect(Collectors.toMap(
+                                                ps -> ps.getStock().getStockCode(),
+                                                PortStock::getQuantity,
+                                                (existing, replacement) -> existing // 중복 시 기존 값 유지 (or sum?)
+                                ));
+
+                List<String> stockCodes = new ArrayList<>(stockQuantityMap.keySet());
 
                 // 2. 해당 월의 시작일과 종료일 계산
                 LocalDate firstDay = LocalDate.of(request.getYear(), request.getMonth(), 1);
@@ -521,16 +533,36 @@ public class DividendService {
                                                 endDate);
 
                 // 4. DTO 변환 & distinct
-                return dividends.stream()
-                                .map(entity -> StockDividendInfoDto.builder()
-                                                .stockCode(entity.getStock().getStockCode())
-                                                .stockName(entity.getStock().getStockName())
-                                                .recordDate(entity.getRecordDate())
-                                                .paymentDate(entity.getPaymentDate())
-                                                .dividendAmount(entity.getDividendAmount())
-                                                .dividendRate(entity.getDividendRate())
-                                                .build())
+                // 4. DTO 변환 & distinct
+                List<StockDividendInfoDto> dividendList = dividends.stream()
+                                .map(entity -> {
+                                        Integer quantity = stockQuantityMap
+                                                        .getOrDefault(entity.getStock().getStockCode(), 0);
+                                        BigDecimal totalAmount = entity.getDividendAmount()
+                                                        .multiply(new BigDecimal(quantity));
+
+                                        return StockDividendInfoDto.builder()
+                                                        .stockCode(entity.getStock().getStockCode())
+                                                        .stockName(entity.getStock().getStockName())
+                                                        .recordDate(entity.getRecordDate())
+                                                        .paymentDate(entity.getPaymentDate())
+                                                        .dividendAmount(entity.getDividendAmount())
+                                                        .dividendRate(entity.getDividendRate())
+                                                        .totalExpectedDividend(totalAmount)
+                                                        .quantity(quantity)
+                                                        .build();
+                                })
                                 .distinct()
                                 .collect(Collectors.toList());
+
+                // 5. 월간 총 배당금 합산
+                BigDecimal totalMonthlyDividend = dividendList.stream()
+                                .map(StockDividendInfoDto::getTotalExpectedDividend)
+                                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+                return DividendCalendarResponseDto.builder()
+                                .dividends(dividendList)
+                                .totalMonthlyDividend(totalMonthlyDividend)
+                                .build();
         }
 }

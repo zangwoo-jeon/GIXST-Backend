@@ -2,6 +2,7 @@ package com.AISA.AISA.kisStock.kisService;
 
 import com.AISA.AISA.global.exception.BusinessException;
 import com.AISA.AISA.kisStock.Entity.stock.Stock;
+import com.AISA.AISA.kisStock.Entity.stock.StockDividend;
 import com.AISA.AISA.kisStock.config.KisApiProperties;
 import com.AISA.AISA.kisStock.dto.Dividend.KisDividendApiResponse;
 import com.AISA.AISA.kisStock.dto.Dividend.StockDividendInfoDto;
@@ -53,7 +54,7 @@ public class DividendService {
                         String endDate) {
 
                 // 1. DB에서 먼저 조회
-                List<com.AISA.AISA.kisStock.Entity.stock.StockDividend> savedDividends = stockDividendRepository
+                List<StockDividend> savedDividends = stockDividendRepository
                                 .findByStock_StockCodeAndRecordDateBetweenOrderByRecordDateDesc(stockCode, startDate,
                                                 endDate);
 
@@ -176,7 +177,7 @@ public class DividendService {
                                 }
 
                                 // 4. 배당률 재계산 및 DB 저장
-                                List<com.AISA.AISA.kisStock.Entity.stock.StockDividend> entitiesToSave = new ArrayList<>();
+                                List<StockDividend> entitiesToSave = new ArrayList<>();
 
                                 for (StockDividendInfoDto dto : dtoList) {
                                         String recordDate = dto.getRecordDate();
@@ -200,7 +201,7 @@ public class DividendService {
                                                 if (!stockDividendRepository.existsByStock_StockCodeAndRecordDate(
                                                                 stockCode, recordDate)) {
                                                         entitiesToSave.add(
-                                                                        com.AISA.AISA.kisStock.Entity.stock.StockDividend
+                                                                        StockDividend
                                                                                         .builder()
                                                                                         .stock(stock)
                                                                                         .recordDate(recordDate)
@@ -457,5 +458,31 @@ public class DividendService {
                                 .dividendFrequency(frequency)
                                 .recentExDividendDate(recentExDate)
                                 .build();
+        }
+
+        public List<StockDividendInfoDto> getDividendCalendar(int year, int month) {
+                // 1. 해당 월의 시작일과 종료일 계산
+                LocalDate firstDay = LocalDate.of(year, month, 1);
+                LocalDate lastDay = firstDay.withDayOfMonth(firstDay.lengthOfMonth());
+
+                String startDate = firstDay.format(DateTimeFormatter.ofPattern("yyyyMMdd"));
+                String endDate = lastDay.format(DateTimeFormatter.ofPattern("yyyyMMdd"));
+
+                // 2. DB에서 해당 기간의 배당 정보 전체 조회
+                List<StockDividend> dividends = stockDividendRepository
+                                .findByRecordDateBetweenOrderByRecordDateAsc(startDate, endDate);
+
+                // 3. DTO 변환
+                return dividends.stream()
+                                .map(entity -> StockDividendInfoDto.builder()
+                                                .stockCode(entity.getStock().getStockCode())
+                                                .stockName(entity.getStock().getStockName())
+                                                .recordDate(entity.getRecordDate())
+                                                .paymentDate(entity.getPaymentDate())
+                                                .dividendAmount(entity.getDividendAmount())
+                                                .dividendRate(entity.getDividendRate())
+                                                .build())
+                                .distinct()
+                                .collect(Collectors.toList());
         }
 }

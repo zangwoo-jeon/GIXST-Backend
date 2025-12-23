@@ -524,13 +524,16 @@ public class DividendService {
                 LocalDate firstDay = LocalDate.of(request.getYear(), request.getMonth(), 1);
                 LocalDate lastDay = firstDay.withDayOfMonth(firstDay.lengthOfMonth());
 
-                String startDate = firstDay.format(DateTimeFormatter.ofPattern("yyyyMMdd"));
-                String endDate = lastDay.format(DateTimeFormatter.ofPattern("yyyyMMdd"));
+                String recordStart = firstDay.format(DateTimeFormatter.ofPattern("yyyyMMdd"));
+                String recordEnd = lastDay.format(DateTimeFormatter.ofPattern("yyyyMMdd"));
 
-                // 3. DB에서 해당 기간 및 종목들에 해당하는 배당 정보 조회
+                String paymentStart = firstDay.format(DateTimeFormatter.ofPattern("yyyy/MM/dd"));
+                String paymentEnd = lastDay.format(DateTimeFormatter.ofPattern("yyyy/MM/dd"));
+
+                // 3. DB에서 해당 기간 및 종목들에 해당하는 배당 정보 조회 (배당락일 OR 지급일 기준)
                 List<StockDividend> dividends = stockDividendRepository
-                                .findByStock_StockCodeInAndRecordDateBetweenOrderByRecordDateAsc(stockCodes, startDate,
-                                                endDate);
+                                .findDividendsByStockCodesAndDateRange(stockCodes, recordStart, recordEnd, paymentStart,
+                                                paymentEnd);
 
                 // 4. DTO 변환 & distinct
                 // 4. DTO 변환 & distinct
@@ -555,8 +558,11 @@ public class DividendService {
                                 .distinct()
                                 .collect(Collectors.toList());
 
-                // 5. 월간 총 배당금 합산
+                // 5. 월간 총 배당금 합산 (배당 지급일 기준)
                 BigDecimal totalMonthlyDividend = dividendList.stream()
+                                .filter(dto -> dto.getPaymentDate() != null &&
+                                                dto.getPaymentDate().compareTo(paymentStart) >= 0 &&
+                                                dto.getPaymentDate().compareTo(paymentEnd) <= 0)
                                 .map(StockDividendInfoDto::getTotalExpectedDividend)
                                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 

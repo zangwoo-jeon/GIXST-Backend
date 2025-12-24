@@ -4,6 +4,7 @@ import com.AISA.AISA.global.exception.BusinessException;
 import com.AISA.AISA.kisStock.Entity.stock.Stock;
 import com.AISA.AISA.kisStock.config.KisApiProperties;
 import com.AISA.AISA.kisStock.dto.FinancialRank.BalanceSheetDto;
+import com.AISA.AISA.kisStock.dto.FinancialRank.FinancialStatementDto;
 import com.AISA.AISA.kisStock.dto.FinancialRank.FinancialRankDto;
 import com.AISA.AISA.kisStock.dto.FinancialRank.InvestmentMetricDto;
 import com.AISA.AISA.kisStock.dto.FinancialRank.KisBalanceSheetApiResponse;
@@ -21,6 +22,7 @@ import com.AISA.AISA.kisStock.repository.StockFinancialRatioRepository;
 import com.AISA.AISA.kisStock.dto.FinancialRank.KisFinancialRatioApiResponse;
 import com.AISA.AISA.kisStock.dto.FinancialRank.FinancialRatioRankDto;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.Map;
 import com.AISA.AISA.kisStock.repository.StockRepository;
 import lombok.RequiredArgsConstructor;
@@ -281,13 +283,13 @@ public class KisInformationService {
                 // Set/Update Valuations (PER, PBR, PSR)
                 if (currentPrice.compareTo(BigDecimal.ZERO) > 0) {
                     if (eps.compareTo(BigDecimal.ZERO) > 0) {
-                        builder.per(currentPrice.divide(eps, 2, java.math.RoundingMode.HALF_UP));
+                        builder.per(currentPrice.divide(eps, 2, RoundingMode.HALF_UP));
                     }
                     if (bps.compareTo(BigDecimal.ZERO) > 0) {
-                        builder.pbr(currentPrice.divide(bps, 2, java.math.RoundingMode.HALF_UP));
+                        builder.pbr(currentPrice.divide(bps, 2, RoundingMode.HALF_UP));
                     }
                     if (sps.compareTo(BigDecimal.ZERO) > 0) {
-                        builder.psr(currentPrice.divide(sps, 2, java.math.RoundingMode.HALF_UP));
+                        builder.psr(currentPrice.divide(sps, 2, RoundingMode.HALF_UP));
                     }
                 }
 
@@ -345,11 +347,24 @@ public class KisInformationService {
         return value.trim();
     }
 
-    public KisIncomeStatementApiResponse getIncomeStatement(String stockCode, String divCode) {
+    public List<FinancialStatementDto> getIncomeStatement(String stockCode, String divCode) {
+        // 1. Check DB
+        List<StockFinancialStatement> dbData = stockFinancialStatementRepository
+                .findByStockCodeAndDivCodeOrderByStacYymmAsc(stockCode, divCode);
+
+        if (!dbData.isEmpty()) {
+            return convertToFinancialStatementDto(dbData, divCode);
+        }
+
+        // 2. Fetch from API and Save
+        return refreshIncomeStatement(stockCode, divCode);
+    }
+
+    public List<FinancialStatementDto> refreshIncomeStatement(String stockCode, String divCode) {
         String accessToken = kisAuthService.getAccessToken();
 
         try {
-            return webClient.get()
+            KisIncomeStatementApiResponse response = webClient.get()
                     .uri(uriBuilder -> uriBuilder
                             .path(kisApiProperties.getIncomeStatementUrl())
                             .queryParam("FID_DIV_CLS_CODE", divCode)
@@ -364,10 +379,90 @@ public class KisInformationService {
                     .retrieve()
                     .bodyToMono(KisIncomeStatementApiResponse.class)
                     .block();
+
+            if (response == null || !"0".equals(response.getRtCd()) || response.getOutput() == null) {
+                return new ArrayList<>();
+            }
+
+            // Save to DB
+            List<StockFinancialStatement> entitiesToSave = response.getOutput().stream()
+                    .map(item -> StockFinancialStatement.builder()
+                            .stockCode(stockCode)
+                            .stacYymm(item.getStacYymm())
+                            .divCode(divCode)
+                            .saleAccount(new BigDecimal(parseLongSafe(item.getSaleAccount())))
+                            .operatingProfit(new BigDecimal(parseLongSafe(item.getBsopPrti())))
+                            .netIncome(new BigDecimal(parseLongSafe(item.getThtrNtin())))
+                            .build())
+                    .collect(Collectors.toList());
+
+            try {
+                stockFinancialStatementRepository.saveAll(entitiesToSave);
+            } catch (Exception e) {
+                log.warn("Save error for income statement {}: {}", stockCode, e.getMessage());
+            }
+
+            // Sort ASC for calculation
+            entitiesToSave.sort((o1, o2) -> o1.getStacYymm().compareTo(o2.getStacYymm()));
+            return convertToFinancialStatementDto(entitiesToSave, divCode);
+
         } catch (Exception e) {
-            log.error("Failed to fetch income statement: {}", e.getMessage());
-            return null;
+            log.error("Failed to fetch income statement for {}: {}", stockCode, e.getMessage());
+            return new ArrayList<>();
         }
+    }
+
+    public void refreshAllIncomeStatements(String divCode) {
+        List<Stock> stocks = stockRepository.findAll();
+        log.info("Starting Batch Income Statement Refresh for {} stocks (divCode={})", stocks.size(), divCode);
+
+        for (Stock stock : stocks) {
+            try {
+                refreshIncomeStatement(stock.getStockCode(), divCode);
+                Thread.sleep(100);
+            } catch (Exception e) {
+                log.error("Failed to refresh income statement for {}: {}", stock.getStockCode(), e.getMessage());
+            }
+        }
+        log.info("Completed Batch Income Statement Refresh");
+    }
+
+    private List<FinancialStatementDto> convertToFinancialStatementDto(List<StockFinancialStatement> entities,
+            String divCode) {
+        List<FinancialStatementDto> result = new ArrayList<>();
+
+        // entities are assumed to be sorted ASC by date
+        for (int i = 0; i < entities.size(); i++) {
+            StockFinancialStatement current = entities.get(i);
+            String date = current.getStacYymm();
+
+            long sales = current.getSaleAccount().longValue();
+            long operatingProfit = current.getOperatingProfit().longValue();
+            long netIncome = current.getNetIncome().longValue();
+
+            // Accumulated Quarter Logic
+            if ("1".equals(divCode) && date.length() == 6 && !date.endsWith("03")) {
+                if (i > 0) {
+                    StockFinancialStatement prev = entities.get(i - 1);
+                    if (prev.getStacYymm().startsWith(date.substring(0, 4))) {
+                        sales -= prev.getSaleAccount().longValue();
+                        operatingProfit -= prev.getOperatingProfit().longValue();
+                        netIncome -= prev.getNetIncome().longValue();
+                    }
+                }
+            }
+
+            result.add(FinancialStatementDto.builder()
+                    .stacYymm(date)
+                    .saleAccount(String.valueOf(sales))
+                    .operatingProfit(String.valueOf(operatingProfit))
+                    .netIncome(String.valueOf(netIncome))
+                    .build());
+        }
+
+        // Final output: Sort DESC
+        result.sort((o1, o2) -> o2.getStacYymm().compareTo(o1.getStacYymm()));
+        return result;
     }
 
     public FinancialRankDto getFinancialRank(String sort) {
@@ -421,7 +516,9 @@ public class KisInformationService {
 
     @Transactional
     public void fetchAndSaveAllFinancialStatements() {
-        log.info("Starting fetchAndSaveAllFinancialStatements");
+        log.info("Starting fetchAndSaveAllFinancialStatements (Migration to refreshAllIncomeStatements)");
+        // Previously used for init ranking, now use refactored method
+        refreshAllIncomeStatements("0");
         refreshFinancialRank();
     }
 
@@ -434,22 +531,20 @@ public class KisInformationService {
 
         for (Stock stock : stocks) {
             try {
-                KisIncomeStatementApiResponse response = getIncomeStatement(stock.getStockCode(), "0");
-                if (response != null && response.getOutput() != null && !response.getOutput().isEmpty()) {
-                    KisIncomeStatementApiResponse.IncomeStatementOutput latest = response.getOutput().stream()
-                            .sorted((o1, o2) -> o2.getStacYymm().compareTo(o1.getStacYymm()))
-                            .findFirst()
-                            .orElse(null);
+                // Use DB-first getIncomeStatement
+                List<FinancialStatementDto> statements = getIncomeStatement(stock.getStockCode(), "0");
+                if (!statements.isEmpty()) {
+                    FinancialStatementDto latest = statements.get(0); // Already sorted DESC
 
                     if (latest != null) {
                         newRanks.add(StockFinancialRank.builder()
                                 .stockCode(stock.getStockCode())
                                 .stockName(stock.getStockName())
                                 .stacYymm(latest.getStacYymm())
-                                .saleAccount(new java.math.BigDecimal(parseLongSafe(latest.getSaleAccount())))
-                                .operatingProfit(new java.math.BigDecimal(parseLongSafe(latest.getBsopPrti())))
-                                .netIncome(new java.math.BigDecimal(parseLongSafe(latest.getThtrNtin())))
-                                .saleTotlPrfi(new java.math.BigDecimal(0))
+                                .saleAccount(new BigDecimal(parseLongSafe(latest.getSaleAccount())))
+                                .operatingProfit(new BigDecimal(parseLongSafe(latest.getOperatingProfit())))
+                                .netIncome(new BigDecimal(parseLongSafe(latest.getNetIncome())))
+                                .saleTotlPrfi(new BigDecimal(0))
                                 .build());
                     }
                 }
@@ -466,9 +561,9 @@ public class KisInformationService {
         if (saleAccount == null || operatingProfit == null || saleAccount.compareTo(BigDecimal.ZERO) == 0) {
             return "0";
         }
-        return operatingProfit.divide(saleAccount, 4, java.math.RoundingMode.HALF_UP)
+        return operatingProfit.divide(saleAccount, 4, RoundingMode.HALF_UP)
                 .multiply(new BigDecimal(100))
-                .setScale(2, java.math.RoundingMode.HALF_UP)
+                .setScale(2, RoundingMode.HALF_UP)
                 .toString();
     }
 

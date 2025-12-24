@@ -11,40 +11,44 @@ import org.springframework.data.repository.query.Param;
 
 @Repository
 public interface StockFinancialStatementRepository extends JpaRepository<StockFinancialStatement, Long> {
-    Optional<StockFinancialStatement> findByStockCodeAndStacYymm(String stockCode, String stacYymm);
+        Optional<StockFinancialStatement> findByStockCodeAndStacYymm(String stockCode, String stacYymm);
 
-    List<StockFinancialStatement> findByStockCodeOrderByStacYymmDesc(String stockCode);
+        List<StockFinancialStatement> findByStockCodeOrderByStacYymmDesc(String stockCode);
 
-    List<StockFinancialStatement> findByStockCodeAndDivCodeOrderByStacYymmDesc(String stockCode, String divCode);
+        List<StockFinancialStatement> findByStockCodeAndDivCodeOrderByStacYymmDesc(String stockCode, String divCode);
 
-    void deleteByStockCode(String stockCode);
+        List<StockFinancialStatement> findByStockCodeAndDivCodeOrderByStacYymmAsc(String stockCode, String divCode);
 
-    // Initial Ranking Queries (Limit will be handled by Pageable or Top keyword if
-    // supported, but standard JPA supports Top)
-    List<StockFinancialStatement> findTop100ByStacYymmOrderBySaleAccountDesc(String stacYymm);
+        void deleteByStockCode(String stockCode);
 
-    List<StockFinancialStatement> findTop100ByStacYymmOrderByOperatingProfitDesc(String stacYymm);
+        // Initial Ranking Queries (Limit will be handled by Pageable or Top keyword if
+        // supported, but standard JPA supports Top)
+        List<StockFinancialStatement> findTop100ByStacYymmOrderBySaleAccountDesc(String stacYymm);
 
-    List<StockFinancialStatement> findTop100ByStacYymmOrderByNetIncomeDesc(String stacYymm);
+        List<StockFinancialStatement> findTop100ByStacYymmOrderByOperatingProfitDesc(String stacYymm);
 
-    // Find latest Year-Month
-    Optional<StockFinancialStatement> findTop1ByOrderByStacYymmDesc();
+        List<StockFinancialStatement> findTop100ByStacYymmOrderByNetIncomeDesc(String stacYymm);
 
-    // Find latest Year-Month by DivCode
-    Optional<StockFinancialStatement> findTop1ByDivCodeOrderByStacYymmDesc(String divCode);
+        // Find latest Year-Month
+        Optional<StockFinancialStatement> findTop1ByOrderByStacYymmDesc();
 
-    // Top 20 Ranking Queries
-    List<StockFinancialStatement> findTop20ByStacYymmAndDivCodeOrderBySaleAccountDesc(String stacYymm, String divCode);
+        // Find latest Year-Month by DivCode
+        Optional<StockFinancialStatement> findTop1ByDivCodeOrderByStacYymmDesc(String divCode);
 
-    List<StockFinancialStatement> findTop20ByStacYymmAndDivCodeOrderByOperatingProfitDesc(String stacYymm,
-            String divCode);
+        // Top 20 Ranking Queries
+        List<StockFinancialStatement> findTop20ByStacYymmAndDivCodeOrderBySaleAccountDesc(String stacYymm,
+                        String divCode);
 
-    List<StockFinancialStatement> findTop20ByStacYymmAndDivCodeOrderByNetIncomeDesc(String stacYymm, String divCode);
+        List<StockFinancialStatement> findTop20ByStacYymmAndDivCodeOrderByOperatingProfitDesc(String stacYymm,
+                        String divCode);
 
-    // 영업이익률(operatingProfit / saleAccount) 상위 20개 조회 (매출액 0 제외)
-    @Query("SELECT s FROM StockFinancialStatement s " +
-            "WHERE s.stacYymm = :stacYymm AND s.divCode = :divCode AND s.saleAccount > 0 " +
-            "ORDER BY (s.operatingProfit / s.saleAccount) DESC")
-    List<StockFinancialStatement> findTop20ByOperatingMarginDesc(@Param("stacYymm") String stacYymm,
-            @Param("divCode") String divCode, org.springframework.data.domain.Pageable pageable);
+        List<StockFinancialStatement> findTop20ByStacYymmAndDivCodeOrderByNetIncomeDesc(String stacYymm,
+                        String divCode);
+
+        // 영업이익률(operatingProfit / saleAccount) 상위 20개 조회 (매출액 0 제외)
+        @Query("SELECT s FROM StockFinancialStatement s " +
+                        "WHERE s.stacYymm = :stacYymm AND s.divCode = :divCode AND s.saleAccount > 0 " +
+                        "ORDER BY (s.operatingProfit / s.saleAccount) DESC")
+        List<StockFinancialStatement> findTop20ByOperatingMarginDesc(@Param("stacYymm") String stacYymm,
+                        @Param("divCode") String divCode, org.springframework.data.domain.Pageable pageable);
 }

@@ -3,7 +3,7 @@ package com.AISA.AISA.kisStock.kisController;
 import com.AISA.AISA.global.response.SuccessResponse;
 import com.AISA.AISA.kisStock.dto.FinancialRank.BalanceSheetDto;
 import com.AISA.AISA.kisStock.dto.FinancialRank.FinancialStatementDto;
-import com.AISA.AISA.kisStock.dto.FinancialRank.KisIncomeStatementApiResponse;
+import com.AISA.AISA.kisStock.dto.FinancialRank.FinancialStatementDto;
 import com.AISA.AISA.kisStock.dto.FinancialRank.FinancialRatioRankDto;
 import com.AISA.AISA.kisStock.dto.FinancialRank.InvestmentMetricDto;
 import com.AISA.AISA.kisStock.kisService.KisInformationService;
@@ -13,9 +13,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/stocks/financial")
@@ -60,50 +58,8 @@ public class KisInformationController {
     public ResponseEntity<SuccessResponse<List<FinancialStatementDto>>> getIncomeStatement(
             @PathVariable String stockCode,
             @RequestParam(required = false, defaultValue = "0") String divCode) {
-        KisIncomeStatementApiResponse response = kisInformationService.getIncomeStatement(stockCode, divCode);
-
-        List<FinancialStatementDto> simplifiedList = new ArrayList<>();
-        if (response != null && response.getOutput() != null) {
-            // 1. Sort ascending by Date (stac_yymm) to simplify calculation
-            List<KisIncomeStatementApiResponse.IncomeStatementOutput> sortedOutput = response.getOutput().stream()
-                    .sorted((o1, o2) -> o1.getStacYymm().compareTo(o2.getStacYymm()))
-                    .collect(Collectors.toList());
-
-            for (int i = 0; i < sortedOutput.size(); i++) {
-                KisIncomeStatementApiResponse.IncomeStatementOutput current = sortedOutput.get(i);
-
-                String date = current.getStacYymm();
-                long sales = parseLongSafe(current.getSaleAccount());
-                long operatingProfit = parseLongSafe(current.getBsopPrti());
-                long netIncome = parseLongSafe(current.getThtrNtin());
-
-                // Logic: If divCode is "1" (Quarter) and month is not 03 (March), subtract
-                // previous quarter's accumulated value
-                if ("1".equals(divCode) && date.length() == 6 && !date.endsWith("03")) {
-                    // Check if previous entry is from the same year and is the previous quarter
-                    if (i > 0) {
-                        KisIncomeStatementApiResponse.IncomeStatementOutput prev = sortedOutput.get(i - 1);
-                        if (prev.getStacYymm().startsWith(date.substring(0, 4))) {
-                            sales -= parseLongSafe(prev.getSaleAccount());
-                            operatingProfit -= parseLongSafe(prev.getBsopPrti());
-                            netIncome -= parseLongSafe(prev.getThtrNtin());
-                        }
-                    }
-                }
-
-                simplifiedList.add(FinancialStatementDto.builder()
-                        .stacYymm(date)
-                        .saleAccount(String.valueOf(sales))
-                        .operatingProfit(String.valueOf(operatingProfit))
-                        .netIncome(String.valueOf(netIncome))
-                        .build());
-            }
-
-            // 2. Sort descending by Date (stac_yymm) for final output as requested
-            simplifiedList.sort((o1, o2) -> o2.getStacYymm().compareTo(o1.getStacYymm()));
-        }
-
-        return ResponseEntity.ok(new SuccessResponse<>(true, "손익계산서 조회 성공", simplifiedList));
+        return ResponseEntity.ok(new SuccessResponse<>(true, "손익계산서 조회 성공",
+                kisInformationService.getIncomeStatement(stockCode, divCode)));
     }
 
     @PostMapping("/init-all")
@@ -143,18 +99,4 @@ public class KisInformationController {
                         kisInformationService.getInvestmentMetrics(stockCode)));
     }
 
-    private long parseLongSafe(String value) {
-        if (value == null || value.isEmpty()) {
-            return 0;
-        }
-        try {
-            // Remove comma or decimal points if any (API might return "1234.00")
-            if (value.contains(".")) {
-                return (long) Double.parseDouble(value);
-            }
-            return Long.parseLong(value);
-        } catch (NumberFormatException e) {
-            return 0;
-        }
-    }
 }

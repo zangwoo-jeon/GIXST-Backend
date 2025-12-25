@@ -14,6 +14,7 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
@@ -37,6 +38,15 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers("/api/auth/**", "/swagger-ui/**", "/v3/api-docs/**", "/oauth2/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/stocks/search", "/api/stocks/volume-rank",
+                                "/api/stocks/*/price", "/api/stocks/*/chart", "/api/stocks/financial/**",
+                                "/api/rank/financial/**", "/api/dividend/*/dividend", "/api/dividend/*/detail",
+                                "/api/dividend/rank", "/api/macro/exchange-rate/**", "/api/macro/m2",
+                                "/api/macro/base-rate",
+                                "/api/macro/cpi", "/api/macro/bond/**", "/api/indices/{marketCode}/status",
+                                "/api/indices/{marketCode}/chart", "/api/indices/overseas/**",
+                                "/api/indices/kospi-usd-ratio", "/api/indices/kosdaq-usd-ratio")
+                        .permitAll()
                         .anyRequest().authenticated())
                 .oauth2Login(oauth2 -> oauth2
                         .userInfoEndpoint(userInfo -> userInfo.userService(customOAuth2UserService))

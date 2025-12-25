@@ -184,6 +184,80 @@ public class AnalysisService {
                 .build();
     }
 
+    /*
+     * Calculates Partial Correlation between X and Y while controlling for Z.
+     * Formula: r_xy.z = (r_xy - r_xz * r_yz) / sqrt((1 - r_xz^2) * (1 - r_yz^2))
+     * This requires finding the common date intersection of all three series.
+     */
+    public CorrelationResultDto calculatePartialCorrelation(
+            Map<LocalDate, Double> seriesX, String nameX,
+            Map<LocalDate, Double> seriesY, String nameY,
+            Map<LocalDate, Double> seriesZ, String nameZ) {
+
+        // 1. Find Intersection of Dates for X, Y, Z
+        List<LocalDate> commonDates = new ArrayList<>();
+        for (LocalDate date : seriesX.keySet()) {
+            if (seriesY.containsKey(date) && seriesZ.containsKey(date)) {
+                commonDates.add(date);
+            }
+        }
+        Collections.sort(commonDates);
+
+        if (commonDates.size() < 5) {
+            return CorrelationResultDto.builder()
+                    .asset1Name(nameX)
+                    .asset2Name(nameY)
+                    .coefficient(0)
+                    .description("데이터 부족 (Partial Correlation)")
+                    .build();
+        }
+
+        // 2. Calculate Log Returns for the common period
+        List<Double> retX = calculateLogReturns(seriesX, commonDates);
+        List<Double> retY = calculateLogReturns(seriesY, commonDates);
+        List<Double> retZ = calculateLogReturns(seriesZ, commonDates);
+
+        double[] arrX = retX.stream().mapToDouble(Double::doubleValue).toArray();
+        double[] arrY = retY.stream().mapToDouble(Double::doubleValue).toArray();
+        double[] arrZ = retZ.stream().mapToDouble(Double::doubleValue).toArray();
+
+        PearsonsCorrelation pc = new PearsonsCorrelation();
+
+        // 3. Calculate Pairwise Correlations
+        double r_xy = pc.correlation(arrX, arrY);
+        double r_xz = pc.correlation(arrX, arrZ);
+        double r_yz = pc.correlation(arrY, arrZ);
+
+        // 4. Calculate Partial Correlation
+        double numerator = r_xy - (r_xz * r_yz);
+        double denominator = Math.sqrt((1 - Math.pow(r_xz, 2)) * (1 - Math.pow(r_yz, 2)));
+
+        // Prevent division by zero
+        if (denominator == 0) {
+            return CorrelationResultDto.builder()
+                    .asset1Name(nameX)
+                    .asset2Name(nameY)
+                    .coefficient(0) // Undefined
+                    .description("계산 불가 (분모 0)")
+                    .build();
+        }
+
+        double partialCorr = numerator / denominator;
+
+        // Calculate p-value (degrees of freedom: n - 2 - number of control variables =
+        // n - 3)
+        double pValue = calculatePValue(partialCorr, arrX.length - 1);
+
+        return CorrelationResultDto.builder()
+                .asset1Name(nameX)
+                .asset2Name(nameY)
+                .coefficient(partialCorr)
+                .pValue(pValue)
+                .sampleSize(arrX.length)
+                .description(interpretCorrelation(partialCorr))
+                .build();
+    }
+
     @Transactional(readOnly = true)
     public RollingCorrelationDto calculateRollingCorrelation(String asset1Type, String asset1Code, String asset2Type,
             String asset2Code, String startDate, String endDate, int windowSize) {

@@ -41,15 +41,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(Exception.class)
     protected ResponseEntity<ResponseErrorEntity> handleException(Exception e) {
         log.error("Unhandled Exception occurred: {}", e.getMessage(), e);
-        return ResponseEntity
-                .status(500)
-                .body(ResponseErrorEntity.builder()
-                        .status(500)
-                        .isSuccess(false)
-                        .name(e.getClass().getSimpleName())
-                        .code("DEBUG-500")
-                        .message("DEBUG INFO: " + e.toString())
-                        .build());
+        return ResponseErrorEntity.toResponseEntity(CommonErrorCode.INTERNAL_SERVER_ERROR);
     }
 
 }

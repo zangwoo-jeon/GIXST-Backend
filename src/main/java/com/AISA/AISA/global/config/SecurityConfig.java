@@ -72,7 +72,7 @@ public class SecurityConfig {
         @Bean
         public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
                 http
-                                .securityMatcher("/api/**", "/oauth2/**")
+                                .securityMatcher("/api/**", "/oauth2/**", "/login/oauth2/code/**")
                                 .httpBasic(AbstractHttpConfigurer::disable)
                                 .csrf(AbstractHttpConfigurer::disable)
                                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))

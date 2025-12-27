@@ -52,14 +52,9 @@ public class MemberService {
         checkUserNameDuplicate(request.getUserName());
         checkDisplayNameDuplicate(request.getDisplayName());
 
-        if (request.getEmail() != null && !request.getEmail().isBlank()) {
-            checkEmailDuplicate(request.getEmail());
-        }
-
         Member newMember = Member.builder()
                 .userName(request.getUserName())
                 .displayName(request.getDisplayName())
-                .email(request.getEmail())
                 .password(passwordEncoder.encode(request.getPassword()))
                 .provider("local")
                 .build();

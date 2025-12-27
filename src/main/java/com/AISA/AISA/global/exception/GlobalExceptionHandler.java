@@ -41,20 +41,15 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(Exception.class)
     protected ResponseEntity<ResponseErrorEntity> handleException(Exception e) {
         log.error("Unhandled Exception occurred: {}", e.getMessage(), e);
-        // For debugging purposes, we might want to return the message, but generally
-        // INTERNAL_SERVER_ERROR is safer.
-        // However, to debug this issue, I will check if I can include the cause.
-        // CommonErrorCode.INTERNAL_SERVER_ERROR usually has a generic message.
-        // Let's rely on logs mainly, but since I can't see logs, I'll temporary print
-        // the message?
-        // No, let's look at the logs via tool if possible? No tool for logs.
-        // I'll assume the user can see the response.
-        // I will return INTERNAL_SERVER_ERROR but maybe I can notify the user to assume
-        // it's a connection issue.
-        // Wait, if I add this handler, the User will see my JSON response, NOT the
-        // timestamp one.
-        // This confirms if it's hitting my app.
-        return ResponseErrorEntity.toResponseEntity(CommonErrorCode.INTERNAL_SERVER_ERROR);
+        return ResponseEntity
+                .status(500)
+                .body(ResponseErrorEntity.builder()
+                        .status(500)
+                        .isSuccess(false)
+                        .name(e.getClass().getSimpleName())
+                        .code("DEBUG-500")
+                        .message("DEBUG INFO: " + e.toString())
+                        .build());
     }
 
 }

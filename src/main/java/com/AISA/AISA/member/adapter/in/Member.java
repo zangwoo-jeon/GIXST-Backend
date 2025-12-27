@@ -29,6 +29,9 @@ public class Member {
     @Column(nullable = false)
     private String password;
 
+    @Column(name = "email", nullable = true, unique = true)
+    private String email;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private MembershipType membershipType;
@@ -43,10 +46,12 @@ public class Member {
     private String providerId;
 
     @Builder
-    public Member(String userName, String displayName, String password, String provider, String providerId) {
+    public Member(String userName, String displayName, String password, String email, String provider,
+            String providerId) {
         this.userName = userName;
         this.displayName = displayName;
         this.password = password;
+        this.email = email;
         this.membershipType = MembershipType.FREE;
         this.provider = provider;
         this.providerId = providerId;
@@ -60,9 +65,19 @@ public class Member {
         this.displayName = newDisplayName;
     }
 
+    public void changeEmail(String newEmail) {
+        this.email = newEmail;
+    }
+
     public void upgradeMembership(MembershipType membershipType) {
         this.membershipType = membershipType;
         this.subscriptionStartDate = LocalDateTime.now();
         this.subscriptionEndDate = LocalDateTime.now().plusMonths(1);
+    }
+
+    public Member update(String displayName, String email) {
+        this.displayName = displayName;
+        this.email = email;
+        return this;
     }
 }

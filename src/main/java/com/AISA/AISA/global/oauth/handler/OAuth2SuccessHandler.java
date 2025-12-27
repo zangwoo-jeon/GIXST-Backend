@@ -3,6 +3,8 @@ package com.AISA.AISA.global.oauth.handler;
 import com.AISA.AISA.global.jwt.JwtTokenProvider;
 import com.AISA.AISA.global.jwt.RefreshToken;
 import com.AISA.AISA.global.jwt.RefreshTokenRepository;
+import com.AISA.AISA.member.adapter.in.Member;
+import com.AISA.AISA.member.adapter.in.MemberRepository;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -10,6 +12,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
+import java.io.IOException;
+
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.security.web.authentication.SimpleUrlAuthenticationSuccessHandler;
@@ -26,28 +30,32 @@ public class OAuth2SuccessHandler extends SimpleUrlAuthenticationSuccessHandler 
 
     private final JwtTokenProvider jwtTokenProvider;
     private final RefreshTokenRepository refreshTokenRepository;
+    private final MemberRepository memberRepository;
 
     @Override
     public void onAuthenticationSuccess(HttpServletRequest request, HttpServletResponse response,
             Authentication authentication) throws IOException, ServletException {
         OAuth2User oAuth2User = (OAuth2User) authentication.getPrincipal();
-        String email = (String) oAuth2User.getAttributes().get("email");
-        Collection<? extends GrantedAuthority> authorities = oAuth2User.getAuthorities();
+        // CustomOAuth2UserService에서 넣어준 userName 사용 (가장 확실한 식별자)
+        String userName = (String) oAuth2User.getAttributes().get("userName");
 
-        // JWT 생성을 위한 인증 객체 생성 (Subject를 이메일로 설정하기 위함)
-        Authentication auth = new UsernamePasswordAuthenticationToken(email, null, authorities);
+        Member member = memberRepository.findByUserName(userName)
+                .orElseThrow(() -> new RuntimeException("회원 정보를 찾을 수 없습니다."));
+
+        Authentication auth = new UsernamePasswordAuthenticationToken(member.getUserName(), null,
+                authentication.getAuthorities());
 
         String accessToken = jwtTokenProvider.createAccessToken(auth);
         String refreshToken = jwtTokenProvider.createRefreshToken(auth);
 
         // 리프레시 토큰 저장
-        RefreshToken token = refreshTokenRepository.findByUserName(email)
+        RefreshToken token = refreshTokenRepository.findByUserName(member.getUserName())
                 .map(t -> {
                     t.updateToken(refreshToken);
                     return t;
                 })
                 .orElse(RefreshToken.builder()
-                        .userName(email)
+                        .userName(member.getUserName())
                         .token(refreshToken)
                         .build());
 

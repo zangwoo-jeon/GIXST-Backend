@@ -16,6 +16,7 @@ import org.springframework.stereotype.Service;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
@@ -48,23 +49,51 @@ public class CustomOAuth2UserService implements OAuth2UserService<OAuth2UserRequ
         }
 
         private Member saveOrUpdate(OAuthAttributes attributes) {
-                // 1. 이메일로 찾기
-                if (attributes.getEmail() != null && !attributes.getEmail().isBlank()) {
-                        Member memberByEmail = memberRepository.findByEmail(attributes.getEmail())
-                                        .map(entity -> entity.update(attributes.getName(), attributes.getEmail()))
+                String email = attributes.getEmail();
+
+                // 1. 이메일이 존재하면 이메일로 사용자 조회
+                if (email != null && !email.isBlank()) {
+                        Member memberByEmail = memberRepository.findByEmail(email)
+                                        .map(entity -> entity.update(attributes.getName(), email))
                                         .orElse(null);
 
                         if (memberByEmail != null) {
+                                // 이미 존재하는 이메일이면 해당 계정 정보를 업데이트하여 반환
                                 return memberRepository.save(memberByEmail);
                         }
                 }
 
-                // 2. Provider ID로 찾기 (이메일 변경/삭제 되었거나 이메일 없는 경우)
-                Member memberByProvider = memberRepository
+                // 2. Provider ID로 조회 (이메일이 없거나, 이메일로 찾지 못한 경우)
+                Member member = memberRepository
                                 .findByProviderAndProviderId(attributes.getProvider(), attributes.getProviderId())
-                                .map(entity -> entity.update(attributes.getName(), attributes.getEmail()))
-                                .orElse(attributes.toEntity()); // 3. 없으면 생성
+                                .map(entity -> entity.update(attributes.getName(), email))
+                                .orElseGet(() -> {
+                                        // 3. 존재하지 않는 경우 신규 회원 생성
+                                        String uniqueNickname = attributes.getName();
+                                        while (memberRepository.existsByDisplayName(uniqueNickname)) {
+                                                uniqueNickname = attributes.getName() + "_"
+                                                                + UUID.randomUUID().toString().substring(0, 5);
+                                        }
 
-                return memberRepository.save(memberByProvider);
+                                        String generatedUserName = (email != null && !email.isBlank()) ? email
+                                                        : attributes.getProvider() + "_" + attributes.getProviderId();
+                                        String uniqueUserName = generatedUserName;
+
+                                        while (memberRepository.existsByUserName(uniqueUserName)) {
+                                                uniqueUserName = generatedUserName + "_"
+                                                                + UUID.randomUUID().toString().substring(0, 5);
+                                        }
+
+                                        return Member.builder()
+                                                        .userName(uniqueUserName)
+                                                        .displayName(uniqueNickname)
+                                                        .email(email)
+                                                        .password(UUID.randomUUID().toString()) // 임시 비밀번호
+                                                        .provider(attributes.getProvider())
+                                                        .providerId(attributes.getProviderId())
+                                                        .build();
+                                });
+
+                return memberRepository.save(member);
         }
 }

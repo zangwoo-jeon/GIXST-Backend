@@ -53,6 +53,13 @@ public class MemberController {
         return ResponseEntity.ok(new SuccessResponse<>(true, "사용 가능한 닉네임입니다.", null));
     }
 
+    @GetMapping("/check-email")
+    @Operation(summary = "이메일 중복 확인", description = "이메일 중복 여부를 확인합니다.")
+    public ResponseEntity<SuccessResponse<Void>> checkEmail(@RequestParam String email) {
+        memberService.checkEmailDuplicate(email);
+        return ResponseEntity.ok(new SuccessResponse<>(true, "사용 가능한 이메일입니다.", null));
+    }
+
     @GetMapping("/members")
     @Operation(summary = "전체 회원 조회", description = "모든 회원 정보를 조회합니다.")
     public ResponseEntity<SuccessResponse<List<MemberResponse>>> getAllMembers() {
@@ -102,7 +109,7 @@ public class MemberController {
         return ResponseEntity.ok(new SuccessResponse<>(true, "비밀번호 변경 성공", null));
     }
 
-    @PatchMapping("/members/me/displayName")
+    @PostMapping("/members/me/displayName")
     @Operation(summary = "닉네임 변경", description = "로그인한 회원의 닉네임을 변경합니다.")
     public ResponseEntity<SuccessResponse<Void>> changeDisplayName(
             Principal principal,
@@ -110,6 +117,16 @@ public class MemberController {
         MemberResponse member = memberService.findMemberByUserName(principal.getName());
         memberService.changeDisplayName(member.getMemberId(), request);
         return ResponseEntity.ok(new SuccessResponse<>(true, "닉네임 변경 성공", null));
+    }
+
+    @PostMapping("/members/me/email")
+    @Operation(summary = "이메일 변경", description = "로그인한 회원의 이메일을 변경합니다.")
+    public ResponseEntity<SuccessResponse<Void>> changeEmail(
+            Principal principal,
+            @RequestBody EmailChangeRequest request) {
+        MemberResponse member = memberService.findMemberByUserName(principal.getName());
+        memberService.changeEmail(member.getMemberId(), request);
+        return ResponseEntity.ok(new SuccessResponse<>(true, "이메일 변경(추가) 성공", null));
     }
 
 }

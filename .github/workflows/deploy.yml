@@ -59,11 +59,10 @@ jobs:
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.0
         with:
-          host: ${{ secrets.GCP_SSH_HOST }} # 34.50.11.164 (외부 IP)
+          host: ${{ secrets.GCP_SSH_HOST }}
           username: ubuntu
           key: ${{ secrets.GCP_SSH_KEY }}
           port: 22
-          # 환경변수 전달
           envs: PROJECT_ID,GAR_LOCATION,REPOSITORY,IMAGE,CONTAINER_NAME
           script: |
             # 1. GAR 인증 (VM이 이미지를 가져오기 위함)

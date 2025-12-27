@@ -8,6 +8,7 @@ import com.AISA.AISA.member.adapter.in.dto.LoginRequestDto;
 import com.AISA.AISA.member.adapter.in.dto.MemberSignupRequest;
 import com.AISA.AISA.member.adapter.in.dto.PasswordChangeRequest;
 import com.AISA.AISA.member.adapter.in.dto.DisplayNameChangeRequest;
+import com.AISA.AISA.member.adapter.in.dto.EmailChangeRequest;
 import com.AISA.AISA.global.jwt.dto.TokenResponseDto;
 import com.AISA.AISA.member.adapter.in.exception.MemberErrorCode;
 import com.AISA.AISA.member.adapter.out.dto.MemberResponse;
@@ -51,9 +52,14 @@ public class MemberService {
         checkUserNameDuplicate(request.getUserName());
         checkDisplayNameDuplicate(request.getDisplayName());
 
+        if (request.getEmail() != null && !request.getEmail().isBlank()) {
+            checkEmailDuplicate(request.getEmail());
+        }
+
         Member newMember = Member.builder()
                 .userName(request.getUserName())
                 .displayName(request.getDisplayName())
+                .email(request.getEmail())
                 .password(passwordEncoder.encode(request.getPassword()))
                 .provider("local")
                 .build();
@@ -69,6 +75,12 @@ public class MemberService {
     public void checkDisplayNameDuplicate(String displayName) {
         if (memberRepository.existsByDisplayName(displayName)) {
             throw new BusinessException(MemberErrorCode.DUPLICATE_DISPLAY_NAME);
+        }
+    }
+
+    public void checkEmailDuplicate(String email) {
+        if (memberRepository.existsByEmail(email)) {
+            throw new BusinessException(MemberErrorCode.DUPLICATE_EMAIL);
         }
     }
 
@@ -138,6 +150,24 @@ public class MemberService {
         }
 
         member.changeDisplayName(newDisplayName);
+    }
+
+    @Transactional
+    public void changeEmail(UUID memberId, EmailChangeRequest request) {
+        Member member = memberRepository.findById(memberId)
+                .orElseThrow(() -> new BusinessException(MemberErrorCode.MEMBER_NOT_FOUND));
+
+        String newEmail = request.getNewEmail();
+
+        // 이메일 유효성 검사 및 중복 체크 (null이 아니고 비어있지 않을 때만)
+        if (newEmail != null && !newEmail.isBlank()) {
+            // 본인의 이메일이 아닐 경우 중복 체크
+            if (!newEmail.equals(member.getEmail())) {
+                checkEmailDuplicate(newEmail);
+            }
+        }
+
+        member.changeEmail(newEmail);
     }
 
     @Transactional

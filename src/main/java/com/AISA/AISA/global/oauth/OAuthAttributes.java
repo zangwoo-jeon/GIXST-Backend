@@ -61,9 +61,14 @@ public class OAuthAttributes {
     }
 
     public Member toEntity() {
+        String generatedUserName = (email != null && !email.isBlank())
+                ? email
+                : provider + "_" + providerId;
+
         return Member.builder()
-                .userName(email)
+                .userName(generatedUserName)
                 .displayName(name)
+                .email(email) // can be null
                 .password(UUID.randomUUID().toString()) // 임시 비밀번호
                 .provider(provider)
                 .providerId(providerId)

@@ -39,6 +39,7 @@ public class CustomOAuth2UserService implements OAuth2UserService<OAuth2UserRequ
 
                 Map<String, Object> attributesMap = new HashMap<>(attributes.getAttributes());
                 attributesMap.put("email", attributes.getEmail());
+                attributesMap.put("userName", member.getUserName()); // SuccessHandler에서 사용
 
                 return new DefaultOAuth2User(
                                 Collections.singleton(new SimpleGrantedAuthority(member.getMembershipType().name())),
@@ -47,9 +48,23 @@ public class CustomOAuth2UserService implements OAuth2UserService<OAuth2UserRequ
         }
 
         private Member saveOrUpdate(OAuthAttributes attributes) {
-                Member member = memberRepository.findByUserName(attributes.getEmail())
-                                .orElse(attributes.toEntity());
+                // 1. 이메일로 찾기
+                if (attributes.getEmail() != null && !attributes.getEmail().isBlank()) {
+                        Member memberByEmail = memberRepository.findByEmail(attributes.getEmail())
+                                        .map(entity -> entity.update(attributes.getName(), attributes.getEmail()))
+                                        .orElse(null);
 
-                return memberRepository.save(member);
+                        if (memberByEmail != null) {
+                                return memberRepository.save(memberByEmail);
+                        }
+                }
+
+                // 2. Provider ID로 찾기 (이메일 변경/삭제 되었거나 이메일 없는 경우)
+                Member memberByProvider = memberRepository
+                                .findByProviderAndProviderId(attributes.getProvider(), attributes.getProviderId())
+                                .map(entity -> entity.update(attributes.getName(), attributes.getEmail()))
+                                .orElse(attributes.toEntity()); // 3. 없으면 생성
+
+                return memberRepository.save(memberByProvider);
         }
 }

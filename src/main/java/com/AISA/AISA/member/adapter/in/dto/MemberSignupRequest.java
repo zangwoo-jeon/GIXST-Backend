@@ -10,4 +10,5 @@ public class MemberSignupRequest {
     private String displayName;
     private String userName;
     private String password;
+    private String email;
 }

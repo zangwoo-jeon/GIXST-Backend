@@ -72,15 +72,15 @@ public class SecurityConfig {
         @Bean
         public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
                 http
-                                .securityMatcher("/api/**", "/oauth2/**", "/login/oauth2/code/**")
+                                .securityMatcher("/api/**", "/oauth2/**", "/login/oauth2/code/**", "/actuator/**")
                                 .httpBasic(AbstractHttpConfigurer::disable)
                                 .csrf(AbstractHttpConfigurer::disable)
                                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                                 .sessionManagement(session -> session
                                                 .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                                 .authorizeHttpRequests(authorize -> authorize
-                                                .requestMatchers("/api/auth/**", "/oauth2/**").permitAll() // Swagger
-                                                                                                           // removed
+                                                .requestMatchers("/api/auth/**", "/oauth2/**", "/actuator/**")
+                                                .permitAll()
                                                 .requestMatchers(HttpMethod.GET, "/api/stocks/search",
                                                                 "/api/stocks/volume-rank",
                                                                 "/api/stocks/*/price", "/api/stocks/*/chart",

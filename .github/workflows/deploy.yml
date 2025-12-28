@@ -139,6 +139,7 @@ jobs:
               \
               -e SWAGGER_AUTH_USERNAME="${{ secrets.SWAGGER_AUTH_USERNAME }}" \
               -e SWAGGER_AUTH_PASSWORD="${{ secrets.SWAGGER_AUTH_PASSWORD }}" \
+              -e MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE="prometheus,health,metrics" \
               \
               $FULL_IMAGE_URI
 

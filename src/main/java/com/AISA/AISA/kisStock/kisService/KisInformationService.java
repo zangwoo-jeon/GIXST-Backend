@@ -282,13 +282,13 @@ public class KisInformationService {
 
                 // Set/Update Valuations (PER, PBR, PSR)
                 if (currentPrice.compareTo(BigDecimal.ZERO) > 0) {
-                    if (eps.compareTo(BigDecimal.ZERO) > 0) {
+                    if (eps.compareTo(BigDecimal.ZERO) != 0) {
                         builder.per(currentPrice.divide(eps, 2, RoundingMode.HALF_UP));
                     }
-                    if (bps.compareTo(BigDecimal.ZERO) > 0) {
+                    if (bps.compareTo(BigDecimal.ZERO) != 0) {
                         builder.pbr(currentPrice.divide(bps, 2, RoundingMode.HALF_UP));
                     }
-                    if (sps.compareTo(BigDecimal.ZERO) > 0) {
+                    if (sps.compareTo(BigDecimal.ZERO) != 0) {
                         builder.psr(currentPrice.divide(sps, 2, RoundingMode.HALF_UP));
                     }
                 }

@@ -139,6 +139,9 @@ jobs:
               \
               -e SWAGGER_AUTH_USERNAME="${{ secrets.SWAGGER_AUTH_USERNAME }}" \
               -e SWAGGER_AUTH_PASSWORD="${{ secrets.SWAGGER_AUTH_PASSWORD }}" \
+              -e SPRING_DATA_REDIS_HOST="172.17.0.1" \
+              -e SPRING_DATA_REDIS_PORT="6379" \
+              -e SPRING_DATA_REDIS_PASSWORD="${{ secrets.REDIS_PASSWORD }}" \
               -e MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE="prometheus,health,metrics" \
               \
               $FULL_IMAGE_URI

@@ -19,6 +19,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.cache.annotation.Cacheable;
 
 import java.math.RoundingMode;
 import java.time.LocalDate;
@@ -48,6 +49,7 @@ public class KisMacroService {
     // StatCode for Bond Yield (New constant)
     private static final String STAT_CODE_BOND_YIELD = "KIS_BOND_YIELD";
 
+    @Cacheable(value = "macroExchangeRate", key = "#currencyCode + '-' + #startDate + '-' + #endDate")
     public List<MacroIndicatorDto> fetchExchangeRate(String currencyCode, String startDate, String endDate) {
         ExchangeRateCode exchangeRateCode = ExchangeRateCode.findBySymbol(currencyCode);
 
@@ -138,6 +140,7 @@ public class KisMacroService {
         }
     }
 
+    @Cacheable(value = "macroBond", key = "#bond.name() + '-' + #startDate + '-' + #endDate")
     public List<MacroIndicatorDto> fetchBondYield(BondYield bond, String startDate, String endDate) {
         return fetchMacroData(STAT_CODE_BOND_YIELD, bond.getSymbol(), "I", bond.getSymbol(), startDate, endDate);
     }

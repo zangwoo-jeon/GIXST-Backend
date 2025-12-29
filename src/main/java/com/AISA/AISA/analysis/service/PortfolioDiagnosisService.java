@@ -11,6 +11,7 @@ import com.AISA.AISA.portfolio.PortfolioStock.dto.PortfolioReturnResponse;
 import com.AISA.AISA.portfolio.PortfolioStock.dto.PortStockResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -38,6 +39,7 @@ public class PortfolioDiagnosisService {
     private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyyMMdd");
 
     @Transactional(readOnly = true)
+    @Cacheable(value = "portfolioDiagnosis", key = "#portfolioId.toString()", sync = true)
     public DiagnosisResultDto diagnosePortfolio(UUID portfolioId) {
         // 1. Setup Adaptive Time Horizon (Max 5 Years for Data Fetching)
         LocalDate endVal = LocalDate.now();
@@ -537,7 +539,7 @@ public class PortfolioDiagnosisService {
     }
 
     @Transactional(readOnly = true)
-    public com.AISA.AISA.analysis.dto.RollingCorrelationDto getPortfolioRollingCorrelation(UUID portfolioId,
+    public RollingCorrelationDto getPortfolioRollingCorrelation(UUID portfolioId,
             String benchmarkType, String benchmarkCode, String startDate, String endDate, int windowSize) {
         // 1. Get Portfolio Daily Values (Virtual Asset)
         BacktestResultDto backtestResult = backtestService.calculatePortfolioBacktest(portfolioId, startDate, endDate);

@@ -1,11 +1,15 @@
 package com.AISA.AISA.kisStock.dto.FinancialRank;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import lombok.AllArgsConstructor;
 import lombok.Builder;
+import lombok.NoArgsConstructor;
 import lombok.Getter;
 
 @Getter
 @Builder
+@NoArgsConstructor
+@AllArgsConstructor
 @Schema(description = "투자 지표 응답 DTO")
 public class InvestmentMetricDto {
     @Schema(description = "종목 코드")

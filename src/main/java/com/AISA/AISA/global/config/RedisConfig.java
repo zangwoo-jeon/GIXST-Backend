@@ -79,6 +79,10 @@ public class RedisConfig {
         configMap.put("kosdaqUsdRatio", longTermConfig);
         configMap.put("stockChart", longTermConfig); // 주식 차트 과거 데이터
 
+        // 초단기 데이터 (1분)
+        configMap.put("stockChartToday", shortTermConfig);
+        configMap.put("stockPrice", shortTermConfig); // 주가 (1분)
+
         // 추가 장기 데이터 (24시간)
         configMap.put("stockMetrics", longTermConfig);
         configMap.put("stockDividend", longTermConfig);

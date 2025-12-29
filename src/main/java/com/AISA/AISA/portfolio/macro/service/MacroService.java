@@ -9,6 +9,7 @@ import com.AISA.AISA.kisStock.enums.ExchangeRateCode;
 import com.AISA.AISA.portfolio.macro.dto.MacroIndicatorDto;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.cache.annotation.Cacheable;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -27,6 +28,7 @@ public class MacroService {
 
     // Methods moved to KisIndexService
 
+    @Cacheable(value = "overseasIndexKrw", key = "#indexName + '-' + #startDate + '-' + #endDate")
     public List<IndexChartPriceDto> getWonConvertedOverseasIndex(String indexName, String startDate, String endDate) {
         OverseasIndex overseasIndex = OverseasIndex.valueOf(indexName.toUpperCase());
         String currencyCode;

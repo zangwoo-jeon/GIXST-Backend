@@ -65,4 +65,8 @@ public class StockFinancialRatio {
 
     @Column(precision = 10, scale = 2)
     private BigDecimal psr; // Price Sales Ratio (Optional, requires Sales per Share)
+
+    @Column(nullable = false)
+    @Builder.Default
+    private boolean isSuspended = false; // 거래 정지 여부
 }

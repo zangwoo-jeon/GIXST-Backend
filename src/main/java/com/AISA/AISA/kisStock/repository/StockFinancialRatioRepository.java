@@ -15,26 +15,32 @@ public interface StockFinancialRatioRepository extends JpaRepository<StockFinanc
                         String divCode);
 
         // ROE 랭킹 조회
-        List<StockFinancialRatio> findAllByDivCodeAndStacYymmOrderByRoeDesc(String divCode, String stacYymm);
+        List<StockFinancialRatio> findAllByDivCodeAndStacYymmAndIsSuspendedFalseOrderByRoeDesc(String divCode,
+                        String stacYymm);
 
         // EPS 랭킹 조회
-        List<StockFinancialRatio> findAllByDivCodeAndStacYymmOrderByEpsDesc(String divCode, String stacYymm);
+        List<StockFinancialRatio> findAllByDivCodeAndStacYymmAndIsSuspendedFalseOrderByEpsDesc(String divCode,
+                        String stacYymm);
 
         // 부채비율 낮은 순 랭킹 조회
-        List<StockFinancialRatio> findAllByDivCodeAndStacYymmOrderByDebtRatioAsc(String divCode, String stacYymm);
+        List<StockFinancialRatio> findAllByDivCodeAndStacYymmAndIsSuspendedFalseOrderByDebtRatioAsc(String divCode,
+                        String stacYymm);
 
         // PER 낮은 순 랭킹 조회 (0보다 큰 값만)
-        List<StockFinancialRatio> findAllByDivCodeAndStacYymmAndPerGreaterThanOrderByPerAsc(String divCode,
+        List<StockFinancialRatio> findAllByDivCodeAndStacYymmAndIsSuspendedFalseAndPerGreaterThanOrderByPerAsc(
+                        String divCode,
                         String stacYymm,
                         java.math.BigDecimal zero);
 
         // PBR 낮은 순 랭킹 조회 (0보다 큰 값만)
-        List<StockFinancialRatio> findAllByDivCodeAndStacYymmAndPbrGreaterThanOrderByPbrAsc(String divCode,
+        List<StockFinancialRatio> findAllByDivCodeAndStacYymmAndIsSuspendedFalseAndPbrGreaterThanOrderByPbrAsc(
+                        String divCode,
                         String stacYymm,
                         java.math.BigDecimal zero);
 
         // PSR 낮은 순 랭킹 조회 (0보다 큰 값만)
-        List<StockFinancialRatio> findAllByDivCodeAndStacYymmAndPsrGreaterThanOrderByPsrAsc(String divCode,
+        List<StockFinancialRatio> findAllByDivCodeAndStacYymmAndIsSuspendedFalseAndPsrGreaterThanOrderByPsrAsc(
+                        String divCode,
                         String stacYymm,
                         java.math.BigDecimal zero);
 

@@ -18,20 +18,34 @@ export const options = {
     },
 };
 
+
 // 2. 가상 유저가 수행할 시나리오
 export default function () {
-    // 테스트할 대상 URL
-    // 환경 변수(TARGET_URL)가 있으면 그걸 쓰고, 없으면 아래 IP를 기본값으로 사용
+    // 테스트할 대상 URL (기본값 변경)
     const BASE_URL = __ENV.TARGET_URL || 'http://34.50.11.164:8080';
 
-    // GET 요청 테스트 (KOSPI-USD Ratio 조회)
-    const res = http.get(`${BASE_URL}/api/indices/kospi-usd-ratio?startDate=20050627&endDate=20251226`);
+    const stockCode = '005930'; // 삼성전자
 
-    // 응답 확인 (검증)
-    const isStatus200 = check(res, {
-        'status is 200': (r) => r.status === 200,
-    });
+    // 여러 API를 그룹으로 묶어서 동시 요청 (실제 브라우저 동작 시뮬레이션)
+    // 또는 순차적으로 호출하여 각 API의 성능 측정 중 선택.
+    // 여기서는 개별 성능 측정을 위해 순차 호출 + Check 사용
 
-    // 부하 조절을 위한 대기 시간 (0.5초 ~ 1.5초 랜덤)
+    const responses = http.batch([
+        ['GET', `${BASE_URL}/api/stocks/${stockCode}/price`],
+        ['GET', `${BASE_URL}/api/stocks/${stockCode}/chart?startDate=20000101&endDate=20251229&dateType=D`],
+        ['GET', `${BASE_URL}/api/stocks/financial/metrics/${stockCode}`],
+        ['GET', `${BASE_URL}/api/dividend/${stockCode}/dividend?startDate=20230101&endDate=20251229`],
+        ['GET', `${BASE_URL}/api/dividend/${stockCode}/detail`],
+        ['GET', `${BASE_URL}/api/stocks/financial/${stockCode}?divCode=0`],
+    ]);
+
+    check(responses[0], { 'Price status is 200': (r) => r.status === 200 });
+    check(responses[1], { 'Chart status is 200': (r) => r.status === 200 });
+    check(responses[2], { 'Metrics status is 200': (r) => r.status === 200 });
+    check(responses[3], { 'Dividend status is 200': (r) => r.status === 200 });
+    check(responses[4], { 'Dividend Detail status is 200': (r) => r.status === 200 });
+    check(responses[5], { 'Income Statement status is 200': (r) => r.status === 200 });
+
     sleep(1);
 }
+

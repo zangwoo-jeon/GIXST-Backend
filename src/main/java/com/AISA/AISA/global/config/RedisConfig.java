@@ -55,6 +55,15 @@ public class RedisConfig {
                 .disableCachingNullValues()
                 .entryTtl(Duration.ofHours(24));
 
+        // 1분 캐싱 (초단기 데이터 - 실시간 차트 부하 방지)
+        RedisCacheConfiguration shortTermConfig = RedisCacheConfiguration.defaultCacheConfig()
+                .serializeKeysWith(
+                        RedisSerializationContext.SerializationPair.fromSerializer(new StringRedisSerializer()))
+                .serializeValuesWith(RedisSerializationContext.SerializationPair
+                        .fromSerializer(new GenericJackson2JsonRedisSerializer()))
+                .disableCachingNullValues()
+                .entryTtl(Duration.ofMinutes(1));
+
         Map<String, RedisCacheConfiguration> configMap = new HashMap<>();
         configMap.put("indexChart", longTermConfig);
         configMap.put("overseasIndex", longTermConfig);
@@ -66,7 +75,18 @@ public class RedisConfig {
         configMap.put("macroExchangeRate", longTermConfig);
         configMap.put("kospiUsdRatio", longTermConfig);
         configMap.put("kosdaqUsdRatio", longTermConfig);
+        configMap.put("kospiUsdRatio", longTermConfig);
+        configMap.put("kosdaqUsdRatio", longTermConfig);
         configMap.put("stockChart", longTermConfig); // 주식 차트 과거 데이터
+
+        // 추가 장기 데이터 (24시간)
+        configMap.put("stockMetrics", longTermConfig);
+        configMap.put("stockDividend", longTermConfig);
+        configMap.put("stockDividendDetail", longTermConfig);
+        configMap.put("stockFinancial", longTermConfig);
+
+        // 초단기 데이터 (1분)
+        configMap.put("stockChartToday", shortTermConfig);
 
         return RedisCacheManager.builder(connectionFactory)
                 .cacheDefaults(defaultConfig)

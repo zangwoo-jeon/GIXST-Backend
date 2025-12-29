@@ -348,7 +348,7 @@ public class KisInformationService {
         return value.trim();
     }
 
-    @Cacheable(value = "stockFinancial", key = "#stockCode + '-' + #divCode")
+    @Cacheable(value = "stockFinancial", key = "#stockCode + '-' + #divCode", sync = true)
     public List<FinancialStatementDto> getIncomeStatement(String stockCode, String divCode) {
         // 1. Check DB
         List<StockFinancialStatement> dbData = stockFinancialStatementRepository
@@ -581,7 +581,7 @@ public class KisInformationService {
         }
     }
 
-    @Cacheable(value = "stockMetrics", key = "#stockCode")
+    @Cacheable(value = "stockMetrics", key = "#stockCode", sync = true)
     public InvestmentMetricDto getInvestmentMetrics(String stockCode) {
         // 1. Fetch latest financial ratio from API and save to DB
         // Use "0" (Yearly) as default, can be parameterized if needed.

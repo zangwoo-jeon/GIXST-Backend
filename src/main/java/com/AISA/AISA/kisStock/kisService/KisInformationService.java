@@ -159,6 +159,7 @@ public class KisInformationService {
         log.info("Completed Batch Financial Ratio Refresh");
     }
 
+    @Cacheable(value = "financialRank", key = "#sort + '-' + #divCode", sync = true)
     public FinancialRatioRankDto getFinancialRatioRank(String sort, String divCode) {
         // 1. Find latest available date
         StockFinancialRatio latest = stockFinancialRatioRepository.findTop1ByDivCodeOrderByStacYymmDesc(divCode);

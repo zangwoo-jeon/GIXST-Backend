@@ -244,6 +244,7 @@ public class DividendService {
                 return dtoList;
         }
 
+        @Cacheable(value = "dividendRank", key = "'all'", sync = true)
         public DividendRankDto getDividendRank() {
                 List<StockDividendRank> rankList = stockDividendRankRepository.findAll();
 

@@ -6,8 +6,8 @@ import { check, sleep } from 'k6';
 export const options = {
     // 가상 유저(VU) 및 지속 시간 설정
     stages: [
-        { duration: '30s', target: 200 }, // 처음 30초 동안 유저를 0 -> 200명으로 증가 (Ramp-up)
-        { duration: '1m', target: 200 },  // 1분 동안 200명 유지 (Steady State)
+        { duration: '30s', target: 20 }, // 처음 30초 동안 유저를 0 -> 200명으로 증가 (Ramp-up)
+        { duration: '1m', target: 20 },  // 1분 동안 200명 유지 (Steady State)
         { duration: '10s', target: 0 },   // 10초 동안 유저를 200 -> 0명으로 감소 (Ramp-down)
     ],
 

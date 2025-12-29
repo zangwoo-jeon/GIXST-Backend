@@ -6,9 +6,9 @@ import { check, sleep } from 'k6';
 export const options = {
     // 가상 유저(VU) 및 지속 시간 설정
     stages: [
-        { duration: '30s', target: 20 }, // 처음 30초 동안 유저를 0 -> 20명으로 증가 (Ramp-up)
-        { duration: '1m', target: 20 },  // 1분 동안 20명 유지 (Steady State)
-        { duration: '10s', target: 0 },  // 10초 동안 유저를 20 -> 0명으로 감소 (Ramp-down)
+        { duration: '30s', target: 200 }, // 처음 30초 동안 유저를 0 -> 200명으로 증가 (Ramp-up)
+        { duration: '1m', target: 200 },  // 1분 동안 200명 유지 (Steady State)
+        { duration: '10s', target: 0 },   // 10초 동안 유저를 200 -> 0명으로 감소 (Ramp-down)
     ],
 
     // 임계값 설정 (Thresholds) - 테스트 성공/실패 기준
@@ -24,8 +24,8 @@ export default function () {
     // 환경 변수(TARGET_URL)가 있으면 그걸 쓰고, 없으면 아래 IP를 기본값으로 사용
     const BASE_URL = __ENV.TARGET_URL || 'http://34.50.11.164:8080';
 
-    // GET 요청 테스트
-    const res = http.get(`${BASE_URL}/actuator/health`); // 헬스 체크 엔드포인트 공략
+    // GET 요청 테스트 (KOSPI-USD Ratio 조회)
+    const res = http.get(`${BASE_URL}/api/indices/kospi-usd-ratio?startDate=20050627&endDate=20251226`);
 
     // 응답 확인 (검증)
     const isStatus200 = check(res, {

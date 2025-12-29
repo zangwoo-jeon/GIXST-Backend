@@ -19,6 +19,7 @@ import com.AISA.AISA.kisStock.dto.Index.OverseasIndexStatusDto;
 import com.AISA.AISA.global.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import com.AISA.AISA.portfolio.macro.dto.MacroIndicatorDto;
@@ -169,6 +170,7 @@ public class KisIndexService {
     }
 
     // DB에서 조회하는 메서드 (Controller에서 사용)
+    @Cacheable(value = "indexChart", key = "#marketCode + '-' + #startDate + '-' + #endDate + '-' + #dateType")
     public IndexChartResponseDto getIndexChart(String marketCode, String startDate, String endDate,
             String dateType) {
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
@@ -375,6 +377,7 @@ public class KisIndexService {
     // 하지만 Controller에서 List<MacroIndicatorDto>를 받고 있으므로, Controller 수정과 맞물려야 함.
     // 일단 여기서는 IndexChartPriceDto (OHLC) 리스트를 반환하도록 변경하고 Controller도 수정하는게 맞음.
     // 기존 DTO 재활용: IndexChartPriceDto
+    @Cacheable(value = "overseasIndex", key = "#index.name() + '-' + #startDate + '-' + #endDate")
     public List<IndexChartPriceDto> fetchOverseasIndex(OverseasIndex index, String startDate, String endDate) {
         return fetchOverseasIndexData(index.getSymbol(), "N", index.getSymbol(), startDate, endDate);
     }
@@ -660,6 +663,7 @@ public class KisIndexService {
         return dataList;
     }
 
+    @Cacheable(value = "kospiUsdRatio", key = "#startDate + '-' + #endDate")
     public List<IndexChartPriceDto> getKospiUsdRatio(String startDate, String endDate) {
         // 1. Fetch KOSPI Data
         IndexChartResponseDto kospiData = getIndexChart("KOSPI", startDate, endDate, "D");
@@ -709,6 +713,7 @@ public class KisIndexService {
         return ratioList;
     }
 
+    @Cacheable(value = "kosdaqUsdRatio", key = "#startDate + '-' + #endDate")
     public List<IndexChartPriceDto> getKosdaqUsdRatio(String startDate, String endDate) {
         // 1. Fetch KOSDAQ Data
         IndexChartResponseDto kosdaqData = getIndexChart("KOSDAQ", startDate, endDate, "D");

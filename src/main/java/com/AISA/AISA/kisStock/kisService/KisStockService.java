@@ -139,53 +139,9 @@ public class KisStockService {
                         }
                 }
 
-                // Calculate USD prices
-                Map<String, Double> exchangeRateMap = kisMacroService.getExchangeRateMap(startDate,
-                                endDate);
-                DateTimeFormatter dtFormatter = DateTimeFormatter.ofPattern("yyyyMMdd");
-
-                List<StockChartPriceDto> finalMergedList = new ArrayList<>();
-                for (StockChartPriceDto dto : mergedList) {
-                        StockChartPriceDto newDto = dto; // Start with copy/ref
-                        try {
-                                LocalDate date = LocalDate.parse(dto.getDate(), dtFormatter);
-                                Double rate = null;
-
-                                for (int i = 0; i < 7; i++) {
-                                        String queryDate = date.minusDays(i).format(dtFormatter);
-                                        rate = exchangeRateMap.get(queryDate);
-                                        if (rate != null)
-                                                break;
-                                }
-
-                                if (rate != null && rate > 0) {
-                                        newDto = StockChartPriceDto.builder()
-                                                        .date(dto.getDate())
-                                                        .closePrice(dto.getClosePrice())
-                                                        .openPrice(dto.getOpenPrice())
-                                                        .highPrice(dto.getHighPrice())
-                                                        .lowPrice(dto.getLowPrice())
-                                                        .volume(dto.getVolume())
-                                                        .closePriceUsd(String.format("%.2f",
-                                                                        Double.parseDouble(dto.getClosePrice())
-                                                                                        / rate))
-                                                        .openPriceUsd(String.format("%.2f",
-                                                                        Double.parseDouble(dto.getOpenPrice())
-                                                                                        / rate))
-                                                        .highPriceUsd(String.format("%.2f",
-                                                                        Double.parseDouble(dto.getHighPrice())
-                                                                                        / rate))
-                                                        .lowPriceUsd(String.format("%.2f",
-                                                                        Double.parseDouble(dto.getLowPrice())
-                                                                                        / rate))
-                                                        .exchangeRate(String.format("%.2f", rate))
-                                                        .build();
-                                }
-                        } catch (Exception e) {
-                                // ignore
-                        }
-                        finalMergedList.add(newDto);
-                }
+                // Calculate USD prices (Moved to cached methods)
+                // Just merge and return
+                List<StockChartPriceDto> finalMergedList = new ArrayList<>(mergedList);
 
                 return StockChartResponseDto.builder()
                                 .rtCd("0")
@@ -279,7 +235,9 @@ public class KisStockService {
 
                         List<StockChartPriceDto> mergedList = new ArrayList<>(filteredApiList);
                         mergedList.addAll(dbPriceList);
-                        return mergedList;
+
+                        // Apply USD Conversion before caching
+                        return applyUsdConversion(mergedList, startDate, endDate);
 
                 } catch (Exception e) {
                         log.warn("API 조회 실패, DB 데이터로 대체합니다: {}", e.getMessage());
@@ -289,9 +247,12 @@ public class KisStockService {
 
                         pastDataList = filterHistoricalData(pastDataList, dateType);
 
-                        return pastDataList.stream()
+                        List<StockChartPriceDto> dtos = pastDataList.stream()
                                         .map(this::convertToDto)
                                         .collect(Collectors.toList());
+
+                        // Apply USD Conversion before caching
+                        return applyUsdConversion(dtos, startDate, endDate);
                 }
         }
 
@@ -301,7 +262,10 @@ public class KisStockService {
                 try {
                         StockChartResponseDto response = fetchStockChartFromApi(stockCode, today, today, "D");
                         if (response.getPriceList() != null && !response.getPriceList().isEmpty()) {
-                                return response.getPriceList().get(0);
+                                List<StockChartPriceDto> singleList = new ArrayList<>();
+                                singleList.add(response.getPriceList().get(0));
+                                List<StockChartPriceDto> converted = applyUsdConversion(singleList, today, today);
+                                return converted.get(0);
                         }
                 } catch (Exception e) {
                         log.warn("Failed to fetch today's data for {}: {}", stockCode, e.getMessage());
@@ -576,5 +540,54 @@ public class KisStockService {
                                                 .marketName(stock.getMarketName())
                                                 .build())
                                 .collect(Collectors.toList());
+        }
+
+        private List<StockChartPriceDto> applyUsdConversion(List<StockChartPriceDto> list, String startDate,
+                        String endDate) {
+                if (list == null || list.isEmpty()) {
+                        return list;
+                }
+                Map<String, Double> exchangeRateMap = kisMacroService.getExchangeRateMap(startDate, endDate);
+                DateTimeFormatter dtFormatter = DateTimeFormatter.ofPattern("yyyyMMdd");
+
+                List<StockChartPriceDto> result = new ArrayList<>();
+                for (StockChartPriceDto dto : list) {
+                        StockChartPriceDto newDto = dto;
+                        try {
+                                LocalDate date = LocalDate.parse(dto.getDate(), dtFormatter);
+                                Double rate = null;
+
+                                for (int i = 0; i < 7; i++) {
+                                        String queryDate = date.minusDays(i).format(dtFormatter);
+                                        rate = exchangeRateMap.get(queryDate);
+                                        if (rate != null)
+                                                break;
+                                }
+
+                                if (rate != null && rate > 0) {
+                                        newDto = StockChartPriceDto.builder()
+                                                        .date(dto.getDate())
+                                                        .closePrice(dto.getClosePrice())
+                                                        .openPrice(dto.getOpenPrice())
+                                                        .highPrice(dto.getHighPrice())
+                                                        .lowPrice(dto.getLowPrice())
+                                                        .volume(dto.getVolume())
+                                                        .closePriceUsd(String.format("%.2f",
+                                                                        Double.parseDouble(dto.getClosePrice()) / rate))
+                                                        .openPriceUsd(String.format("%.2f",
+                                                                        Double.parseDouble(dto.getOpenPrice()) / rate))
+                                                        .highPriceUsd(String.format("%.2f",
+                                                                        Double.parseDouble(dto.getHighPrice()) / rate))
+                                                        .lowPriceUsd(String.format("%.2f",
+                                                                        Double.parseDouble(dto.getLowPrice()) / rate))
+                                                        .exchangeRate(String.format("%.2f", rate))
+                                                        .build();
+                                }
+                        } catch (Exception e) {
+                                // ignore
+                        }
+                        result.add(newDto);
+                }
+                return result;
         }
 }

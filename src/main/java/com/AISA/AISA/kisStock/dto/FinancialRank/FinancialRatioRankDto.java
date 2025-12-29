@@ -9,6 +9,8 @@ import lombok.ToString;
 import java.util.List;
 
 @Getter
+@NoArgsConstructor
+@AllArgsConstructor
 @Builder
 @ToString
 public class FinancialRatioRankDto {

@@ -11,6 +11,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.cache.annotation.Cacheable;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
@@ -38,6 +39,7 @@ public class EcosService {
     private static final String ITEM_CODE_CPI_TOTAL = "0"; // 총지수 (API 문서상 '0' 또는 'A01' 등이 아닌 최상위 코드 확인 필요, 보통 '0'이 총지수)
 
     @Transactional(readOnly = true)
+    @Cacheable(value = "macroM2", key = "#startDateStr + '-' + #endDateStr")
     public List<MacroIndicatorDto> fetchM2MoneySupply(String startDateStr, String endDateStr) {
         String startMonth = startDateStr.substring(0, 6);
         String endMonth = endDateStr.substring(0, 6);
@@ -45,6 +47,7 @@ public class EcosService {
     }
 
     @Transactional(readOnly = true)
+    @Cacheable(value = "macroBaseRate", key = "#startDateStr + '-' + #endDateStr")
     public List<MacroIndicatorDto> fetchBaseRate(String startDateStr, String endDateStr) {
         String startMonth = startDateStr.substring(0, 6);
         String endMonth = endDateStr.substring(0, 6);
@@ -52,6 +55,7 @@ public class EcosService {
     }
 
     @Transactional(readOnly = true)
+    @Cacheable(value = "macroCPI", key = "#startDateStr + '-' + #endDateStr")
     public List<MacroIndicatorDto> fetchCPI(String startDateStr, String endDateStr) {
         String startMonth = startDateStr.substring(0, 6);
         String endMonth = endDateStr.substring(0, 6);

@@ -27,6 +27,7 @@ import java.util.Map;
 import com.AISA.AISA.kisStock.repository.StockRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -347,6 +348,7 @@ public class KisInformationService {
         return value.trim();
     }
 
+    @Cacheable(value = "stockFinancial", key = "#stockCode + '-' + #divCode")
     public List<FinancialStatementDto> getIncomeStatement(String stockCode, String divCode) {
         // 1. Check DB
         List<StockFinancialStatement> dbData = stockFinancialStatementRepository
@@ -579,6 +581,7 @@ public class KisInformationService {
         }
     }
 
+    @Cacheable(value = "stockMetrics", key = "#stockCode")
     public InvestmentMetricDto getInvestmentMetrics(String stockCode) {
         // 1. Fetch latest financial ratio from API and save to DB
         // Use "0" (Yearly) as default, can be parameterized if needed.

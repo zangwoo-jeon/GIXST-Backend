@@ -19,6 +19,8 @@ import com.AISA.AISA.portfolio.PortfolioStock.PortStock;
 import com.AISA.AISA.portfolio.PortfolioStock.PortStockRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 
@@ -59,6 +61,7 @@ public class DividendService {
         private final StockDividendRepository stockDividendRepository;
         private final PortStockRepository portStockRepository;
 
+        @Cacheable(value = "stockDividend", key = "#stockCode + '-' + #startDate + '-' + #endDate")
         public List<StockDividendInfoDto> getDividendInfo(
                         String stockCode,
                         String startDate,
@@ -381,6 +384,7 @@ public class DividendService {
                 log.info("Refreshed Dividend Rank with {} stocks.", newRankList.size());
         }
 
+        @Cacheable(value = "stockDividendDetail", key = "#stockCode")
         public DividendDetailDto getDividendDetail(String stockCode) {
                 // 1. 기간 설정 (최근 1년)
                 String endDate = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));

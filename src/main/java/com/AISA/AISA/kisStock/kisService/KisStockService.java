@@ -294,6 +294,7 @@ public class KisStockService {
                 }
         }
 
+        @Cacheable(value = "stockChartToday", key = "#stockCode")
         public StockChartPriceDto getTodayStockChart(String stockCode) {
                 String today = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
                 try {

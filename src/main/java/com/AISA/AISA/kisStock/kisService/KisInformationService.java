@@ -171,23 +171,30 @@ public class KisInformationService {
         // 2. Fetch Ranking
         List<StockFinancialRatio> ratios;
         if ("roe".equalsIgnoreCase(sort)) {
-            ratios = stockFinancialRatioRepository.findAllByDivCodeAndStacYymmOrderByRoeDesc(divCode, stacYymm);
+            ratios = stockFinancialRatioRepository.findAllByDivCodeAndStacYymmAndIsSuspendedFalseOrderByRoeDesc(divCode,
+                    stacYymm);
         } else if ("eps".equalsIgnoreCase(sort)) {
-            ratios = stockFinancialRatioRepository.findAllByDivCodeAndStacYymmOrderByEpsDesc(divCode, stacYymm);
+            ratios = stockFinancialRatioRepository.findAllByDivCodeAndStacYymmAndIsSuspendedFalseOrderByEpsDesc(divCode,
+                    stacYymm);
         } else if ("debt".equalsIgnoreCase(sort) || "debtratio".equalsIgnoreCase(sort)) {
-            ratios = stockFinancialRatioRepository.findAllByDivCodeAndStacYymmOrderByDebtRatioAsc(divCode, stacYymm);
+            ratios = stockFinancialRatioRepository
+                    .findAllByDivCodeAndStacYymmAndIsSuspendedFalseOrderByDebtRatioAsc(divCode, stacYymm);
         } else if ("per".equalsIgnoreCase(sort)) {
-            ratios = stockFinancialRatioRepository.findAllByDivCodeAndStacYymmAndPerGreaterThanOrderByPerAsc(divCode,
-                    stacYymm, java.math.BigDecimal.ZERO);
+            ratios = stockFinancialRatioRepository
+                    .findAllByDivCodeAndStacYymmAndIsSuspendedFalseAndPerGreaterThanOrderByPerAsc(divCode,
+                            stacYymm, java.math.BigDecimal.ZERO);
         } else if ("pbr".equalsIgnoreCase(sort)) {
-            ratios = stockFinancialRatioRepository.findAllByDivCodeAndStacYymmAndPbrGreaterThanOrderByPbrAsc(divCode,
-                    stacYymm, java.math.BigDecimal.ZERO);
+            ratios = stockFinancialRatioRepository
+                    .findAllByDivCodeAndStacYymmAndIsSuspendedFalseAndPbrGreaterThanOrderByPbrAsc(divCode,
+                            stacYymm, java.math.BigDecimal.ZERO);
         } else if ("psr".equalsIgnoreCase(sort)) {
-            ratios = stockFinancialRatioRepository.findAllByDivCodeAndStacYymmAndPsrGreaterThanOrderByPsrAsc(divCode,
-                    stacYymm, java.math.BigDecimal.ZERO);
+            ratios = stockFinancialRatioRepository
+                    .findAllByDivCodeAndStacYymmAndIsSuspendedFalseAndPsrGreaterThanOrderByPsrAsc(divCode,
+                            stacYymm, java.math.BigDecimal.ZERO);
         } else {
             // Default ROE
-            ratios = stockFinancialRatioRepository.findAllByDivCodeAndStacYymmOrderByRoeDesc(divCode, stacYymm);
+            ratios = stockFinancialRatioRepository.findAllByDivCodeAndStacYymmAndIsSuspendedFalseOrderByRoeDesc(divCode,
+                    stacYymm);
         }
 
         // 3. Map Stock Names (Optimize N+1)
@@ -250,8 +257,9 @@ public class KisInformationService {
                 return new ArrayList<>();
             }
 
-            // 2. Fetch Current Price (for PER/PBR Calc)
-            BigDecimal currentPrice = fetchCurrentPrice(stockCode, accessToken);
+            // 2. Fetch Current Price & Status
+            StockPriceInfo priceInfo = fetchCurrentPrice(stockCode, accessToken);
+            BigDecimal currentPrice = priceInfo.price;
 
             List<StockFinancialRatio> entitiesToSave = new ArrayList<>();
 
@@ -266,7 +274,8 @@ public class KisInformationService {
                         : StockFinancialRatio.builder()
                                 .stockCode(stockCode)
                                 .stacYymm(item.getStacYymm())
-                                .divCode(divCode);
+                                .divCode(divCode)
+                                .isSuspended(priceInfo.isSuspended); // Set Suspension Status
 
                 // Set/Update Financials
                 BigDecimal eps = new BigDecimal(parseRateSafe(item.getEps()));
@@ -274,6 +283,7 @@ public class KisInformationService {
                 BigDecimal sps = new BigDecimal(parseRateSafe(item.getSps()));
 
                 builder.roe(new BigDecimal(parseRateSafe(item.getRoeVal())))
+                        .isSuspended(priceInfo.isSuspended) // Ensure update on existing
                         .eps(eps)
                         .bps(bps)
                         .debtRatio(new BigDecimal(parseRateSafe(item.getLbltRate())))
@@ -312,7 +322,7 @@ public class KisInformationService {
         }
     }
 
-    private BigDecimal fetchCurrentPrice(String stockCode, String accessToken) {
+    private StockPriceInfo fetchCurrentPrice(String stockCode, String accessToken) {
         try {
             String responseBody = webClient.get()
                     .uri(uriBuilder -> uriBuilder
@@ -331,15 +341,35 @@ public class KisInformationService {
             if (responseBody != null) {
                 com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
                 com.fasterxml.jackson.databind.JsonNode root = mapper.readTree(responseBody);
-                String priceStr = root.path("output").path("stck_prpr").asText();
+                com.fasterxml.jackson.databind.JsonNode output = root.path("output");
+
+                String priceStr = output.path("stck_prpr").asText();
+                String statusCode = output.path("iscd_stat_cls_code").asText(); // 종목상태구분코드
+
+                BigDecimal price = BigDecimal.ZERO;
                 if (priceStr != null && !priceStr.isEmpty()) {
-                    return new BigDecimal(priceStr);
+                    price = new BigDecimal(priceStr);
                 }
+
+                // Check for Suspension (58: 거래정지)
+                boolean isSuspended = "58".equals(statusCode);
+
+                return new StockPriceInfo(price, isSuspended);
             }
         } catch (Exception e) {
             log.warn("Failed to fetch price for {}: {}", stockCode, e.getMessage());
         }
-        return BigDecimal.ZERO;
+        return new StockPriceInfo(BigDecimal.ZERO, false);
+    }
+
+    private static class StockPriceInfo {
+        BigDecimal price;
+        boolean isSuspended;
+
+        StockPriceInfo(BigDecimal price, boolean isSuspended) {
+            this.price = price;
+            this.isSuspended = isSuspended;
+        }
     }
 
     private String parseRateSafe(String value) {

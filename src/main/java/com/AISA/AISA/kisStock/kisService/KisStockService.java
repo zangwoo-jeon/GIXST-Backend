@@ -19,6 +19,7 @@ import com.AISA.AISA.kisStock.repository.StockDailyDataRepository;
 import com.AISA.AISA.kisStock.repository.StockRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -101,7 +102,99 @@ public class KisStockService {
                                 exchangeRateStr);
         }
 
+        // Hybrid Caching: Past Data (Cached) + Today's Data (Real-time)
         public StockChartResponseDto getStockChart(String stockCode, String startDate, String endDate,
+                        String dateType) {
+                DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
+                LocalDate targetStartDate = LocalDate.parse(startDate, formatter);
+                LocalDate targetEndDate = LocalDate.parse(endDate, formatter);
+                LocalDate today = LocalDate.now();
+
+                // 1. Fetch Past Data (Cached)
+                // If endDate is today or future, we fetch up to yesterday from cache.
+                // If endDate is past, we fetch up to endDate from cache.
+                LocalDate pastEndDate = targetEndDate;
+                if (!pastEndDate.isBefore(today)) {
+                        pastEndDate = today.minusDays(1);
+                }
+
+                List<StockChartPriceDto> mergedList = new ArrayList<>();
+
+                // Only fetch past data if range allows
+                if (!pastEndDate.isBefore(targetStartDate)) {
+                        List<StockChartPriceDto> pastData = getPastStockChart(stockCode, startDate,
+                                        pastEndDate.format(formatter), dateType);
+                        if (pastData != null) {
+                                mergedList.addAll(pastData);
+                        }
+                }
+
+                // 2. Fetch Today's Data (Real-time) if needed
+                if (!targetEndDate.isBefore(today) && "D".equals(dateType)) { // Today data only relevant for Daily
+                                                                              // chart
+                        StockChartPriceDto todayData = getTodayStockChart(stockCode);
+                        if (todayData != null) {
+                                mergedList.add(todayData);
+                        }
+                }
+
+                // Calculate USD prices
+                Map<String, Double> exchangeRateMap = kisMacroService.getExchangeRateMap(startDate,
+                                endDate);
+                DateTimeFormatter dtFormatter = DateTimeFormatter.ofPattern("yyyyMMdd");
+
+                List<StockChartPriceDto> finalMergedList = new ArrayList<>();
+                for (StockChartPriceDto dto : mergedList) {
+                        StockChartPriceDto newDto = dto; // Start with copy/ref
+                        try {
+                                LocalDate date = LocalDate.parse(dto.getDate(), dtFormatter);
+                                Double rate = null;
+
+                                for (int i = 0; i < 7; i++) {
+                                        String queryDate = date.minusDays(i).format(dtFormatter);
+                                        rate = exchangeRateMap.get(queryDate);
+                                        if (rate != null)
+                                                break;
+                                }
+
+                                if (rate != null && rate > 0) {
+                                        newDto = StockChartPriceDto.builder()
+                                                        .date(dto.getDate())
+                                                        .closePrice(dto.getClosePrice())
+                                                        .openPrice(dto.getOpenPrice())
+                                                        .highPrice(dto.getHighPrice())
+                                                        .lowPrice(dto.getLowPrice())
+                                                        .volume(dto.getVolume())
+                                                        .closePriceUsd(String.format("%.2f",
+                                                                        Double.parseDouble(dto.getClosePrice())
+                                                                                        / rate))
+                                                        .openPriceUsd(String.format("%.2f",
+                                                                        Double.parseDouble(dto.getOpenPrice())
+                                                                                        / rate))
+                                                        .highPriceUsd(String.format("%.2f",
+                                                                        Double.parseDouble(dto.getHighPrice())
+                                                                                        / rate))
+                                                        .lowPriceUsd(String.format("%.2f",
+                                                                        Double.parseDouble(dto.getLowPrice())
+                                                                                        / rate))
+                                                        .exchangeRate(String.format("%.2f", rate))
+                                                        .build();
+                                }
+                        } catch (Exception e) {
+                                // ignore
+                        }
+                        finalMergedList.add(newDto);
+                }
+
+                return StockChartResponseDto.builder()
+                                .rtCd("0")
+                                .msg1("Success")
+                                .priceList(finalMergedList)
+                                .build();
+        }
+
+        @Cacheable(value = "stockChart", key = "#stockCode + '-' + #startDate + '-' + #endDate + '-' + #dateType")
+        public List<StockChartPriceDto> getPastStockChart(String stockCode, String startDate, String endDate,
                         String dateType) {
                 DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
                 LocalDate targetStartDate = LocalDate.parse(startDate, formatter);
@@ -185,112 +278,7 @@ public class KisStockService {
 
                         List<StockChartPriceDto> mergedList = new ArrayList<>(filteredApiList);
                         mergedList.addAll(dbPriceList);
-
-                        // Calculate USD prices
-                        Map<String, Double> exchangeRateMap = kisMacroService.getExchangeRateMap(startDate,
-                                        endDate);
-                        DateTimeFormatter dtFormatter = DateTimeFormatter.ofPattern("yyyyMMdd");
-
-                        for (StockChartPriceDto dto : mergedList) {
-                                try {
-                                        LocalDate date = LocalDate.parse(dto.getDate(), dtFormatter);
-                                        Double rate = null;
-
-                                        // Try to find rate for up to 7 days back
-                                        for (int i = 0; i < 7; i++) {
-                                                String queryDate = date.minusDays(i).format(dtFormatter);
-                                                rate = exchangeRateMap.get(queryDate);
-                                                if (rate != null)
-                                                        break;
-                                        }
-
-                                        if (rate != null && rate > 0) {
-                                                dto = StockChartPriceDto.builder()
-                                                                .date(dto.getDate())
-                                                                .closePrice(dto.getClosePrice())
-                                                                .openPrice(dto.getOpenPrice())
-                                                                .highPrice(dto.getHighPrice())
-                                                                .lowPrice(dto.getLowPrice())
-                                                                .volume(dto.getVolume())
-                                                                .closePriceUsd(String.format("%.2f",
-                                                                                Double.parseDouble(dto.getClosePrice())
-                                                                                                / rate))
-                                                                .openPriceUsd(String.format("%.2f",
-                                                                                Double.parseDouble(dto.getOpenPrice())
-                                                                                                / rate))
-                                                                .highPriceUsd(String.format("%.2f",
-                                                                                Double.parseDouble(dto.getHighPrice())
-                                                                                                / rate))
-                                                                .lowPriceUsd(String.format("%.2f",
-                                                                                Double.parseDouble(dto.getLowPrice())
-                                                                                                / rate))
-                                                                .exchangeRate(String.format("%.2f", rate))
-                                                                .build();
-
-                                                // Replace the object in list (Wait, list contains references but DTO is
-                                                // immutable due to Builder if not carefully handled.
-                                                // Ideally, DTO should have setters or I should replace element in list.
-                                                // Since DTO fields were private and I didn't add Setters in Plan, I
-                                                // must reconstruct and replace.)
-
-                                                // Correction: iterating with for-each and reassigning `dto` variable
-                                                // DOES NOT change the list content.
-                                                // I must use index-based loop.
-                                        }
-                                } catch (Exception e) {
-                                        log.warn("Failed to calc USD for date {}: {}", dto.getDate(), e.getMessage());
-                                }
-                        }
-
-                        // Re-implement loop correctly
-                        List<StockChartPriceDto> finalMergedList = new ArrayList<>();
-                        for (StockChartPriceDto dto : mergedList) {
-                                StockChartPriceDto newDto = dto; // Start with copy/ref
-                                try {
-                                        LocalDate date = LocalDate.parse(dto.getDate(), dtFormatter);
-                                        Double rate = null;
-
-                                        for (int i = 0; i < 7; i++) {
-                                                String queryDate = date.minusDays(i).format(dtFormatter);
-                                                rate = exchangeRateMap.get(queryDate);
-                                                if (rate != null)
-                                                        break;
-                                        }
-
-                                        if (rate != null && rate > 0) {
-                                                newDto = StockChartPriceDto.builder()
-                                                                .date(dto.getDate())
-                                                                .closePrice(dto.getClosePrice())
-                                                                .openPrice(dto.getOpenPrice())
-                                                                .highPrice(dto.getHighPrice())
-                                                                .lowPrice(dto.getLowPrice())
-                                                                .volume(dto.getVolume())
-                                                                .closePriceUsd(String.format("%.2f",
-                                                                                Double.parseDouble(dto.getClosePrice())
-                                                                                                / rate))
-                                                                .openPriceUsd(String.format("%.2f",
-                                                                                Double.parseDouble(dto.getOpenPrice())
-                                                                                                / rate))
-                                                                .highPriceUsd(String.format("%.2f",
-                                                                                Double.parseDouble(dto.getHighPrice())
-                                                                                                / rate))
-                                                                .lowPriceUsd(String.format("%.2f",
-                                                                                Double.parseDouble(dto.getLowPrice())
-                                                                                                / rate))
-                                                                .exchangeRate(String.format("%.2f", rate))
-                                                                .build();
-                                        }
-                                } catch (Exception e) {
-                                        // ignore
-                                }
-                                finalMergedList.add(newDto);
-                        }
-
-                        return StockChartResponseDto.builder()
-                                        .rtCd(apiResponse.getRtCd())
-                                        .msg1(apiResponse.getMsg1())
-                                        .priceList(finalMergedList)
-                                        .build();
+                        return mergedList;
 
                 } catch (Exception e) {
                         log.warn("API 조회 실패, DB 데이터로 대체합니다: {}", e.getMessage());
@@ -300,16 +288,23 @@ public class KisStockService {
 
                         pastDataList = filterHistoricalData(pastDataList, dateType);
 
-                        List<StockChartPriceDto> dbPriceList = pastDataList.stream()
+                        return pastDataList.stream()
                                         .map(this::convertToDto)
                                         .collect(Collectors.toList());
-
-                        return StockChartResponseDto.builder()
-                                        .rtCd("0")
-                                        .msg1("Fetched from DB (Fallback)")
-                                        .priceList(dbPriceList)
-                                        .build();
                 }
+        }
+
+        public StockChartPriceDto getTodayStockChart(String stockCode) {
+                String today = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
+                try {
+                        StockChartResponseDto response = fetchStockChartFromApi(stockCode, today, today, "D");
+                        if (response.getPriceList() != null && !response.getPriceList().isEmpty()) {
+                                return response.getPriceList().get(0);
+                        }
+                } catch (Exception e) {
+                        log.warn("Failed to fetch today's data for {}: {}", stockCode, e.getMessage());
+                }
+                return null;
         }
 
         private StockChartResponseDto fetchStockChartFromApi(String stockCode, String startDate, String endDate,

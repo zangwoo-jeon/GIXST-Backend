@@ -417,17 +417,41 @@ public class KisInformationService {
                 return new ArrayList<>();
             }
 
-            // Save to DB
-            List<StockFinancialStatement> entitiesToSave = response.getOutput().stream()
-                    .map(item -> StockFinancialStatement.builder()
+            // Fetch Current Price & Status
+            StockPriceInfo priceInfo = fetchCurrentPrice(stockCode, accessToken);
+
+            // Save to DB with Upsert Logic
+            List<StockFinancialStatement> entitiesToSave = new ArrayList<>();
+            for (KisIncomeStatementApiResponse.IncomeStatementOutput item : response.getOutput()) {
+                StockFinancialStatement existing = stockFinancialStatementRepository
+                        .findByStockCodeAndStacYymmAndDivCode(stockCode, item.getStacYymm(), divCode)
+                        .orElse(null);
+
+                StockFinancialStatement entity;
+                if (existing != null) {
+                    entity = StockFinancialStatement.builder()
+                            .id(existing.getId()) // Keep ID for update
                             .stockCode(stockCode)
                             .stacYymm(item.getStacYymm())
                             .divCode(divCode)
+                            .isSuspended(priceInfo.isSuspended)
                             .saleAccount(new BigDecimal(parseLongSafe(item.getSaleAccount())))
                             .operatingProfit(new BigDecimal(parseLongSafe(item.getBsopPrti())))
                             .netIncome(new BigDecimal(parseLongSafe(item.getThtrNtin())))
-                            .build())
-                    .collect(Collectors.toList());
+                            .build();
+                } else {
+                    entity = StockFinancialStatement.builder()
+                            .stockCode(stockCode)
+                            .stacYymm(item.getStacYymm())
+                            .divCode(divCode)
+                            .isSuspended(priceInfo.isSuspended)
+                            .saleAccount(new BigDecimal(parseLongSafe(item.getSaleAccount())))
+                            .operatingProfit(new BigDecimal(parseLongSafe(item.getBsopPrti())))
+                            .netIncome(new BigDecimal(parseLongSafe(item.getThtrNtin())))
+                            .build();
+                }
+                entitiesToSave.add(entity);
+            }
 
             try {
                 stockFinancialStatementRepository.saveAll(entitiesToSave);
@@ -513,17 +537,20 @@ public class KisInformationService {
 
         List<StockFinancialStatement> ranks;
         if ("operating".equalsIgnoreCase(sort)) {
-            ranks = stockFinancialStatementRepository.findTop20ByStacYymmAndDivCodeOrderByOperatingProfitDesc(stacYymm,
-                    divCode);
+            ranks = stockFinancialStatementRepository
+                    .findTop20ByStacYymmAndDivCodeAndIsSuspendedFalseOrderByOperatingProfitDesc(stacYymm,
+                            divCode);
         } else if ("netincome".equalsIgnoreCase(sort)) {
-            ranks = stockFinancialStatementRepository.findTop20ByStacYymmAndDivCodeOrderByNetIncomeDesc(stacYymm,
-                    divCode);
+            ranks = stockFinancialStatementRepository
+                    .findTop20ByStacYymmAndDivCodeAndIsSuspendedFalseOrderByNetIncomeDesc(stacYymm,
+                            divCode);
         } else if ("margin".equalsIgnoreCase(sort) || "operatingmargin".equalsIgnoreCase(sort)) {
             ranks = stockFinancialStatementRepository.findTop20ByOperatingMarginDesc(stacYymm, divCode,
                     org.springframework.data.domain.Pageable.ofSize(20));
         } else {
-            ranks = stockFinancialStatementRepository.findTop20ByStacYymmAndDivCodeOrderBySaleAccountDesc(stacYymm,
-                    divCode);
+            ranks = stockFinancialStatementRepository
+                    .findTop20ByStacYymmAndDivCodeAndIsSuspendedFalseOrderBySaleAccountDesc(stacYymm,
+                            divCode);
         }
 
         Map<String, String> stockMap = stockRepository.findAll().stream()
@@ -547,7 +574,7 @@ public class KisInformationService {
         return FinancialRankDto.builder().ranks(entries).build();
     }
 
-    @Transactional
+    // Removed @Transactional to prevent rollback loop
     public void fetchAndSaveAllFinancialStatements() {
         log.info("Starting fetchAndSaveAllFinancialStatements (Migration to refreshAllIncomeStatements)");
         // Previously used for init ranking, now use refactored method

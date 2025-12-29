@@ -61,7 +61,7 @@ public class DividendService {
         private final StockDividendRepository stockDividendRepository;
         private final PortStockRepository portStockRepository;
 
-        @Cacheable(value = "stockDividend", key = "#stockCode + '-' + #startDate + '-' + #endDate")
+        @Cacheable(value = "stockDividend", key = "#stockCode + '-' + #startDate + '-' + #endDate", sync = true)
         public List<StockDividendInfoDto> getDividendInfo(
                         String stockCode,
                         String startDate,
@@ -384,7 +384,7 @@ public class DividendService {
                 log.info("Refreshed Dividend Rank with {} stocks.", newRankList.size());
         }
 
-        @Cacheable(value = "stockDividendDetail", key = "#stockCode")
+        @Cacheable(value = "stockDividendDetail", key = "#stockCode", sync = true)
         public DividendDetailDto getDividendDetail(String stockCode) {
                 // 1. 기간 설정 (최근 1년)
                 String endDate = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));

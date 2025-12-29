@@ -47,6 +47,7 @@ public class KisStockService {
         private final StockDailyDataRepository stockDailyDataRepository;
         private final KisMacroService kisMacroService;
 
+        @Cacheable(value = "stockPrice", key = "#stockCode", sync = true)
         public StockPriceDto getStockPrice(String stockCode) {
                 String accessToken = kisAuthService.getAccessToken();
 
@@ -294,7 +295,7 @@ public class KisStockService {
                 }
         }
 
-        @Cacheable(value = "stockChartToday", key = "#stockCode")
+        @Cacheable(value = "stockChartToday", key = "#stockCode", sync = true)
         public StockChartPriceDto getTodayStockChart(String stockCode) {
                 String today = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
                 try {

@@ -6,6 +6,7 @@ import com.AISA.AISA.kisStock.dto.StockPrice.StockChartResponseDto;
 import com.AISA.AISA.kisStock.dto.StockPrice.StockPriceDto;
 import com.AISA.AISA.kisStock.dto.StockSearchResponseDto;
 import com.AISA.AISA.kisStock.dto.VolumeRank.VolumeRankDto;
+import com.AISA.AISA.kisStock.kisService.Auth.KisAuthService;
 import com.AISA.AISA.kisStock.kisService.KisStockService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -15,13 +16,15 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
+import static org.springframework.http.MediaType.APPLICATION_JSON;
+
 @RestController
 @RequestMapping("/api/stocks")
 @RequiredArgsConstructor
 @Tag(name = "주식 API", description = "주식 관련 API")
 public class KisStockController {
     private final KisStockService kisStockService;
-    private final com.AISA.AISA.kisStock.kisService.Auth.KisAuthService kisAuthService;
+    private final KisAuthService kisAuthService;
 
     @GetMapping("/token")
     @Operation(summary = "Access Token 조회", description = "현재 유효한 KIS Access Token을 조회합니다.")
@@ -46,13 +49,22 @@ public class KisStockController {
 
     @GetMapping("/{stockCode}/chart")
     @Operation(summary = "주식 차트 데이터 조회", description = "특정 주식의 차트 데이터를 조회합니다.")
-    public ResponseEntity<SuccessResponse<StockChartResponseDto>> getStockChart(
+    public ResponseEntity<String> getStockChart(
             @PathVariable String stockCode,
             @RequestParam String startDate,
             @RequestParam String endDate,
             @RequestParam(defaultValue = "D") String dateType) {
-        StockChartResponseDto chartData = kisStockService.getStockChart(stockCode, startDate, endDate, dateType);
-        return ResponseEntity.ok(new SuccessResponse<>(true, "주식 차트 데이터 조회 성공", chartData));
+        String chartDataJson = kisStockService.getStockChartJson(stockCode, startDate, endDate, dateType);
+
+        // Manual JSON construction to wrap with SuccessResponse structure
+        // Avoiding object serialization overhead
+        String responseJson = String.format(
+                "{\"Success\":true,\"message\":\"주식 차트 데이터 조회 성공\",\"data\":%s}",
+                chartDataJson);
+
+        return ResponseEntity.ok()
+                .contentType(APPLICATION_JSON)
+                .body(responseJson);
     }
 
     @PostMapping("/init-history/{stockCode}")

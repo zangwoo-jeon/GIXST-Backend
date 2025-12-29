@@ -35,6 +35,8 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import java.time.temporal.WeekFields;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -46,6 +48,7 @@ public class KisStockService {
         private final StockRepository stockRepository;
         private final StockDailyDataRepository stockDailyDataRepository;
         private final KisMacroService kisMacroService;
+        private final ObjectMapper objectMapper;
 
         @Cacheable(value = "stockPrice", key = "#stockCode", sync = true)
         public StockPriceDto getStockPrice(String stockCode) {
@@ -104,61 +107,77 @@ public class KisStockService {
         }
 
         // Hybrid Caching: Past Data (Cached) + Today's Data (Real-time)
-        public StockChartResponseDto getStockChart(String stockCode, String startDate, String endDate,
+        public String getStockChartJson(String stockCode, String startDate, String endDate,
                         String dateType) {
                 DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
                 LocalDate targetStartDate = LocalDate.parse(startDate, formatter);
                 LocalDate targetEndDate = LocalDate.parse(endDate, formatter);
                 LocalDate today = LocalDate.now();
 
-                // 1. Fetch Past Data (Cached)
-                // If endDate is today or future, we fetch up to yesterday from cache.
-                // If endDate is past, we fetch up to endDate from cache.
+                // 1. Fetch Past Data (Cached JSON)
                 LocalDate pastEndDate = targetEndDate;
                 if (!pastEndDate.isBefore(today)) {
                         pastEndDate = today.minusDays(1);
                 }
 
-                List<StockChartPriceDto> mergedList = new ArrayList<>();
-
-                // Only fetch past data if range allows
+                String pastJson = "[]";
                 if (!pastEndDate.isBefore(targetStartDate)) {
-                        List<StockChartPriceDto> pastData = getPastStockChart(stockCode, startDate,
+                        pastJson = getPastStockChartJson(stockCode, startDate,
                                         pastEndDate.format(formatter), dateType);
-                        if (pastData != null) {
-                                mergedList.addAll(pastData);
-                        }
                 }
 
-                // 2. Fetch Today's Data (Real-time) if needed
-                if (!targetEndDate.isBefore(today) && "D".equals(dateType)) { // Today data only relevant for Daily
-                                                                              // chart
-                        StockChartPriceDto todayData = getTodayStockChart(stockCode);
-                        if (todayData != null) {
-                                mergedList.add(todayData);
-                        }
+                // 2. Fetch Today's Data (Cached JSON)
+                String todayJson = "[]";
+                if (!targetEndDate.isBefore(today) && "D".equals(dateType)) {
+                        todayJson = getTodayStockChartJson(stockCode);
                 }
 
-                // Calculate USD prices (Moved to cached methods)
-                // Just merge and return
-                List<StockChartPriceDto> finalMergedList = new ArrayList<>(mergedList);
+                // 3. Merge JSON Strings directly (Zero-Copy)
+                String mergedListJson = mergeJsonArrays(todayJson, pastJson);
 
-                return StockChartResponseDto.builder()
-                                .rtCd("0")
-                                .msg1("Success")
-                                .priceList(finalMergedList)
-                                .build();
+                // 4. Construct Final Response JSON
+                return String.format("{\"rt_cd\":\"0\", \"msg1\":\"Success\", \"output2\":%s}", mergedListJson);
         }
 
-        @Cacheable(value = "stockChart", key = "#stockCode + '-' + #startDate + '-' + #endDate + '-' + #dateType")
-        public List<StockChartPriceDto> getPastStockChart(String stockCode, String startDate, String endDate,
+        public StockChartResponseDto getStockChart(String stockCode, String startDate, String endDate,
                         String dateType) {
+                String json = getStockChartJson(stockCode, startDate, endDate, dateType);
+                try {
+                        return objectMapper.readValue(json, StockChartResponseDto.class);
+                } catch (Exception e) {
+                        log.error("Failed to parse stock chart JSON for internal use", e);
+                        return null; // Or throw custom exception
+                }
+        }
+
+        private String mergeJsonArrays(String json1, String json2) {
+                // Handle nulls or empty strings
+                boolean isEmpty1 = (json1 == null || json1.equals("[]") || json1.isEmpty());
+                boolean isEmpty2 = (json2 == null || json2.equals("[]") || json2.isEmpty());
+
+                if (isEmpty1 && isEmpty2)
+                        return "[]";
+                if (isEmpty1)
+                        return json2;
+                if (isEmpty2)
+                        return json1;
+
+                // Remove closing bracket of json1 and opening bracket of json2
+                // json1: "[{...}]" -> "[{...}"
+                // json2: "[{...}]" -> ",{...}]"
+                return json1.substring(0, json1.length() - 1) + "," + json2.substring(1);
+        }
+
+        @Cacheable(value = "stockChartJson", key = "#stockCode + '-' + #startDate + '-' + #endDate + '-' + #dateType")
+        public String getPastStockChartJson(String stockCode, String startDate, String endDate, String dateType) {
                 DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
                 LocalDate targetStartDate = LocalDate.parse(startDate, formatter);
                 LocalDate targetEndDate = LocalDate.parse(endDate, formatter);
 
                 Stock stock = stockRepository.findByStockCode(stockCode)
                                 .orElseThrow(() -> new BusinessException(KisApiErrorCode.STOCK_NOT_FOUND));
+
+                List<StockChartPriceDto> resultList = null;
 
                 try {
                         LocalDate apiStartDate = targetEndDate.minusDays(150);
@@ -237,7 +256,7 @@ public class KisStockService {
                         mergedList.addAll(dbPriceList);
 
                         // Apply USD Conversion before caching
-                        return applyUsdConversion(mergedList, startDate, endDate);
+                        resultList = applyUsdConversion(mergedList, startDate, endDate);
 
                 } catch (Exception e) {
                         log.warn("API 조회 실패, DB 데이터로 대체합니다: {}", e.getMessage());
@@ -252,12 +271,22 @@ public class KisStockService {
                                         .collect(Collectors.toList());
 
                         // Apply USD Conversion before caching
-                        return applyUsdConversion(dtos, startDate, endDate);
+                        resultList = applyUsdConversion(dtos, startDate, endDate);
+                }
+
+                if (resultList == null)
+                        return "[]";
+
+                try {
+                        return objectMapper.writeValueAsString(resultList);
+                } catch (Exception e) {
+                        log.error("JSON Serialization Failed for Past Chart", e);
+                        return "[]";
                 }
         }
 
-        @Cacheable(value = "stockChartToday", key = "#stockCode", sync = true)
-        public StockChartPriceDto getTodayStockChart(String stockCode) {
+        @Cacheable(value = "stockChartTodayJson", key = "#stockCode", sync = true)
+        public String getTodayStockChartJson(String stockCode) {
                 String today = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
                 try {
                         StockChartResponseDto response = fetchStockChartFromApi(stockCode, today, today, "D");
@@ -265,12 +294,12 @@ public class KisStockService {
                                 List<StockChartPriceDto> singleList = new ArrayList<>();
                                 singleList.add(response.getPriceList().get(0));
                                 List<StockChartPriceDto> converted = applyUsdConversion(singleList, today, today);
-                                return converted.get(0);
+                                return objectMapper.writeValueAsString(converted);
                         }
                 } catch (Exception e) {
                         log.warn("Failed to fetch today's data for {}: {}", stockCode, e.getMessage());
                 }
-                return null;
+                return "[]";
         }
 
         private StockChartResponseDto fetchStockChartFromApi(String stockCode, String startDate, String endDate,

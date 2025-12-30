@@ -1,7 +1,10 @@
 package com.AISA.AISA.kisStock.repository;
 
 import com.AISA.AISA.kisStock.Entity.stock.StockFinancialStatement;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -39,17 +42,23 @@ public interface StockFinancialStatementRepository extends JpaRepository<StockFi
         Optional<StockFinancialStatement> findTop1ByDivCodeOrderByStacYymmDesc(String divCode);
 
         // Top 20 Ranking Queries
+        @Query("SELECT s FROM StockFinancialStatement s WHERE s.stacYymm = :stacYymm AND s.divCode = :divCode AND s.isSuspended = false ORDER BY s.saleAccount DESC")
         List<StockFinancialStatement> findTop20ByStacYymmAndDivCodeAndIsSuspendedFalseOrderBySaleAccountDesc(
-                        String stacYymm,
-                        String divCode);
+                        @Param("stacYymm") String stacYymm,
+                        @Param("divCode") String divCode,
+                        Pageable pageable);
 
+        @Query("SELECT s FROM StockFinancialStatement s WHERE s.stacYymm = :stacYymm AND s.divCode = :divCode AND s.isSuspended = false ORDER BY s.operatingProfit DESC")
         List<StockFinancialStatement> findTop20ByStacYymmAndDivCodeAndIsSuspendedFalseOrderByOperatingProfitDesc(
-                        String stacYymm,
-                        String divCode);
+                        @Param("stacYymm") String stacYymm,
+                        @Param("divCode") String divCode,
+                        Pageable pageable);
 
+        @Query("SELECT s FROM StockFinancialStatement s WHERE s.stacYymm = :stacYymm AND s.divCode = :divCode AND s.isSuspended = false ORDER BY s.netIncome DESC")
         List<StockFinancialStatement> findTop20ByStacYymmAndDivCodeAndIsSuspendedFalseOrderByNetIncomeDesc(
-                        String stacYymm,
-                        String divCode);
+                        @Param("stacYymm") String stacYymm,
+                        @Param("divCode") String divCode,
+                        Pageable pageable);
 
         // 영업이익률(operatingProfit / saleAccount) 상위 20개 조회 (매출액 0 제외, 거래정지 제외)
         @Query("SELECT s FROM StockFinancialStatement s " +
@@ -57,5 +66,5 @@ public interface StockFinancialStatementRepository extends JpaRepository<StockFi
                         +
                         "ORDER BY (s.operatingProfit / s.saleAccount) DESC")
         List<StockFinancialStatement> findTop20ByOperatingMarginDesc(@Param("stacYymm") String stacYymm,
-                        @Param("divCode") String divCode, org.springframework.data.domain.Pageable pageable);
+                        @Param("divCode") String divCode, Pageable pageable);
 }

@@ -27,7 +27,9 @@ import java.util.Map;
 import com.AISA.AISA.kisStock.repository.StockRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -144,6 +146,7 @@ public class KisInformationService {
         log.info("Completed Batch Balance Sheet Refresh");
     }
 
+    @CacheEvict(value = "financialRank", allEntries = true)
     public void refreshAllFinancialRatios(String divCode) {
         List<Stock> stocks = stockRepository.findAll();
         log.info("Starting Batch Financial Ratio Refresh for {} stocks (divCode={})", stocks.size(), divCode);
@@ -539,18 +542,18 @@ public class KisInformationService {
         if ("operating".equalsIgnoreCase(sort)) {
             ranks = stockFinancialStatementRepository
                     .findTop20ByStacYymmAndDivCodeAndIsSuspendedFalseOrderByOperatingProfitDesc(stacYymm,
-                            divCode);
+                            divCode, Pageable.ofSize(20));
         } else if ("netincome".equalsIgnoreCase(sort)) {
             ranks = stockFinancialStatementRepository
                     .findTop20ByStacYymmAndDivCodeAndIsSuspendedFalseOrderByNetIncomeDesc(stacYymm,
-                            divCode);
+                            divCode, Pageable.ofSize(20));
         } else if ("margin".equalsIgnoreCase(sort) || "operatingmargin".equalsIgnoreCase(sort)) {
             ranks = stockFinancialStatementRepository.findTop20ByOperatingMarginDesc(stacYymm, divCode,
-                    org.springframework.data.domain.Pageable.ofSize(20));
+                    Pageable.ofSize(20));
         } else {
             ranks = stockFinancialStatementRepository
                     .findTop20ByStacYymmAndDivCodeAndIsSuspendedFalseOrderBySaleAccountDesc(stacYymm,
-                            divCode);
+                            divCode, Pageable.ofSize(20));
         }
 
         Map<String, String> stockMap = stockRepository.findAll().stream()

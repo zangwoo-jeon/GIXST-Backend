@@ -68,5 +68,5 @@ public class StockFinancialRatio {
 
     @Column(nullable = false)
     @Builder.Default
-    private boolean isSuspended = false; // 거래 정지 여부
+    private Boolean isSuspended = false; // 거래 정지 여부
 }

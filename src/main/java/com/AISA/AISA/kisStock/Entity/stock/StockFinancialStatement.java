@@ -40,4 +40,8 @@ public class StockFinancialStatement {
     @Column(precision = 20, scale = 2)
     private BigDecimal netIncome; // 당기순이익
 
+    @Column(nullable = false)
+    @Builder.Default
+    private Boolean isSuspended = false; // 거래 정지 여부
+
 }

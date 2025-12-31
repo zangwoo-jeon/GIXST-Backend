@@ -10,10 +10,10 @@ public class StockPriceResponse {
     @JsonProperty("stck_shrn_iscd") // 주식 종목 코드
     private String stockCode;
 
-    @JsonProperty("stck_prpr") //주식 현재가
+    @JsonProperty("stck_prpr") // 주식 현재가
     private String stockPriceRaw;
 
-    @JsonProperty("prdy_vrss") //전일 대비
+    @JsonProperty("prdy_vrss") // 전일 대비
     private String priceChangeRaw;
 
     @JsonProperty("prdy_ctrt") // 전일 대비율
@@ -24,4 +24,10 @@ public class StockPriceResponse {
 
     @JsonProperty("stck_oprc") // 시가
     private String openingPriceRaw;
+
+    @JsonProperty("lstn_stcn") // 상장 주수
+    private String listedSharesCount;
+
+    @JsonProperty("hts_avls") // HTS 시가총액
+    private String marketCapRaw;
 }

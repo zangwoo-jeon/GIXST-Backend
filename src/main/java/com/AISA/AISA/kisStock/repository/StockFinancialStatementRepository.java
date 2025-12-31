@@ -25,6 +25,11 @@ public interface StockFinancialStatementRepository extends JpaRepository<StockFi
 
         List<StockFinancialStatement> findByStockCodeAndDivCodeOrderByStacYymmAsc(String stockCode, String divCode);
 
+        List<StockFinancialStatement> findTop5ByStockCodeAndDivCodeOrderByStacYymmDesc(String stockCode,
+                        String divCode);
+
+        StockFinancialStatement findTop1ByStockCodeAndDivCodeOrderByStacYymmDesc(String stockCode, String divCode);
+
         void deleteByStockCode(String stockCode);
 
         // Initial Ranking Queries (Limit will be handled by Pageable or Top keyword if

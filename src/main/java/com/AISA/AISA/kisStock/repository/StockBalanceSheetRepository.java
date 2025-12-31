@@ -9,4 +9,6 @@ import java.util.List;
 @Repository
 public interface StockBalanceSheetRepository extends JpaRepository<StockBalanceSheet, Long> {
     List<StockBalanceSheet> findByStockCodeAndDivCodeOrderByStacYymmDesc(String stockCode, String divCode);
+
+    StockBalanceSheet findTop1ByStockCodeAndDivCodeOrderByStacYymmDesc(String stockCode, String divCode);
 }

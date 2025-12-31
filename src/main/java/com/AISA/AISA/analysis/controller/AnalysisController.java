@@ -17,7 +17,6 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
-import java.math.BigDecimal;
 
 @RestController
 @RequestMapping("/api/analysis")
@@ -68,17 +67,24 @@ public class AnalysisController {
         }
 
         @PostMapping("/valuation/{stockCode}")
-        @Operation(summary = "종목 적정 주가 진단 (S-RIM/PER/PBR)", description = "특정 종목의 적정 주가를 S-RIM, PER, PBR 모델로 분석하고 밴드를 제시합니다. (할인율 커스텀 가능)")
+        @Operation(summary = "종목 적정 주가 진단 (S-RIM/PER/PBR)", description = "특정 종목의 적정 주가를 S-RIM, PER, PBR 모델로 분석하고 밴드를 제시합니다. \n\n"
+                        + "userPropensity 옵션: CONSERVATIVE (보수적, 10%), NEUTRAL (중립, 8%, 기본값), AGGRESSIVE (공격적, 6%) \n"
+                        + "(할인율 커스텀 가능)")
         public ResponseEntity<SuccessResponse<ValuationDto.Response>> valuation(
                         @PathVariable String stockCode,
                         @RequestBody(required = false) ValuationDto.Request request) {
 
-                BigDecimal expectedReturn = null;
-                if (request != null && request.getExpectedTotalReturn() != null) {
-                        expectedReturn = new BigDecimal(request.getExpectedTotalReturn().toString());
-                }
-
                 return ResponseEntity.ok(new SuccessResponse<>(true, "적정 주가 진단 성공",
-                                valuationService.calculateValuation(stockCode, expectedReturn)));
+                                valuationService.calculateValuation(stockCode, request)));
+        }
+
+        @PostMapping("/valuation/{stockCode}/report")
+        @Operation(summary = "종목 적정 주가 진단 + AI 리포트", description = "종목 진단 결과와 함께 Gemini AI가 분석한 투자 조언 리포트를 제공합니다. (약 3~5초 소요)")
+        public ResponseEntity<SuccessResponse<ValuationDto.Response>> valuationReport(
+                        @PathVariable String stockCode,
+                        @RequestBody(required = false) ValuationDto.Request request) {
+
+                return ResponseEntity.ok(new SuccessResponse<>(true, "AI 적정 주가 분석 리포트 생성 성공",
+                                valuationService.calculateValuationWithAi(stockCode, request)));
         }
 }

@@ -11,6 +11,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -32,7 +33,9 @@ public class GeminiService {
         Map<String, Object> requestBody = Map.of(
                 "contents", Collections.singletonList(
                         Map.of("parts", Collections.singletonList(
-                                Map.of("text", context)))));
+                                Map.of("text", context)))),
+                "tools", Collections.singletonList(
+                        Map.of("google_search", new HashMap<>())));
 
         try {
             String response = webClient.post()

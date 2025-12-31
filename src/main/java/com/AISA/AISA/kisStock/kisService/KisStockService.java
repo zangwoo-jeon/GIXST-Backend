@@ -103,7 +103,9 @@ public class KisStockService {
                                 raw.getAccumulatedVolumeRaw(),
                                 raw.getOpeningPriceRaw(),
                                 usdPrice,
-                                exchangeRateStr);
+                                exchangeRateStr,
+                                raw.getListedSharesCount(),
+                                raw.getMarketCapRaw());
         }
 
         // Hybrid Caching: Past Data (Cached) + Today's Data (Real-time)

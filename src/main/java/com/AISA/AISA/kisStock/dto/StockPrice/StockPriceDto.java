@@ -18,4 +18,6 @@ public class StockPriceDto {
     private String openingPrice;
     private String usdPrice;
     private String exchangeRate;
+    private String listedSharesCount;
+    private String marketCap;
 }

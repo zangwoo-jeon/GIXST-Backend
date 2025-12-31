@@ -57,4 +57,7 @@ public interface StockFinancialRatioRepository extends JpaRepository<StockFinanc
 
         // 특정 종목의 가장 최근 결산월 조회
         StockFinancialRatio findTop1ByStockCodeAndDivCodeOrderByStacYymmDesc(String stockCode, String divCode);
+
+        // 과거 5개년 데이터 조회 (Average ROE 계산용)
+        List<StockFinancialRatio> findTop5ByStockCodeAndDivCodeOrderByStacYymmDesc(String stockCode, String divCode);
 }

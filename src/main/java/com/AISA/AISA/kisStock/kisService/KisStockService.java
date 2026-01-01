@@ -604,6 +604,9 @@ public class KisStockService {
                                                         .stockCode(stock.getStockCode())
                                                         .stockName(stock.getStockName())
                                                         .marketName(stock.getMarketName())
+                                                        .marketCap(smc.getMarketCap() != null
+                                                                        ? smc.getMarketCap().toString()
+                                                                        : null)
                                                         .build();
                                 })
                                 .collect(Collectors.toList());

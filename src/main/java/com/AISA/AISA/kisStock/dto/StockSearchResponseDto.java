@@ -9,4 +9,5 @@ public class StockSearchResponseDto {
     private String stockCode;
     private String stockName;
     private String marketName;
+    private String marketCap; // 시가총액 (문자열 포맷팅 용)
 }

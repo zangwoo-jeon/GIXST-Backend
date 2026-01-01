@@ -4,6 +4,7 @@ import com.AISA.AISA.global.exception.BusinessException;
 
 import com.AISA.AISA.kisStock.Entity.stock.Stock;
 import com.AISA.AISA.kisStock.Entity.stock.StockDailyData;
+import com.AISA.AISA.kisStock.Entity.stock.StockMarketCap;
 import com.AISA.AISA.kisStock.config.KisApiProperties;
 import com.AISA.AISA.kisStock.dto.StockSearchResponseDto;
 import com.AISA.AISA.kisStock.dto.VolumeRank.KisVolumeRankApiResponse;
@@ -16,6 +17,7 @@ import com.AISA.AISA.kisStock.dto.StockPrice.StockPriceResponse;
 import com.AISA.AISA.kisStock.exception.KisApiErrorCode;
 import com.AISA.AISA.kisStock.kisService.Auth.KisAuthService;
 import com.AISA.AISA.kisStock.repository.StockDailyDataRepository;
+import com.AISA.AISA.kisStock.repository.StockMarketCapRepository;
 import com.AISA.AISA.kisStock.repository.StockRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -47,6 +49,7 @@ public class KisStockService {
         private final KisAuthService kisAuthService;
         private final StockRepository stockRepository;
         private final StockDailyDataRepository stockDailyDataRepository;
+        private final StockMarketCapRepository stockMarketCapRepository; // Added repo
         private final KisMacroService kisMacroService;
         private final ObjectMapper objectMapper;
 
@@ -91,6 +94,25 @@ public class KisStockService {
                         }
                 } catch (Exception e) {
                         log.warn("Failed to calculate USD price for {}: {}", stockCode, e.getMessage());
+                }
+
+                try {
+                        if (raw.getMarketCapRaw() != null && !raw.getMarketCapRaw().isEmpty()) {
+                                BigDecimal marketCap = new BigDecimal(raw.getMarketCapRaw().replace(",", ""));
+                                // Update StockMarketCap Entity
+                                StockMarketCap marketCapEntity = stockMarketCapRepository
+                                                .findByStock(stock).orElse(null);
+
+                                if (marketCapEntity == null) {
+                                        marketCapEntity = StockMarketCap
+                                                        .create(stock, marketCap);
+                                } else {
+                                        marketCapEntity.updateMarketCap(marketCap);
+                                }
+                                stockMarketCapRepository.save(marketCapEntity);
+                        }
+                } catch (Exception e) {
+                        log.warn("Failed to update market cap for {}: {}", stockCode, e.getMessage());
                 }
 
                 return new StockPriceDto(
@@ -571,6 +593,39 @@ public class KisStockService {
                                                 .marketName(stock.getMarketName())
                                                 .build())
                                 .collect(Collectors.toList());
+        }
+
+        public List<StockSearchResponseDto> getMarketCapRanking() {
+                List<StockMarketCap> marketCaps = stockMarketCapRepository.findTop100ByOrderByMarketCapDesc();
+                return marketCaps.stream()
+                                .map(smc -> {
+                                        Stock stock = smc.getStock();
+                                        return StockSearchResponseDto.builder()
+                                                        .stockCode(stock.getStockCode())
+                                                        .stockName(stock.getStockName())
+                                                        .marketName(stock.getMarketName())
+                                                        .build();
+                                })
+                                .collect(Collectors.toList());
+        }
+
+        public void initAllStocksMarketCap() {
+                List<Stock> allStocks = stockRepository.findAll();
+                log.info("Starting initialization of Market Cap for {} stocks...", allStocks.size());
+
+                for (Stock stock : allStocks) {
+                        try {
+                                // Call getStockPrice to fetch & save market cap
+                                // Note: This makes an API call per stock. KIS API limit check required.
+                                // For now, process sequentially with delay.
+                                getStockPrice(stock.getStockCode());
+                                Thread.sleep(100); // Prevent rate limit (10 req/sec usually safe, but being
+                                                   // conservative)
+                        } catch (Exception e) {
+                                log.error("Failed to init market cap for {}: {}", stock.getStockCode(), e.getMessage());
+                        }
+                }
+                log.info("Finished initialization of Market Cap.");
         }
 
         private List<StockChartPriceDto> applyUsdConversion(List<StockChartPriceDto> list, String startDate,

@@ -87,4 +87,12 @@ public class AnalysisController {
                 return ResponseEntity.ok(new SuccessResponse<>(true, "AI 적정 주가 분석 리포트 생성 성공",
                                 valuationService.calculateValuationWithAi(stockCode, request)));
         }
+
+        @GetMapping("/valuation/{stockCode}/optimized-report")
+        @Operation(summary = "AI 적정 주가 분석 리포트 (최적화/캐싱)", description = "표준화된(NEUTRAL) 설정으로 AI 리포트를 생성하거나 캐시된 결과를 즉시 반환합니다. (속도 빠름)")
+        public ResponseEntity<SuccessResponse<ValuationDto.Response>> optimizedValuationReport(
+                        @PathVariable String stockCode) {
+                return ResponseEntity.ok(new SuccessResponse<>(true, "AI 적정 주가 분석 리포트 조회 성공 (최적화)",
+                                valuationService.getStandardizedValuationReport(stockCode)));
+        }
 }

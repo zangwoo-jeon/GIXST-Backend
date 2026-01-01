@@ -5,6 +5,8 @@ import com.AISA.AISA.analysis.dto.ValuationDto.Response;
 import com.AISA.AISA.analysis.dto.ValuationDto.Summary;
 import com.AISA.AISA.analysis.dto.ValuationDto.ValuationBand;
 import com.AISA.AISA.analysis.dto.ValuationDto.ValuationResult;
+import com.AISA.AISA.analysis.entity.StockAiSummary;
+import com.AISA.AISA.analysis.repository.StockAiSummaryRepository;
 import com.AISA.AISA.kisStock.Entity.stock.Stock;
 import com.AISA.AISA.kisStock.Entity.stock.StockFinancialRatio;
 import com.AISA.AISA.kisStock.Entity.stock.StockFinancialStatement;
@@ -17,18 +19,20 @@ import com.AISA.AISA.kisStock.repository.StockBalanceSheetRepository;
 import com.AISA.AISA.kisStock.repository.StockRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class ValuationService {
 
     private final StockRepository stockRepository;
@@ -37,10 +41,54 @@ public class ValuationService {
     private final StockBalanceSheetRepository stockBalanceSheetRepository;
     private final KisStockService kisStockService;
     private final GeminiService geminiService;
+    private final StockAiSummaryRepository stockAiSummaryRepository; // Added field
+
+    @Autowired
+    public ValuationService(StockRepository stockRepository, // Added stockRepository to constructor
+            StockFinancialRatioRepository stockFinancialRatioRepository,
+            StockBalanceSheetRepository stockBalanceSheetRepository,
+            StockFinancialStatementRepository stockFinancialStatementRepository,
+            KisStockService kisStockService,
+            GeminiService geminiService,
+            StockAiSummaryRepository stockAiSummaryRepository) {
+        this.stockRepository = stockRepository; // Initialized stockRepository
+        this.stockFinancialRatioRepository = stockFinancialRatioRepository;
+        this.stockBalanceSheetRepository = stockBalanceSheetRepository;
+        this.stockFinancialStatementRepository = stockFinancialStatementRepository;
+        this.kisStockService = kisStockService;
+        this.geminiService = geminiService;
+        this.stockAiSummaryRepository = stockAiSummaryRepository;
+    }
 
     // 기본 요구 수익률 (Fallback)
 
-    @Transactional(readOnly = true)
+    @Transactional
+    public Response getStandardizedValuationReport(String stockCode) {
+        // 1. Calculate Standard Valuation (Neutral)
+        ValuationDto.Request standardRequest = ValuationDto.Request.builder()
+                .userPropensity(ValuationDto.UserPropensity.NEUTRAL)
+                .build();
+        Response response = calculateValuation(stockCode, standardRequest);
+
+        // Fetch Data for AI (Same as calculateValuationWithAi)
+        StockFinancialRatio latestRatio = stockFinancialRatioRepository
+                .findTop1ByStockCodeAndDivCodeOrderByStacYymmDesc(stockCode, "0");
+        StockBalanceSheet latestBalanceSheet = stockBalanceSheetRepository
+                .findTop1ByStockCodeAndDivCodeOrderByStacYymmDesc(stockCode, "0");
+        List<StockFinancialStatement> recentAnnuals = stockFinancialStatementRepository
+                .findTop5ByStockCodeAndDivCodeOrderByStacYymmDesc(stockCode, "0");
+        List<StockFinancialStatement> recentQuarters = stockFinancialStatementRepository
+                .findTop5ByStockCodeAndDivCodeOrderByStacYymmDesc(stockCode, "1");
+
+        // 2. Fetch Cached AI Analysis (Standardized)
+        // Note: We pass the 'standard' response here to be safe
+        String aiAnalysis = getOrGenerateCachedAiAnalysis(stockCode, response, latestRatio, latestBalanceSheet,
+                recentAnnuals, recentQuarters);
+
+        // 3. Build Final Response
+        return buildResponseWithAi(response, aiAnalysis);
+    }
+
     public Response calculateValuation(String stockCode, ValuationDto.Request request) {
         Stock stock = stockRepository.findByStockCode(stockCode)
                 .orElseThrow(() -> new IllegalArgumentException("Stock not found: " + stockCode));
@@ -906,14 +954,24 @@ public class ValuationService {
         StockBalanceSheet latestBalanceSheet = stockBalanceSheetRepository
                 .findTop1ByStockCodeAndDivCodeOrderByStacYymmDesc(stockCode, "0");
 
-        // Fetch latest Financial Statement
-        StockFinancialStatement latestStatement = stockFinancialStatementRepository
-                .findTop1ByStockCodeAndDivCodeOrderByStacYymmDesc(stockCode, "0");
+        // Fetch Recent 5 Years (Annual) for Long-term Trend
+        List<StockFinancialStatement> recentAnnuals = stockFinancialStatementRepository
+                .findTop5ByStockCodeAndDivCodeOrderByStacYymmDesc(stockCode, "0");
 
-        // 2. Generate AI Analysis
-        String aiAnalysis = generateAiDiagnosis(response, latestRatio, latestBalanceSheet, latestStatement);
+        // Fetch Recent 5 Quarters for Trend Analysis
+        List<StockFinancialStatement> recentQuarters = stockFinancialStatementRepository
+                .findTop5ByStockCodeAndDivCodeOrderByStacYymmDesc(stockCode, "1");
+
+        // 2. Generate or Fetch AI Analysis (Caching + Standardization)
+        // 2. Personal AI Analysis (No Caching, uses User's specific valuation context)
+        String aiAnalysis = generateAiDiagnosis(response, latestRatio, latestBalanceSheet, recentAnnuals,
+                recentQuarters);
 
         // 3. Update Summary with AI Analysis
+        return buildResponseWithAi(response, aiAnalysis);
+    }
+
+    private Response buildResponseWithAi(Response response, String aiAnalysis) {
         if (response.getSummary() != null) {
             Summary oldSummary = response.getSummary();
             Summary newSummary = Summary.builder()
@@ -929,6 +987,7 @@ public class ValuationService {
                     .stockCode(response.getStockCode())
                     .stockName(response.getStockName())
                     .currentPrice(response.getCurrentPrice())
+                    .marketCap(response.getMarketCap())
                     .targetReturn(response.getTargetReturn())
                     .discountRate(response.getDiscountRate())
                     .srim(response.getSrim())
@@ -942,7 +1001,7 @@ public class ValuationService {
     }
 
     private String generateAiDiagnosis(Response val, StockFinancialRatio latestRatio, StockBalanceSheet balanceSheet,
-            StockFinancialStatement statement) {
+            List<StockFinancialStatement> recentAnnuals, List<StockFinancialStatement> recentQuarters) {
         StringBuilder prompt = new StringBuilder();
         prompt.append("다음 종목의 가치평가 및 재무제표를 분석하고 정밀한 투자 조언을 해줘.\n\n");
         prompt.append(String.format("종목명: %s (%s)\n", val.getStockName(), val.getStockCode()));
@@ -956,12 +1015,39 @@ public class ValuationService {
             prompt.append(String.format("- 자본총계: %s\n", balanceSheet.getTotalCapital()));
         }
 
-        // Add Income Statement Data
-        if (statement != null) {
-            prompt.append("\n[손익계산서 (최근 연간)]\n");
-            prompt.append(String.format("- 매출액: %s\n", statement.getSaleAccount()));
-            prompt.append(String.format("- 영업이익: %s\n", statement.getOperatingProfit()));
-            prompt.append(String.format("- 당기순이익: %s\n", statement.getNetIncome()));
+        // Add Income Statement Data (Annual Trend)
+        if (recentAnnuals != null && !recentAnnuals.isEmpty()) {
+            prompt.append("\n[연간 실적 추이 (최근 5년)]\n");
+            // Reverse to show oldest -> new
+            for (int i = recentAnnuals.size() - 1; i >= 0; i--) {
+                StockFinancialStatement s = recentAnnuals.get(i);
+                String note = "";
+                // Check for Partial Year (Not ending in 12)
+                if (s.getStacYymm() != null && !s.getStacYymm().endsWith("12")) {
+                    note = " (부분 연도/진행중 - 단순비교 주의)";
+                }
+                prompt.append(String.format("- %s%s: 매출 %s / 영익 %s / 순익 %s\n",
+                        s.getStacYymm(), note, s.getSaleAccount(), s.getOperatingProfit(), s.getNetIncome()));
+            }
+        }
+
+        // Add Quarterly Trend Data (Crucial for detecting recent trends)
+        if (recentQuarters != null && !recentQuarters.isEmpty()) {
+            prompt.append("\n[최근 5분기 실적 추이 (단위: 억 원/백만 원 등 재무제표 단위 참조)]\n");
+            // Reverse to show oldest -> new
+            for (int i = recentQuarters.size() - 1; i >= 0; i--) {
+                StockFinancialStatement q = recentQuarters.get(i);
+                String yoyInfo = "";
+
+                // Check if YoY data exists (4 quarters ago)
+                if (i + 4 < recentQuarters.size()) {
+                    StockFinancialStatement qYoY = recentQuarters.get(i + 4);
+                    yoyInfo = calculateQuarterlyYoY(q, qYoY);
+                }
+
+                prompt.append(String.format("- %s: 매출 %s / 영익 %s / 순익 %s %s\n",
+                        q.getStacYymm(), q.getSaleAccount(), q.getOperatingProfit(), q.getNetIncome(), yoyInfo));
+            }
         }
 
         // Add Financial Ratios
@@ -971,6 +1057,7 @@ public class ValuationService {
             prompt.append(String.format("- 유보율: %s%%\n", latestRatio.getReserveRatio()));
             prompt.append(String.format("- 매출 성장률(YoY): %s%%\n", latestRatio.getSalesGrowth()));
             prompt.append(String.format("- 영업이익 성장률(YoY): %s%%\n", latestRatio.getOperatingProfitGrowth()));
+            prompt.append(String.format("- 당기순이익 성장률(YoY): %s%%\n", latestRatio.getNetIncomeGrowth()));
         } else {
             prompt.append("\n[재무 비율]\n데이터 없음 (AI가 검색을 통해 보완할 것)\n");
         }
@@ -1006,5 +1093,90 @@ public class ValuationService {
         prompt.append("4. 금융 전문가 톤으로 작성하되, 최종적으로 투자자가 유의해야 할 점을 포함하여 600자 이내로 요약해.\n");
 
         return geminiService.generateAdvice(prompt.toString());
+    }
+
+    private String getOrGenerateCachedAiAnalysis(String stockCode, Response currentValuation,
+            StockFinancialRatio ratio, StockBalanceSheet bs, List<StockFinancialStatement> annuals,
+            List<StockFinancialStatement> quarters) {
+
+        BigDecimal currentPrice = new BigDecimal(currentValuation.getCurrentPrice().replace(",", ""));
+
+        // 1. Check Cache
+        Optional<StockAiSummary> cachedSummary = stockAiSummaryRepository.findByStockCode(stockCode);
+        if (cachedSummary.isPresent()) {
+            StockAiSummary summary = cachedSummary.get();
+            boolean isExpired = summary.isExpired(24);
+            boolean isPriceDeviated = false;
+
+            // Check Price Trigger (5% deviation)
+            if (summary.getReferencePrice() != null && summary.getReferencePrice().compareTo(BigDecimal.ZERO) != 0) {
+                BigDecimal refPrice = summary.getReferencePrice();
+                BigDecimal diff = currentPrice.subtract(refPrice).abs();
+                BigDecimal deviation = diff.divide(refPrice, 4, RoundingMode.HALF_UP);
+                if (deviation.compareTo(new BigDecimal("0.05")) > 0) {
+                    isPriceDeviated = true;
+                }
+            }
+
+            if (!isExpired && !isPriceDeviated) {
+                return summary.getAiAnalysis();
+            }
+        }
+
+        // 2. Cache Miss: Generate Fresh Analysis with STANDARDIZED (NEUTRAL) Settings
+        // Strictly, we should recalculate valuation with NEUTRAL settings for the AI
+        // context
+        // But to save API calls/Compute, we use the current context if it's close
+        // enough,
+        // OR we can just rely on the Prompt Instructions to be objective.
+        // For strict standardization as per plan:
+        // We will allow the AI to see the *current* valuation (which might be
+        // Aggressive),
+        // BUT we instruct it to be "Objective".
+        // Wait, the plan said "Force NEUTRAL".
+        // To do that, we need to calculate a 'standardValuation'.
+        ValuationDto.Request standardRequest = ValuationDto.Request.builder()
+                .userPropensity(ValuationDto.UserPropensity.NEUTRAL)
+                .build();
+        // Recalculate Base Valuation for AI Baseline
+        Response standardValuation = calculateValuation(stockCode, standardRequest);
+
+        String freshAnalysis = generateAiDiagnosis(standardValuation, ratio, bs, annuals, quarters);
+
+        // 3. Save to DB
+        if (cachedSummary.isPresent()) {
+            StockAiSummary existing = cachedSummary.get();
+            existing.updateAnalysis(freshAnalysis, null, currentPrice);
+            stockAiSummaryRepository.save(existing);
+        } else {
+            StockAiSummary newSummary = StockAiSummary.builder()
+                    .stockCode(stockCode)
+                    .aiAnalysis(freshAnalysis)
+                    .referencePrice(currentPrice)
+                    .lastModifiedDate(LocalDateTime.now())
+                    .createdDate(LocalDateTime.now())
+                    .build();
+            stockAiSummaryRepository.save(newSummary);
+        }
+
+        return freshAnalysis;
+    }
+
+    private String calculateQuarterlyYoY(StockFinancialStatement current, StockFinancialStatement past) {
+        try {
+            if (current.getNetIncome() == null || past.getNetIncome() == null)
+                return "";
+
+            double curNet = current.getNetIncome().doubleValue();
+            double pastNet = past.getNetIncome().doubleValue();
+
+            if (pastNet == 0)
+                return "";
+
+            double growth = (curNet - pastNet) / Math.abs(pastNet) * 100.0;
+            return String.format("(YoY %+.1f%%)", growth);
+        } catch (Exception e) {
+            return "";
+        }
     }
 }

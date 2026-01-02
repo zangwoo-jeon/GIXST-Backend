@@ -147,6 +147,18 @@ public class StockScheduler {
         log.info("Completed scheduled monthly macro data update.");
     }
 
+    // Run at 5 AM every Friday (For ECOS Bond Yield)
+    @Scheduled(cron = "0 0 5 * * FRI")
+    public void updateWeeklyEcosData() {
+        log.info("Starting scheduled weekly ECOS data (Bond Yield) update...");
+        try {
+            kisMacroService.fetchAndSaveEcosBondYield();
+        } catch (Exception e) {
+            log.error("Failed to update weekly ECOS data: {}", e.getMessage());
+        }
+        log.info("Completed scheduled weekly ECOS data update.");
+    }
+
     // Run at 5 AM every Saturday
     @Scheduled(cron = "0 0 5 * * SAT")
     public void refreshDividendRank() {

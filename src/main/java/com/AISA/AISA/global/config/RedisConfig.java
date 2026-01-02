@@ -106,6 +106,9 @@ public class RedisConfig {
                 configMap.put("financialRank", longTermConfig);
                 configMap.put("dividendRank", longTermConfig);
 
+                // ECOS Bond Yield (24시간)
+                configMap.put("ecosBondYield", longTermConfig);
+
                 // Phase 2 추가: 포트폴리오 진단 (30분)
                 configMap.put("portfolioDiagnosis", mediumTermConfig);
 

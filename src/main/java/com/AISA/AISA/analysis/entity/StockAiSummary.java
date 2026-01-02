@@ -29,8 +29,12 @@ public class StockAiSummary {
     @Column(nullable = false, unique = true)
     private String stockCode;
 
-    @Column(columnDefinition = "TEXT", nullable = false)
-    private String aiAnalysis; // AI가 생성한 전체 리포트 텍스트
+    @Column(columnDefinition = "TEXT")
+    private String aiAnalysis; // Legacy or Combined (Deprecated logic but kept for safety if needed, or
+                               // repurposed)
+
+    @Column(columnDefinition = "TEXT")
+    private String valuationAnalysis; // 동적 분석 (가치평가 해석)
 
     // AI 분석 당시의 요약 정보 (버전 관리 및 변경 추적용, JSON String 등)
     @Column(columnDefinition = "TEXT")
@@ -45,13 +49,20 @@ public class StockAiSummary {
     private LocalDateTime createdDate;
 
     @Column(nullable = false)
-    private LocalDateTime lastModifiedDate;
+    private LocalDateTime lastModifiedDate; // 동적(Valuation) 분석 마지막 수정일
 
     // 24시간 만료 체크 등을 위한 편의 메서드
     public boolean isExpired(int hours) {
         return lastModifiedDate.plusHours(hours).isBefore(LocalDateTime.now());
     }
 
+    public void updateValuationAnalysis(String valuationAnalysis, BigDecimal referencePrice) {
+        this.valuationAnalysis = valuationAnalysis;
+        this.referencePrice = referencePrice;
+        this.lastModifiedDate = LocalDateTime.now();
+    }
+
+    // Legacy Support or Unified Update
     public void updateAnalysis(String aiAnalysis, String valuationSummaryJson, BigDecimal referencePrice) {
         this.aiAnalysis = aiAnalysis;
         this.valuationSummaryJson = valuationSummaryJson;

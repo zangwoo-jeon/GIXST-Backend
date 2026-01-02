@@ -97,6 +97,14 @@ public class AnalysisController {
                                 valuationService.getStandardizedValuationReport(stockCode)));
         }
 
+        @GetMapping("/valuation/{stockCode}/static-report")
+        @Operation(summary = "AI 기업 개요 및 리스크 분석 (정적 캐싱 7일)", description = "기업 개요, 미래 성장 동력, 리스크 요인을 조회합니다. (변경 주기 긺)")
+        public ResponseEntity<SuccessResponse<String>> getStaticValuationReport(
+                        @PathVariable String stockCode) {
+                return ResponseEntity.ok(new SuccessResponse<>(true, "기업 개요 및 리스크 분석 조회 성공",
+                                valuationService.getStaticAnalysis(stockCode)));
+        }
+
         @DeleteMapping("/cache")
         @Operation(summary = "AI 분석 캐시 초기화", description = "저장된 모든 종목의 AI 분석 리포트 캐시(DB)를 삭제합니다.")
         public ResponseEntity<SuccessResponse<Void>> clearAiSummaryCache() {

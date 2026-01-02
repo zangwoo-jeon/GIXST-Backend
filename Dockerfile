@@ -19,6 +19,11 @@ RUN groupadd -r spring && useradd -r -g spring spring
 RUN mkdir /logs && chown spring:spring /logs
 RUN mkdir /newsLogs && chown spring:spring /newsLogs
 
+# Python 및 필수 패키지 설치
+RUN apt-get update && apt-get install -y python3 python3-pip && rm -rf /var/lib/apt/lists/*
+RUN ln -s /usr/bin/python3 /usr/bin/python
+RUN pip3 install requests pandas beautifulsoup4 lxml tqdm
+
 USER spring:spring
 
 # 빌드 스테이지에서 생성된 JAR 파일 복사

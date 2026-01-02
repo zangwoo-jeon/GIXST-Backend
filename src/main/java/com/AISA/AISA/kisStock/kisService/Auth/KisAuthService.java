@@ -53,7 +53,7 @@ public class KisAuthService {
         }
     }
 
-    private String refreshAccessToken() {
+    public String refreshAccessToken() {
         KisAuthRequest authRequest = KisAuthRequest.builder()
                 .grantType("client_credentials")
                 .appkey(appkey)

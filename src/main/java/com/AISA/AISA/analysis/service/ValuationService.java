@@ -6,7 +6,9 @@ import com.AISA.AISA.analysis.dto.ValuationDto.Summary;
 import com.AISA.AISA.analysis.dto.ValuationDto.ValuationBand;
 import com.AISA.AISA.analysis.dto.ValuationDto.ValuationResult;
 import com.AISA.AISA.analysis.entity.StockAiSummary;
+import com.AISA.AISA.analysis.entity.StockStaticAnalysis; // NEW
 import com.AISA.AISA.analysis.repository.StockAiSummaryRepository;
+import com.AISA.AISA.analysis.repository.StockStaticAnalysisRepository; // NEW
 import com.AISA.AISA.kisStock.Entity.stock.Stock;
 import com.AISA.AISA.kisStock.Entity.stock.StockFinancialRatio;
 import com.AISA.AISA.kisStock.Entity.stock.StockFinancialStatement;
@@ -45,6 +47,7 @@ public class ValuationService {
     private final GeminiService geminiService;
     private final StockAiSummaryRepository stockAiSummaryRepository;
     private final KisMacroService kisMacroService; // Added
+    private final StockStaticAnalysisRepository stockStaticAnalysisRepository; // Added
 
     @Autowired
     public ValuationService(StockRepository stockRepository,
@@ -54,7 +57,8 @@ public class ValuationService {
             KisStockService kisStockService,
             GeminiService geminiService,
             StockAiSummaryRepository stockAiSummaryRepository,
-            KisMacroService kisMacroService) {
+            KisMacroService kisMacroService,
+            StockStaticAnalysisRepository stockStaticAnalysisRepository) {
         this.stockRepository = stockRepository;
         this.stockFinancialRatioRepository = stockFinancialRatioRepository;
         this.stockBalanceSheetRepository = stockBalanceSheetRepository;
@@ -63,6 +67,7 @@ public class ValuationService {
         this.geminiService = geminiService;
         this.stockAiSummaryRepository = stockAiSummaryRepository;
         this.kisMacroService = kisMacroService;
+        this.stockStaticAnalysisRepository = stockStaticAnalysisRepository;
     }
 
     // 기본 요구 수익률 (Fallback)
@@ -75,20 +80,9 @@ public class ValuationService {
                 .build();
         Response response = calculateValuation(stockCode, standardRequest);
 
-        // Fetch Data for AI (Same as calculateValuationWithAi)
-        StockFinancialRatio latestRatio = stockFinancialRatioRepository
-                .findTop1ByStockCodeAndDivCodeOrderByStacYymmDesc(stockCode, "0");
-        StockBalanceSheet latestBalanceSheet = stockBalanceSheetRepository
-                .findTop1ByStockCodeAndDivCodeOrderByStacYymmDesc(stockCode, "0");
-        List<StockFinancialStatement> recentAnnuals = stockFinancialStatementRepository
-                .findTop5ByStockCodeAndDivCodeOrderByStacYymmDesc(stockCode, "0");
-        List<StockFinancialStatement> recentQuarters = stockFinancialStatementRepository
-                .findTop5ByStockCodeAndDivCodeOrderByStacYymmDesc(stockCode, "1");
-
-        // 2. Fetch Cached AI Analysis (Standardized)
-        // Note: We pass the 'standard' response here to be safe
-        String aiAnalysis = getOrGenerateCachedAiAnalysis(stockCode, response, latestRatio, latestBalanceSheet,
-                recentAnnuals, recentQuarters);
+        // 2. Fetch Cached AI Analysis (Valuation Only)
+        // Static analysis is now served via separate API (/static-report)
+        String aiAnalysis = getValuationAnalysis(stockCode, response);
 
         // 3. Build Final Response
         return buildResponseWithAi(response, aiAnalysis);
@@ -1005,10 +999,162 @@ public class ValuationService {
         return response;
     }
 
-    private String generateAiDiagnosis(Response val, StockFinancialRatio latestRatio, StockBalanceSheet balanceSheet,
-            List<StockFinancialStatement> recentAnnuals, List<StockFinancialStatement> recentQuarters) {
+    @Transactional
+    public String getStaticAnalysis(String stockCode) {
+        // 1. Check Cache (New Repository)
+        Optional<StockStaticAnalysis> cachedAnalysis = stockStaticAnalysisRepository.findByStockCode(stockCode);
+        if (cachedAnalysis.isPresent()) {
+            StockStaticAnalysis staticData = cachedAnalysis.get();
+            // Cache for 7 days (168 hours)
+            if (staticData.getContent() != null && !staticData.isExpired(168)) {
+                return staticData.getContent();
+            }
+        }
+
+        // 2. Generate
+        Stock stock = stockRepository.findByStockCode(stockCode)
+                .orElseThrow(() -> new IllegalArgumentException("Stock not found: " + stockCode));
+
+        // Get Financial Context for Static Analysis (Growth, Risks)
+        List<StockFinancialStatement> recentAnnuals = stockFinancialStatementRepository
+                .findTop5ByStockCodeAndDivCodeOrderByStacYymmDesc(stockCode, "0");
+
+        String analysisContent = generateStaticAnalysisText(stock, recentAnnuals);
+
+        // 3. Save (New Entity)
+        if (cachedAnalysis.isPresent()) {
+            StockStaticAnalysis existing = cachedAnalysis.get();
+            existing.updateContent(analysisContent);
+            stockStaticAnalysisRepository.save(existing);
+        } else {
+            StockStaticAnalysis newAnalysis = StockStaticAnalysis.builder()
+                    .stockCode(stockCode)
+                    .content(analysisContent)
+                    .lastModifiedDate(LocalDateTime.now()) // Default
+                    .createdDate(LocalDateTime.now())
+                    .build();
+            stockStaticAnalysisRepository.save(newAnalysis);
+        }
+
+        return analysisContent;
+    }
+
+    @Transactional
+    public String getValuationAnalysis(String stockCode) {
+        // 1. Calculate Standard Valuation (Neutral)
+        ValuationDto.Request standardRequest = ValuationDto.Request.builder()
+                .userPropensity(ValuationDto.UserPropensity.NEUTRAL)
+                .build();
+        Response val = calculateValuation(stockCode, standardRequest);
+        return getValuationAnalysis(stockCode, val);
+    }
+
+    @Transactional
+    public String getValuationAnalysis(String stockCode, Response val) {
+        BigDecimal currentPrice = new BigDecimal(val.getCurrentPrice().replace(",", ""));
+
+        // 2. Check Cache
+        Optional<StockAiSummary> cachedSummary = stockAiSummaryRepository.findByStockCode(stockCode);
+        if (cachedSummary.isPresent()) {
+            StockAiSummary summary = cachedSummary.get();
+            boolean isExpired = summary.isExpired(24);
+            boolean isPriceDeviated = false;
+
+            if (summary.getReferencePrice() != null && summary.getReferencePrice().compareTo(BigDecimal.ZERO) != 0) {
+                BigDecimal refPrice = summary.getReferencePrice();
+                BigDecimal diff = currentPrice.subtract(refPrice).abs();
+                BigDecimal deviation = diff.divide(refPrice, 4, RoundingMode.HALF_UP);
+                if (deviation.compareTo(new BigDecimal("0.05")) > 0) {
+                    isPriceDeviated = true;
+                }
+            }
+
+            if (summary.getValuationAnalysis() != null && !isExpired && !isPriceDeviated) {
+                return summary.getValuationAnalysis();
+            }
+        }
+
+        // 3. Generate
+        StockFinancialRatio latestRatio = stockFinancialRatioRepository
+                .findTop1ByStockCodeAndDivCodeOrderByStacYymmDesc(stockCode, "0");
+        StockBalanceSheet latestBalanceSheet = stockBalanceSheetRepository
+                .findTop1ByStockCodeAndDivCodeOrderByStacYymmDesc(stockCode, "0");
+        List<StockFinancialStatement> recentQuarters = stockFinancialStatementRepository
+                .findTop5ByStockCodeAndDivCodeOrderByStacYymmDesc(stockCode, "1");
+
+        String analysis = generateValuationAnalysisText(val, latestRatio, latestBalanceSheet, recentQuarters);
+
+        // 4. Save
+        if (cachedSummary.isPresent()) {
+            StockAiSummary existing = cachedSummary.get();
+            existing.updateValuationAnalysis(analysis, currentPrice);
+            stockAiSummaryRepository.save(existing);
+        } else {
+            StockAiSummary newSummary = StockAiSummary.builder()
+                    .stockCode(stockCode)
+                    .valuationAnalysis(analysis)
+                    .referencePrice(currentPrice)
+                    .lastModifiedDate(LocalDateTime.now())
+                    .createdDate(LocalDateTime.now())
+                    .build();
+            stockAiSummaryRepository.save(newSummary);
+        }
+
+        return analysis;
+    }
+
+    // Deprecated or Combined usage
+    private String getOrGenerateCachedAiAnalysis(String stockCode, Response currentValuation,
+            StockFinancialRatio ratio, StockBalanceSheet bs, List<StockFinancialStatement> annuals,
+            List<StockFinancialStatement> quarters) {
+
+        // Return Combined Analysis
+        String staticPart = getStaticAnalysis(stockCode);
+        String dynamicPart = getValuationAnalysis(stockCode);
+
+        return staticPart + "\n\n" + dynamicPart;
+    }
+
+    private String generateStaticAnalysisText(Stock stock, List<StockFinancialStatement> recentAnnuals) {
         StringBuilder prompt = new StringBuilder();
-        prompt.append("다음 종목의 가치평가 및 재무제표를 분석하고 정밀한 투자 조언을 해줘.\n\n");
+        prompt.append("다음 기업의 **기업 개요**, **미래 성장 동력**, **리스크 요인**을 분석해줘.\n\n");
+        prompt.append(String.format("종목명: %s (%s)\n", stock.getStockName(), stock.getStockCode()));
+
+        if (recentAnnuals != null && !recentAnnuals.isEmpty()) {
+            prompt.append("\n[연간 실적 추이 (참고용)]\n");
+            for (int i = recentAnnuals.size() - 1; i >= 0; i--) {
+                StockFinancialStatement s = recentAnnuals.get(i);
+                prompt.append(String.format("- %s: 매출 %s / 영익 %s\n",
+                        s.getStacYymm(), s.getSaleAccount(), s.getOperatingProfit()));
+            }
+        }
+
+        prompt.append("\n[요청사항]\n");
+        prompt.append("1. **Google Search**를 활용하여 최신 정보를 반영해.\n");
+        prompt.append("2. 다음 3가지 항목만 작성해 (마크다운 헤더 필수):\n");
+        prompt.append("   - **## 1. 기업 개요**: 주요 제품, 핵심 경쟁력, 사업 구조.\n");
+        prompt.append("   - **## 2. 미래 성장 동력**: 신사업, R&D, 최근 호재.\n");
+        prompt.append("   - **## 3. 리스크 요인**: 규제, 경쟁, 대외 환경(환율/금리/정치) 등.\n");
+        prompt.append("3. 가치평가(주가 판단)는 절대 포함하지 마.\n");
+        prompt.append("4. 금융 전문가 톤으로, 각 항목당 3~4줄 내외로 요약.\n");
+
+        return geminiService.generateAdvice(prompt.toString());
+    }
+
+    private String generateValuationAnalysisText(Response val, StockFinancialRatio latestRatio,
+            StockBalanceSheet balanceSheet,
+            List<StockFinancialStatement> recentQuarters) {
+        StringBuilder prompt = new StringBuilder();
+
+        // 1. Detect Growth/Turnaround Context
+        boolean isGrowthMode = isGrowthOrTurnaroundCase(latestRatio, recentQuarters);
+
+        if (isGrowthMode) {
+            prompt.append("다음 종목은 **현재 이익이 낮거나 적자이지만 성장성이 기대되는 기업**이야. 이에 맞춰 **성장주/턴어라운드 관점**에서 가치평가를 해석해줘.\n\n");
+        } else {
+            prompt.append("다음 종목의 **가치평가(Valuation)** 결과를 해석하고 투자 판단을 내려줘.\n\n");
+        }
+
         prompt.append(String.format("종목명: %s (%s)\n", val.getStockName(), val.getStockCode()));
         prompt.append(String.format("현재가: %s원 (시가총액: %s)\n", val.getCurrentPrice(), val.getMarketCap()));
 
@@ -1020,152 +1166,108 @@ public class ValuationService {
             prompt.append(String.format("- 자본총계: %s\n", balanceSheet.getTotalCapital()));
         }
 
-        // Add Income Statement Data (Annual Trend)
-        if (recentAnnuals != null && !recentAnnuals.isEmpty()) {
-            prompt.append("\n[연간 실적 추이 (최근 5년)]\n");
-            // Reverse to show oldest -> new
-            for (int i = recentAnnuals.size() - 1; i >= 0; i--) {
-                StockFinancialStatement s = recentAnnuals.get(i);
-                String note = "";
-                // Check for Partial Year (Not ending in 12)
-                if (s.getStacYymm() != null && !s.getStacYymm().endsWith("12")) {
-                    note = " (부분 연도/진행중 - 단순비교 주의)";
-                }
-                prompt.append(String.format("- %s%s: 매출 %s / 영익 %s / 순익 %s\n",
-                        s.getStacYymm(), note, s.getSaleAccount(), s.getOperatingProfit(), s.getNetIncome()));
-            }
-        }
-
-        // Add Quarterly Trend Data (Crucial for detecting recent trends)
+        // Add Quarterly Trend Data
         if (recentQuarters != null && !recentQuarters.isEmpty()) {
-            prompt.append("\n[최근 5분기 실적 추이 (단위: 억 원/백만 원 등 재무제표 단위 참조)]\n");
-            // Reverse to show oldest -> new
+            prompt.append("\n[최근 5분기 실적 추이]\n");
             for (int i = recentQuarters.size() - 1; i >= 0; i--) {
                 StockFinancialStatement q = recentQuarters.get(i);
                 String yoyInfo = "";
-
-                // Check if YoY data exists (4 quarters ago)
                 if (i + 4 < recentQuarters.size()) {
-                    StockFinancialStatement qYoY = recentQuarters.get(i + 4);
-                    yoyInfo = calculateQuarterlyYoY(q, qYoY);
+                    yoyInfo = calculateQuarterlyYoY(q, recentQuarters.get(i + 4));
                 }
-
                 prompt.append(String.format("- %s: 매출 %s / 영익 %s / 순익 %s %s\n",
                         q.getStacYymm(), q.getSaleAccount(), q.getOperatingProfit(), q.getNetIncome(), yoyInfo));
             }
         }
 
-        // Add Financial Ratios
+        // Add Financial Ratios (Differ by Mode)
         if (latestRatio != null) {
             prompt.append("\n[주요 재무 비율]\n");
+            if (isGrowthMode) {
+                // Growth Mode: Emphasize PSR and Revenue Growth
+                if (latestRatio.getPsr() != null) {
+                    prompt.append(String.format("- **PSR (주가매출비율)**: %s배 (적자 기업 핵심 지표)\n", latestRatio.getPsr()));
+                }
+                prompt.append(String.format("- 매출 성장률(YoY): %s%%\n", latestRatio.getSalesGrowth()));
+            }
+
+            // Common Ratios
             prompt.append(String.format("- 부채비율: %s%%\n", latestRatio.getDebtRatio()));
             prompt.append(String.format("- 유보율: %s%%\n", latestRatio.getReserveRatio()));
-            prompt.append(String.format("- 매출 성장률(YoY): %s%%\n", latestRatio.getSalesGrowth()));
             prompt.append(String.format("- 영업이익 성장률(YoY): %s%%\n", latestRatio.getOperatingProfitGrowth()));
-            prompt.append(String.format("- 당기순이익 성장률(YoY): %s%%\n", latestRatio.getNetIncomeGrowth()));
-        } else {
-            prompt.append("\n[재무 비율]\n데이터 없음 (AI가 검색을 통해 보완할 것)\n");
         }
 
-        prompt.append("\n[모델별 평가]\n");
+        prompt.append("\n[모델별 평가 결과]\n");
         prompt.append(String.format("1. S-RIM: %s (Gap: %s%%) - %s\n",
                 val.getSrim().getVerdict(), val.getSrim().getGapRate(), val.getSrim().getDescription()));
-        if (!val.getSrim().isAvailable())
-            prompt.append("   - 사유: " + val.getSrim().getReason() + "\n");
-
         prompt.append(String.format("2. PER: %s (Gap: %s%%) - %s\n",
                 val.getPer().getVerdict(), val.getPer().getGapRate(), val.getPer().getDescription()));
-        if (!val.getPer().isAvailable())
-            prompt.append("   - 사유: " + val.getPer().getReason() + "\n");
-
         prompt.append(String.format("3. PBR: %s (Gap: %s%%) - %s\n",
                 val.getPbr().getVerdict(), val.getPbr().getGapRate(), val.getPbr().getDescription()));
 
-        prompt.append("\n[종합 의견]\n");
-        prompt.append(String.format("결론: %s (Confidence: %s)\n",
+        prompt.append("\n[종합 요약]\n");
+        prompt.append(String.format("이전 결론: %s (Confidence: %s)\n",
                 val.getSummary().getOverallVerdict(), val.getSummary().getConfidence()));
         prompt.append(String.format("핵심: %s\n", val.getSummary().getKeyInsight()));
-        prompt.append(String.format("규칙: %s\n", val.getSummary().getDecisionRule()));
 
         prompt.append("\n[요청사항]\n");
-        prompt.append("1. 위 가치평가 데이터와 **Google Search**를 활용하여 종합적인 투자 리포트를 작성해.\n");
-        prompt.append("2. **필수 포함 항목** (반드시 다음 순서와 마크다운 형식을 지켜줘):\n");
-        prompt.append("   - **## 1. 기업 개요**: 주요 제품, 경쟁력, 수익 구조 (매출 비중 등)\n");
-        prompt.append("   - **## 2. 미래 성장 동력**: 최근 추진 중인 신사업 또는 R&D 현황\n");
-        prompt.append("   - **## 3. 리스크 요인**: 정치적 이슈(예: 트럼프 IRA 영향), 규제, 경쟁 심화 등 외부 환경 분석\n");
-        prompt.append("   - **## 4. 가치평가 해석**: 모델 결과와 위 정성적 요인을 종합하여 현재 주가의 적정성 판단\n");
-        prompt.append("3. '적정 주가' 표현 대신 '가치 평가 적정성'이나 '리스크 대비 매력도' 사용.\n");
-        prompt.append("4. **강조**하고 싶은 단어(키워드)는 `**`를 사용하여 굵게 표시하고, 소제목(예: 기업 개요)과 구분되도록 해.\n");
-        prompt.append("5. 금융 전문가 톤으로 작성하되, 600자 이내로 요약해.\n");
+        prompt.append("1. 위 가치평가 모델 결과를 바탕으로 **가치평가 해석** 항목을 작성해.\n");
+
+        if (isGrowthMode) {
+            prompt.append(
+                    "2. **[성장주 모드]**: 현재 이익이 부족하므로 PER/S-RIM보다 **PSR(주가매출비율)**과 **매출 성장세(Top-line Growth)**, **흑자 전환 가능성**에 집중해서 평가해.\n");
+            prompt.append("3. 적자 상황에서 PBR이 너무 높지는 않은지(버블 여부), 현금 흐름에 문제는 없는지(부채비율) 체크해.\n");
+            prompt.append("4. 단순 '고평가' 판정보다는 '미래 성장성을 선반영 중인지' 논리적으로 서술해.\n");
+
+        } else {
+            prompt.append("2. 현재 주가가 적정 가치 대비 저평가/고평가인지 명확히 논리적으로 설명해.\n");
+            prompt.append("3. 재무 건전성(부채비율 등)과 실적 추이(분기 실적)를 근거로 모델 신뢰도를 보강해.\n");
+        }
+
+        prompt.append("4. **매수/보유/매도**에 대한 의견을 뉘앙스로 제시하되, 직접적인 권유보다는 객관적 지표 해석에 집중해.\n");
+        prompt.append("5. 300자 이내로 핵심만 요약.\n");
 
         return geminiService.generateAdvice(prompt.toString());
     }
 
-    private String getOrGenerateCachedAiAnalysis(String stockCode, Response currentValuation,
-            StockFinancialRatio ratio, StockBalanceSheet bs, List<StockFinancialStatement> annuals,
-            List<StockFinancialStatement> quarters) {
+    private boolean isGrowthOrTurnaroundCase(StockFinancialRatio ratio, List<StockFinancialStatement> recentQuarters) {
+        if (ratio == null)
+            return false;
 
-        BigDecimal currentPrice = new BigDecimal(currentValuation.getCurrentPrice().replace(",", ""));
+        // 1. Loss Making (Negative Net Income or Operating Profit)
+        // If EPS is null or <= 0
+        if (ratio.getEps() == null || ratio.getEps().compareTo(BigDecimal.ZERO) <= 0) {
+            return true;
+        }
 
-        // 1. Check Cache
-        Optional<StockAiSummary> cachedSummary = stockAiSummaryRepository.findByStockCode(stockCode);
-        if (cachedSummary.isPresent()) {
-            StockAiSummary summary = cachedSummary.get();
-            boolean isExpired = summary.isExpired(24);
-            boolean isPriceDeviated = false;
+        // 2. Low Profitability (ROE < 3%)
+        // If ROE is very low, PER might be abnormally high, so use PSR logic
+        if (ratio.getRoe() != null && ratio.getRoe().compareTo(new BigDecimal("3.0")) < 0) {
+            return true;
+        }
 
-            // Check Price Trigger (5% deviation)
-            if (summary.getReferencePrice() != null && summary.getReferencePrice().compareTo(BigDecimal.ZERO) != 0) {
-                BigDecimal refPrice = summary.getReferencePrice();
-                BigDecimal diff = currentPrice.subtract(refPrice).abs();
-                BigDecimal deviation = diff.divide(refPrice, 4, RoundingMode.HALF_UP);
-                if (deviation.compareTo(new BigDecimal("0.05")) > 0) {
-                    isPriceDeviated = true;
+        // 3. Quarterly Operating Loss (Recent 2 quarters have loss)
+        if (recentQuarters != null && !recentQuarters.isEmpty()) {
+            int lossCount = 0;
+            int checkLimit = Math.min(recentQuarters.size(), 2);
+            for (int i = 0; i < checkLimit; i++) {
+                BigDecimal op = recentQuarters.get(i).getOperatingProfit();
+                if (op != null && op.compareTo(BigDecimal.ZERO) < 0) {
+                    lossCount++;
                 }
             }
-
-            if (!isExpired && !isPriceDeviated) {
-                return summary.getAiAnalysis();
-            }
+            if (lossCount >= 1)
+                return true; // At least 1 recent quarter loss -> Turnaround check needed
         }
 
-        // 2. Cache Miss: Generate Fresh Analysis with STANDARDIZED (NEUTRAL) Settings
-        // Strictly, we should recalculate valuation with NEUTRAL settings for the AI
-        // context
-        // But to save API calls/Compute, we use the current context if it's close
-        // enough,
-        // OR we can just rely on the Prompt Instructions to be objective.
-        // For strict standardization as per plan:
-        // We will allow the AI to see the *current* valuation (which might be
-        // Aggressive),
-        // BUT we instruct it to be "Objective".
-        // Wait, the plan said "Force NEUTRAL".
-        // To do that, we need to calculate a 'standardValuation'.
-        ValuationDto.Request standardRequest = ValuationDto.Request.builder()
-                .userPropensity(ValuationDto.UserPropensity.NEUTRAL)
-                .build();
-        // Recalculate Base Valuation for AI Baseline
-        Response standardValuation = calculateValuation(stockCode, standardRequest);
+        return false;
+    }
 
-        String freshAnalysis = generateAiDiagnosis(standardValuation, ratio, bs, annuals, quarters);
-
-        // 3. Save to DB
-        if (cachedSummary.isPresent()) {
-            StockAiSummary existing = cachedSummary.get();
-            existing.updateAnalysis(freshAnalysis, null, currentPrice);
-            stockAiSummaryRepository.save(existing);
-        } else {
-            StockAiSummary newSummary = StockAiSummary.builder()
-                    .stockCode(stockCode)
-                    .aiAnalysis(freshAnalysis)
-                    .referencePrice(currentPrice)
-                    .lastModifiedDate(LocalDateTime.now())
-                    .createdDate(LocalDateTime.now())
-                    .build();
-            stockAiSummaryRepository.save(newSummary);
-        }
-
-        return freshAnalysis;
+    // Legacy Support (Wrapper)
+    private String generateAiDiagnosis(Response val, StockFinancialRatio latestRatio, StockBalanceSheet balanceSheet,
+            List<StockFinancialStatement> recentAnnuals, List<StockFinancialStatement> recentQuarters) {
+        // This serves as a fallback or for non-cached calls if any
+        return getStaticAnalysis(val.getStockCode()) + "\n\n" + getValuationAnalysis(val.getStockCode());
     }
 
     private String calculateQuarterlyYoY(StockFinancialStatement current, StockFinancialStatement past) {

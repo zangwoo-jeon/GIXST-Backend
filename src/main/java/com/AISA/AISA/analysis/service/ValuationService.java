@@ -17,6 +17,7 @@ import com.AISA.AISA.kisStock.repository.StockFinancialRatioRepository;
 import com.AISA.AISA.kisStock.repository.StockFinancialStatementRepository;
 import com.AISA.AISA.kisStock.repository.StockBalanceSheetRepository;
 import com.AISA.AISA.kisStock.repository.StockRepository;
+import com.AISA.AISA.kisStock.kisService.KisMacroService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -26,6 +27,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
+import java.time.LocalDate;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -41,23 +43,26 @@ public class ValuationService {
     private final StockBalanceSheetRepository stockBalanceSheetRepository;
     private final KisStockService kisStockService;
     private final GeminiService geminiService;
-    private final StockAiSummaryRepository stockAiSummaryRepository; // Added field
+    private final StockAiSummaryRepository stockAiSummaryRepository;
+    private final KisMacroService kisMacroService; // Added
 
     @Autowired
-    public ValuationService(StockRepository stockRepository, // Added stockRepository to constructor
+    public ValuationService(StockRepository stockRepository,
             StockFinancialRatioRepository stockFinancialRatioRepository,
             StockBalanceSheetRepository stockBalanceSheetRepository,
             StockFinancialStatementRepository stockFinancialStatementRepository,
             KisStockService kisStockService,
             GeminiService geminiService,
-            StockAiSummaryRepository stockAiSummaryRepository) {
-        this.stockRepository = stockRepository; // Initialized stockRepository
+            StockAiSummaryRepository stockAiSummaryRepository,
+            KisMacroService kisMacroService) {
+        this.stockRepository = stockRepository;
         this.stockFinancialRatioRepository = stockFinancialRatioRepository;
         this.stockBalanceSheetRepository = stockBalanceSheetRepository;
         this.stockFinancialStatementRepository = stockFinancialStatementRepository;
         this.kisStockService = kisStockService;
         this.geminiService = geminiService;
         this.stockAiSummaryRepository = stockAiSummaryRepository;
+        this.kisMacroService = kisMacroService;
     }
 
     // 기본 요구 수익률 (Fallback)
@@ -1179,5 +1184,15 @@ public class ValuationService {
         } catch (Exception e) {
             return "";
         }
+
+    }
+
+    public String fetchBondYieldFromEcos() {
+        return kisMacroService.getLatestEcosBondYield();
+    }
+
+    @Transactional
+    public void clearAiSummaryCache() {
+        stockAiSummaryRepository.deleteAll();
     }
 }

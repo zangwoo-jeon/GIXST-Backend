@@ -14,6 +14,8 @@ import com.AISA.AISA.kisStock.kisService.Auth.KisAuthService;
 import com.AISA.AISA.portfolio.macro.Entity.MacroDailyData;
 import com.AISA.AISA.portfolio.macro.repository.MacroDailyDataRepository;
 import com.AISA.AISA.portfolio.macro.dto.MacroIndicatorDto;
+import com.AISA.AISA.kisStock.config.EcosApiProperties;
+import com.AISA.AISA.kisStock.dto.EcosApiResponseDto;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -38,6 +40,7 @@ public class KisMacroService {
     private final WebClient webClient;
     private final KisAuthService kisAuthService;
     private final KisApiProperties kisApiProperties;
+    private final EcosApiProperties ecosApiProperties; // Added
 
     private final MacroDailyDataRepository macroDailyDataRepository;
 
@@ -445,6 +448,72 @@ public class KisMacroService {
         }
 
         return response.getOutput1();
+    }
+
+    // ECOS Bond Yield (3Y BBB-)
+    // STAT_CODE: 817Y002
+    // ITEM_CODE: 010320000
+    private static final String STAT_CODE_ECOS_BOND_YIELD = "817Y002";
+    private static final String ITEM_CODE_ECOS_BOND_YIELD = "010320000";
+
+    @Transactional
+    public void fetchAndSaveEcosBondYield() {
+        try {
+            LocalDate today = LocalDate.now();
+            LocalDate startDate = today.minusDays(7); // Check last 7 days
+            String startStr = startDate.format(DateTimeFormatter.ofPattern("yyyyMMdd"));
+            String endStr = today.format(DateTimeFormatter.ofPattern("yyyyMMdd"));
+
+            String key = ecosApiProperties.getApiKey();
+            String url = String.format("/StatisticSearch/%s/json/kr/1/10/%s/D/%s/%s/%s",
+                    key, STAT_CODE_ECOS_BOND_YIELD, startStr, endStr, ITEM_CODE_ECOS_BOND_YIELD);
+
+            EcosApiResponseDto response = webClient.get()
+                    .uri("https://ecos.bok.or.kr/api" + url)
+                    .retrieve()
+                    .bodyToMono(EcosApiResponseDto.class)
+                    .block();
+
+            if (response != null && response.getStatisticSearch() != null
+                    && response.getStatisticSearch().getRow() != null) {
+                for (EcosApiResponseDto.Row row : response.getStatisticSearch().getRow()) {
+                    LocalDate date = LocalDate.parse(row.getTime(), DateTimeFormatter.ofPattern("yyyyMMdd"));
+                    BigDecimal value = new BigDecimal(row.getDataValue());
+
+                    boolean exists = macroDailyDataRepository
+                            .findAllByStatCodeAndItemCodeAndDateBetweenOrderByDateAsc(
+                                    STAT_CODE_ECOS_BOND_YIELD, ITEM_CODE_ECOS_BOND_YIELD, date, date)
+                            .stream().findAny().isPresent();
+
+                    if (!exists) {
+                        MacroDailyData entity = MacroDailyData.builder()
+                                .statCode(STAT_CODE_ECOS_BOND_YIELD)
+                                .itemCode(ITEM_CODE_ECOS_BOND_YIELD)
+                                .date(date)
+                                .value(value)
+                                .build();
+                        macroDailyDataRepository.save(entity);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.error("Failed to fetch/save ECOS bond yield: {}", e.getMessage());
+        }
+    }
+
+    @Cacheable(value = "ecosBondYield", key = "'latest'", unless = "#result == null")
+    public String getLatestEcosBondYield() {
+        LocalDate endDate = LocalDate.now();
+        LocalDate startDate = endDate.minusDays(14); // Look back 2 weeks just in case
+
+        List<MacroDailyData> data = macroDailyDataRepository
+                .findAllByStatCodeAndItemCodeAndDateBetweenOrderByDateAsc(
+                        STAT_CODE_ECOS_BOND_YIELD, ITEM_CODE_ECOS_BOND_YIELD, startDate, endDate);
+
+        if (!data.isEmpty()) {
+            return data.get(data.size() - 1).getValue().toString();
+        }
+        return null;
     }
 
 }

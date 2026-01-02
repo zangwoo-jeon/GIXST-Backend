@@ -8,6 +8,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -94,5 +95,12 @@ public class AnalysisController {
                         @PathVariable String stockCode) {
                 return ResponseEntity.ok(new SuccessResponse<>(true, "AI 적정 주가 분석 리포트 조회 성공 (최적화)",
                                 valuationService.getStandardizedValuationReport(stockCode)));
+        }
+
+        @DeleteMapping("/cache")
+        @Operation(summary = "AI 분석 캐시 초기화", description = "저장된 모든 종목의 AI 분석 리포트 캐시(DB)를 삭제합니다.")
+        public ResponseEntity<SuccessResponse<Void>> clearAiSummaryCache() {
+                valuationService.clearAiSummaryCache();
+                return ResponseEntity.ok(new SuccessResponse<>(true, "AI 분석 캐시 초기화 성공", null));
         }
 }

@@ -9,6 +9,7 @@ import com.AISA.AISA.kisStock.enums.BondYield;
 import com.AISA.AISA.portfolio.macro.service.EcosService;
 import com.AISA.AISA.kisStock.kisService.DividendService;
 import com.AISA.AISA.kisStock.kisService.KisInformationService;
+import com.AISA.AISA.kisStock.kisService.Auth.KisAuthService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -28,6 +29,7 @@ public class StockScheduler {
     private final EcosService ecosService;
     private final DividendService dividendService;
     private final KisInformationService kisInformationService;
+    private final KisAuthService kisAuthService;
 
     // Run at 2 AM every day
     @Scheduled(cron = "0 0 2 * * *")
@@ -157,6 +159,18 @@ public class StockScheduler {
             log.error("Failed to update weekly ECOS data: {}", e.getMessage());
         }
         log.info("Completed scheduled weekly ECOS data update.");
+    }
+
+    // Run at 00:00 every day (Daily Token Refresh)
+    @Scheduled(cron = "0 0 0 * * *")
+    public void refreshKisAccessToken() {
+        log.info("Starting scheduled KIS Access Token refresh...");
+        try {
+            kisAuthService.refreshAccessToken();
+        } catch (Exception e) {
+            log.error("Failed to refresh KIS Access Token: {}", e.getMessage());
+        }
+        log.info("Completed scheduled KIS Access Token refresh.");
     }
 
     // Run at 5 AM every Saturday

@@ -36,11 +36,19 @@ public class OAuthAttributes {
     }
 
     private static OAuthAttributes ofGoogle(String userNameAttributeName, Map<String, Object> attributes) {
+        String name = (String) attributes.get("name");
+        if (name == null || name.isBlank()) {
+            name = (String) attributes.get("given_name");
+        }
+        if (name == null || name.isBlank()) {
+            name = "Google User";
+        }
+
         return OAuthAttributes.builder()
-                .name((String) attributes.get("name"))
+                .name(name)
                 .email((String) attributes.get("email"))
                 .provider("google")
-                .providerId((String) attributes.get("sub"))
+                .providerId(String.valueOf(attributes.get("sub")))
                 .attributes(attributes)
                 .nameAttributeKey(userNameAttributeName)
                 .build();

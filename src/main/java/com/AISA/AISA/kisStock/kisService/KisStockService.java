@@ -600,6 +600,24 @@ public class KisStockService {
                 return marketCaps.stream()
                                 .map(smc -> {
                                         Stock stock = smc.getStock();
+
+                                        String currentPrice = null;
+                                        String priceChange = null;
+                                        String changeRate = null;
+
+                                        try {
+                                                // Fetch from Cache (Redis)
+                                                // Since we have a warmer, this should be fast.
+                                                StockPriceDto priceDto = getStockPrice(stock.getStockCode());
+                                                if (priceDto != null) {
+                                                        currentPrice = priceDto.getStockPrice();
+                                                        priceChange = priceDto.getPriceChange();
+                                                        changeRate = priceDto.getChangeRate();
+                                                }
+                                        } catch (Exception e) {
+                                                // Ignore error to avoid breaking the whole list
+                                        }
+
                                         return StockSearchResponseDto.builder()
                                                         .stockCode(stock.getStockCode())
                                                         .stockName(stock.getStockName())
@@ -607,9 +625,29 @@ public class KisStockService {
                                                         .marketCap(smc.getMarketCap() != null
                                                                         ? smc.getMarketCap().toString()
                                                                         : null)
+                                                        .currentPrice(currentPrice)
+                                                        .priceChange(priceChange)
+                                                        .changeRate(changeRate)
                                                         .build();
                                 })
                                 .collect(Collectors.toList());
+        }
+
+        public void refreshTopMarketCapPrices() {
+                List<StockMarketCap> top100 = stockMarketCapRepository.findTop100ByOrderByMarketCapDesc();
+                log.info("Warming up prices for Top {} Market Cap stocks...", top100.size());
+
+                for (StockMarketCap smc : top100) {
+                        try {
+                                // Call getStockPrice to refresh cache
+                                getStockPrice(smc.getStock().getStockCode());
+                                Thread.sleep(50); // Small delay to prevent API rate limit issues
+                        } catch (Exception e) {
+                                log.warn("Failed to warm up price for {}: {}", smc.getStock().getStockCode(),
+                                                e.getMessage());
+                        }
+                }
+                log.info("Finished warming up prices.");
         }
 
         public void initAllStocksMarketCap() {

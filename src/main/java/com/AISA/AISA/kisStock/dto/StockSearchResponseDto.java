@@ -10,4 +10,9 @@ public class StockSearchResponseDto {
     private String stockName;
     private String marketName;
     private String marketCap; // 시가총액 (문자열 포맷팅 용)
+
+    // 실시간 가격 정보 (Rank 조회 시 포함됨)
+    private String currentPrice;
+    private String priceChange; // 전일 대비
+    private String changeRate; // 등락률
 }

@@ -3,6 +3,7 @@ package com.AISA.AISA.global.config;
 import com.AISA.AISA.global.jwt.JwtAuthenticationFilter;
 import com.AISA.AISA.global.jwt.JwtTokenProvider;
 import com.AISA.AISA.global.oauth.handler.OAuth2SuccessHandler;
+import com.AISA.AISA.global.oauth.handler.CustomAuthenticationFailureHandler;
 import com.AISA.AISA.global.oauth.service.CustomOAuth2UserService;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
@@ -40,6 +41,7 @@ public class SecurityConfig {
         private final JwtTokenProvider jwtTokenProvider;
         private final CustomOAuth2UserService customOAuth2UserService;
         private final OAuth2SuccessHandler oAuth2SuccessHandler;
+        private final CustomAuthenticationFailureHandler customAuthenticationFailureHandler;
 
         @Bean
         @Order(1)
@@ -101,7 +103,8 @@ public class SecurityConfig {
                                 .oauth2Login(oauth2 -> oauth2
                                                 .userInfoEndpoint(userInfo -> userInfo
                                                                 .userService(customOAuth2UserService))
-                                                .successHandler(oAuth2SuccessHandler))
+                                                .successHandler(oAuth2SuccessHandler)
+                                                .failureHandler(customAuthenticationFailureHandler))
                                 .addFilterBefore(new JwtAuthenticationFilter(jwtTokenProvider),
                                                 UsernamePasswordAuthenticationFilter.class);
 

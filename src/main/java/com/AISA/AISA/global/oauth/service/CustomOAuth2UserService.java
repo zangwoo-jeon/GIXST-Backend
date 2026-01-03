@@ -70,7 +70,6 @@ public class CustomOAuth2UserService implements OAuth2UserService<OAuth2UserRequ
                 // 1. 이메일이 존재하면 이메일로 사용자 조회
                 if (email != null && !email.isBlank()) {
                         Member memberByEmail = memberRepository.findByEmail(email)
-                                        .map(entity -> entity.update(attributes.getName(), email))
                                         .orElse(null);
 
                         if (memberByEmail != null) {
@@ -83,7 +82,6 @@ public class CustomOAuth2UserService implements OAuth2UserService<OAuth2UserRequ
                 // 2. Provider ID로 조회 (이메일이 없거나, 이메일로 찾지 못한 경우)
                 Member member = memberRepository
                                 .findByProviderAndProviderId(attributes.getProvider(), attributes.getProviderId())
-                                .map(entity -> entity.update(attributes.getName(), email))
                                 .orElseGet(() -> {
                                         log.info("Member not found by email or provider. Creating new member...");
                                         // 3. 존재하지 않는 경우 신규 회원 생성

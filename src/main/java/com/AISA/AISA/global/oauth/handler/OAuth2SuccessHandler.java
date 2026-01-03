@@ -3,34 +3,35 @@ package com.AISA.AISA.global.oauth.handler;
 import com.AISA.AISA.global.jwt.JwtTokenProvider;
 import com.AISA.AISA.global.jwt.RefreshToken;
 import com.AISA.AISA.global.jwt.RefreshTokenRepository;
+import com.AISA.AISA.global.oauth.repository.RedisOAuth2AuthorizationRequestRepository;
+import com.AISA.AISA.global.util.CookieUtils;
 import com.AISA.AISA.member.adapter.in.Member;
 import com.AISA.AISA.member.adapter.in.MemberRepository;
-import com.AISA.AISA.global.oauth.repository.HttpCookieOAuth2AuthorizationRequestRepository;
 import jakarta.servlet.ServletException;
+import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
-import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.security.web.authentication.SimpleUrlAuthenticationSuccessHandler;
 import org.springframework.stereotype.Component;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import java.io.IOException;
-import java.util.Collection;
+import java.nio.charset.StandardCharsets;
 
-@Slf4j
 @Component
 @RequiredArgsConstructor
+@Slf4j
 public class OAuth2SuccessHandler extends SimpleUrlAuthenticationSuccessHandler {
 
         private final JwtTokenProvider jwtTokenProvider;
-        private final RefreshTokenRepository refreshTokenRepository;
         private final MemberRepository memberRepository;
-        private final HttpCookieOAuth2AuthorizationRequestRepository httpCookieOAuth2AuthorizationRequestRepository; // Injected
+        private final RefreshTokenRepository refreshTokenRepository;
+        private final RedisOAuth2AuthorizationRequestRepository redisOAuth2AuthorizationRequestRepository;
 
         @Override
         public void onAuthenticationSuccess(HttpServletRequest request, HttpServletResponse response,
@@ -61,12 +62,16 @@ public class OAuth2SuccessHandler extends SimpleUrlAuthenticationSuccessHandler 
 
                 refreshTokenRepository.save(token);
 
-                String targetUrl = UriComponentsBuilder.fromUriString("https://gixst.vercel.app/oauth2/redirect")
+                String targetUrl = CookieUtils.getCookie(request, "redirect_uri")
+                                .map(Cookie::getValue)
+                                .orElse("https://gixst.vercel.app/oauth2/redirect");
+
+                targetUrl = UriComponentsBuilder.fromUriString(targetUrl)
                                 .queryParam("accessToken", accessToken)
                                 .queryParam("refreshToken", refreshToken)
                                 .build().toUriString();
 
-                httpCookieOAuth2AuthorizationRequestRepository.removeAuthorizationRequestCookies(request, response);
+                redisOAuth2AuthorizationRequestRepository.removeAuthorizationRequestCookies(request, response);
                 getRedirectStrategy().sendRedirect(request, response, targetUrl);
         }
 }

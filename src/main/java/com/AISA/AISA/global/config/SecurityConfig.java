@@ -140,11 +140,6 @@ public class SecurityConfig {
         }
 
         @Bean
-        public org.springframework.web.filter.ForwardedHeaderFilter forwardedHeaderFilter() {
-                return new org.springframework.web.filter.ForwardedHeaderFilter();
-        }
-
-        @Bean
         public CorsConfigurationSource corsConfigurationSource() {
                 CorsConfiguration configuration = new CorsConfiguration();
                 configuration.addAllowedOrigin("http://localhost:3000");

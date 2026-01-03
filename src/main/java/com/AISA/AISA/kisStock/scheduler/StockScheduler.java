@@ -300,4 +300,15 @@ public class StockScheduler {
         }
         log.info("Completed scheduled weekly financial data update.");
     }
+
+    // Run every 1 minute from 9 AM to 3:59 PM (Market Hours) on Weekdays
+    @Scheduled(cron = "0 * 9-15 * * MON-FRI")
+    public void warmupMarketCapPrices() {
+        log.info("Starting scheduled Top 100 Market Cap price warmup...");
+        try {
+            kisStockService.refreshTopMarketCapPrices();
+        } catch (Exception e) {
+            log.error("Failed to warmup market cap prices: {}", e.getMessage());
+        }
+    }
 }

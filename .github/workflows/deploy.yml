@@ -89,13 +89,13 @@ jobs:
             docker run -d \
               --name ${{ env.CONTAINER_NAME }} \
               -p 8080:8080 \
-              -v ~/logs:/logs \
               -e SPRING_DATASOURCE_URL="jdbc:mysql://172.17.0.1:3306/aisa_portfolio?useUnicode=true&characterEncoding=utf8&allowPublicKeyRetrieval=true&useSSL=false" \
               -e SPRING_DATASOURCE_USERNAME="${{ secrets.DB_USERNAME }}" \
               -e SPRING_DATASOURCE_PASSWORD="${{ secrets.DB_PASSWORD }}" \
               -e SPRING_JPA_HIBERNATE_DDL_AUTO="update" \
               -e SPRING_JPA_SHOW_SQL="true" \
               -e SPRING_JPA_PROPERTIES_HIBERNATE_FORMAT_SQL="true" \
+              -e SERVER_FORWARD_HEADERS_STRATEGY="framework" \
               \
               -e KIS_BASE_URL="https://openapi.koreainvestment.com:9443" \
               -e KIS_AUTH_URL="/oauth2/tokenP" \

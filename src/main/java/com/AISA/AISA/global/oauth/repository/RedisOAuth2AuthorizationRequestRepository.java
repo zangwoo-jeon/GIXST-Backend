@@ -15,13 +15,16 @@ import org.springframework.stereotype.Component;
 import java.util.concurrent.TimeUnit;
 
 @Component
-@RequiredArgsConstructor
 @Slf4j
 public class RedisOAuth2AuthorizationRequestRepository
         implements AuthorizationRequestRepository<OAuth2AuthorizationRequest> {
 
-    @Qualifier("oAuth2RedisTemplate")
-    private final RedisTemplate<String, Object> redisTemplate;
+    private final RedisTemplate<String, Object> oAuth2RedisTemplate;
+
+    public RedisOAuth2AuthorizationRequestRepository(
+            @Qualifier("oAuth2RedisTemplate") RedisTemplate<String, Object> oAuth2RedisTemplate) {
+        this.oAuth2RedisTemplate = oAuth2RedisTemplate;
+    }
 
     private static final String OAUTH2_REQUEST_CACHE_KEY_PREFIX = "oauth2:auth:request:";
     private static final long DURATION_MINUTES = 5;
@@ -37,7 +40,7 @@ public class RedisOAuth2AuthorizationRequestRepository
         }
         String key = OAUTH2_REQUEST_CACHE_KEY_PREFIX + state;
         log.info("Loading OAuth2 request from Redis. Key: {}", key);
-        return (OAuth2AuthorizationRequest) redisTemplate.opsForValue().get(key);
+        return (OAuth2AuthorizationRequest) oAuth2RedisTemplate.opsForValue().get(key);
     }
 
     @Override
@@ -54,7 +57,7 @@ public class RedisOAuth2AuthorizationRequestRepository
         }
         String key = OAUTH2_REQUEST_CACHE_KEY_PREFIX + state;
         log.info("Saving OAuth2 request to Redis. Key: {}, Expiration: {} mins", key, DURATION_MINUTES);
-        redisTemplate.opsForValue().set(key, authorizationRequest, DURATION_MINUTES, TimeUnit.MINUTES);
+        oAuth2RedisTemplate.opsForValue().set(key, authorizationRequest, DURATION_MINUTES, TimeUnit.MINUTES);
 
         String redirectUriAfterLogin = request.getParameter(REDIRECT_URI_PARAM_COOKIE_NAME);
         if (StringUtils.isNotBlank(redirectUriAfterLogin)) {
@@ -72,10 +75,10 @@ public class RedisOAuth2AuthorizationRequestRepository
         }
         String key = OAUTH2_REQUEST_CACHE_KEY_PREFIX + state;
         log.info("Removing OAuth2 request from Redis. Key: {}", key);
-        OAuth2AuthorizationRequest authorizationRequest = (OAuth2AuthorizationRequest) redisTemplate.opsForValue()
+        OAuth2AuthorizationRequest authorizationRequest = (OAuth2AuthorizationRequest) oAuth2RedisTemplate.opsForValue()
                 .get(key);
         if (authorizationRequest != null) {
-            redisTemplate.delete(key);
+            oAuth2RedisTemplate.delete(key);
         }
         return authorizationRequest;
     }

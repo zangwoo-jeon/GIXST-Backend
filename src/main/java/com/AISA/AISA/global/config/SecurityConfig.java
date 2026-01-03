@@ -112,8 +112,6 @@ public class SecurityConfig {
                                                 .successHandler(oAuth2SuccessHandler)
                                                 .failureHandler(customAuthenticationFailureHandler))
                                 .addFilterBefore(new JwtAuthenticationFilter(jwtTokenProvider),
-                                                UsernamePasswordAuthenticationFilter.class)
-                                .addFilterBefore(new org.springframework.web.filter.ForwardedHeaderFilter(),
                                                 UsernamePasswordAuthenticationFilter.class);
 
                 return http.build();
@@ -139,6 +137,11 @@ public class SecurityConfig {
         @Bean
         public PasswordEncoder passwordEncoder() {
                 return new BCryptPasswordEncoder();
+        }
+
+        @Bean
+        public org.springframework.web.filter.ForwardedHeaderFilter forwardedHeaderFilter() {
+                return new org.springframework.web.filter.ForwardedHeaderFilter();
         }
 
         @Bean

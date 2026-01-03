@@ -5,7 +5,7 @@ import com.AISA.AISA.global.jwt.JwtTokenProvider;
 import com.AISA.AISA.global.oauth.handler.OAuth2SuccessHandler;
 import com.AISA.AISA.global.oauth.handler.CustomAuthenticationFailureHandler;
 import com.AISA.AISA.global.oauth.service.CustomOAuth2UserService;
-import com.AISA.AISA.global.oauth.repository.HttpCookieOAuth2AuthorizationRequestRepository;
+import com.AISA.AISA.global.oauth.repository.RedisOAuth2AuthorizationRequestRepository;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
@@ -43,7 +43,7 @@ public class SecurityConfig {
         private final CustomOAuth2UserService customOAuth2UserService;
         private final OAuth2SuccessHandler oAuth2SuccessHandler;
         private final CustomAuthenticationFailureHandler customAuthenticationFailureHandler;
-        private final HttpCookieOAuth2AuthorizationRequestRepository httpCookieOAuth2AuthorizationRequestRepository;
+        private final RedisOAuth2AuthorizationRequestRepository redisOAuth2AuthorizationRequestRepository;
 
         @Bean
         @Order(1)
@@ -106,7 +106,7 @@ public class SecurityConfig {
                                                 .authorizationEndpoint(authorization -> authorization
                                                                 .baseUri("/oauth2/authorization")
                                                                 .authorizationRequestRepository(
-                                                                                httpCookieOAuth2AuthorizationRequestRepository))
+                                                                                redisOAuth2AuthorizationRequestRepository))
                                                 .userInfoEndpoint(userInfo -> userInfo
                                                                 .userService(customOAuth2UserService))
                                                 .successHandler(oAuth2SuccessHandler)

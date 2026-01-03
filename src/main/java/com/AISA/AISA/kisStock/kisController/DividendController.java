@@ -43,10 +43,62 @@ public class DividendController {
     }
 
     @PostMapping("/rank/refresh")
-    @Operation(summary = "배당률 순위 갱신", description = "전체 주식의 작년 배당금을 조회하여 배당수익률 순위를 갱신합니다. (시간 소요 주의)")
+    @Operation(summary = "배당률 순위 갱신 (DB 기반)", description = "DB에 저장된 배당 정보를 바탕으로 배당수익률 순위를 갱신합니다. (API 호출 없음, 빠름)")
     public ResponseEntity<SuccessResponse<String>> refreshDividendRank() {
         dividendService.refreshDividendRank();
         return ResponseEntity.ok(new SuccessResponse<>(true, "배당률 순위 갱신 완료", null));
+    }
+
+    @PostMapping("/refresh-all")
+    @Operation(summary = "전체 배당 데이터 갱신 (KIS API)", description = "모든 주식의 배당 정보를 KIS API를 통해 최신화합니다. (시간이 오래 걸림)")
+    public ResponseEntity<SuccessResponse<String>> refreshAllDividends(
+            @RequestParam(required = false) String startDate,
+            @RequestParam(required = false) String endDate) {
+
+        if (startDate == null || endDate == null) {
+            // Default to last 1 year
+            endDate = java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd"));
+            startDate = java.time.LocalDate.now().minusYears(1)
+                    .format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd"));
+        }
+
+        dividendService.refreshAllDividends(startDate, endDate);
+        return ResponseEntity.ok(new SuccessResponse<>(true, "전체 배당 데이터 갱신 완료", null));
+    }
+
+    @PostMapping("/{stockCode}/refresh")
+    @Operation(summary = "특정 종목 배당 데이터 갱신 (KIS API)", description = "특정 종목의 배당 정보를 KIS API를 통해 최신화합니다.")
+    public ResponseEntity<SuccessResponse<String>> refreshStockDividend(
+            @PathVariable String stockCode,
+            @RequestParam(required = false) String startDate,
+            @RequestParam(required = false) String endDate) {
+
+        if (startDate == null || endDate == null) {
+            // Default to last 1 year
+            endDate = java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd"));
+            startDate = java.time.LocalDate.now().minusYears(1)
+                    .format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd"));
+        }
+
+        dividendService.refreshStockDividend(stockCode, startDate, endDate);
+        return ResponseEntity.ok(new SuccessResponse<>(true, stockCode + " 배당 데이터 갱신 완료", null));
+    }
+
+    @GetMapping("/{stockCode}/fetch-kis")
+    @Operation(summary = "특정 종목 배당 KIS API 직접 조회", description = "DB를 거치지 않고 KIS API에서 직접 배당 정보를 조회하여 반환합니다. (동시에 DB 저장도 수행됨)")
+    public ResponseEntity<SuccessResponse<List<StockDividendInfoDto>>> fetchDividendFromKis(
+            @PathVariable String stockCode,
+            @RequestParam(required = false) String startDate,
+            @RequestParam(required = false) String endDate) {
+
+        if (startDate == null || endDate == null) {
+            endDate = java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd"));
+            startDate = java.time.LocalDate.now().minusYears(1)
+                    .format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd"));
+        }
+
+        List<StockDividendInfoDto> result = dividendService.refreshStockDividend(stockCode, startDate, endDate);
+        return ResponseEntity.ok(new SuccessResponse<>(true, "KIS API 배당 정보 직접 조회 성공", result));
     }
 
     @GetMapping("/rank")

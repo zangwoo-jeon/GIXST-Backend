@@ -258,14 +258,21 @@ public class StockScheduler {
 
     // Run at 5 AM every Saturday
     @Scheduled(cron = "0 0 5 * * SAT")
-    public void refreshDividendRank() {
-        log.info("Starting scheduled dividend rank refresh...");
+    public void refreshDividendDataAndRank() {
+        log.info("Starting scheduled dividend data and rank refresh...");
         try {
+            // 1. Fetch latest dividend data (Last 1 Month)
+            String endDate = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
+            String startDate = LocalDate.now().minusMonths(1).format(DateTimeFormatter.ofPattern("yyyyMMdd"));
+
+            dividendService.refreshAllDividends(startDate, endDate);
+
+            // 2. Calculate Rank based on DB data
             dividendService.refreshDividendRank();
         } catch (Exception e) {
-            log.error("Failed to refresh dividend rank: {}", e.getMessage());
+            log.error("Failed to refresh dividend data/rank: {}", e.getMessage());
         }
-        log.info("Completed scheduled dividend rank refresh.");
+        log.info("Completed scheduled dividend data and rank refresh.");
     }
 
     // Run at 4 AM every Sunday (Financial Statements & Ratios)

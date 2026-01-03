@@ -20,7 +20,9 @@ import com.AISA.AISA.portfolio.PortfolioStock.PortStockRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.cache.annotation.Caching;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 
@@ -73,17 +75,6 @@ public class DividendService {
                                                 endDate);
 
                 if (!savedDividends.isEmpty()) {
-                        // DB에 데이터가 있으면 API 호출 없이 반환 (단, 전체 기간 커버 여부는 간단히 startDate/endDate로 판단하거나,
-                        // 일단 데이터가 있으면 갱신하지 않는 정책으로 감. 더 정교하려면 비어있는 구간만 API 호출해야 함.)
-                        // 여기서는 "DB에 하나라도 있으면 API 호출 안함"으로 단순화할 수 있으나,
-                        // 사용자가 특정 연도 데이터를 원하는데 DB엔 작년것만 있으면 안됨.
-                        // 따라서, DB 조회 결과가 요청 기간을 충분히 커버하는지 체크하는게 좋지만,
-                        // KIS API 특성상 '결산배당', '중간배당' 등이 섞여서 기간 체크가 모호함.
-                        // -> 간단한 전략: DB 조회 결과가 있으면 그걸 반환. (데이터 누락 가능성 존재하나 속도 우선)
-                        // -> 더 나은 전략: DB 조회 결과가 비어있지 않으면 그대로 반환 (캐시처럼 사용).
-                        // 만약 사용자가 "최신 데이터 갱신"을 원하면 별도 API가 필요할 수 있음.
-                        // 우선은 "DB 조회 결과 존재 시 반환"으로 구현.
-
                         return savedDividends.stream()
                                         .filter(entity -> entity.getDividendAmount().compareTo(BigDecimal.ZERO) > 0)
                                         .map(entity -> StockDividendInfoDto.builder()
@@ -98,6 +89,11 @@ public class DividendService {
                 }
 
                 // 2. DB에 없으면 API 호출
+                return fetchAndSaveDividendsFromApi(stockCode, startDate, endDate);
+        }
+
+        private List<StockDividendInfoDto> fetchAndSaveDividendsFromApi(String stockCode, String startDate,
+                        String endDate) {
                 String accessToken = kisAuthService.getAccessToken();
 
                 Stock stock = stockRepository.findByStockCode(stockCode)
@@ -162,14 +158,12 @@ public class DividendService {
                                 })
                                 .collect(Collectors.toList());
 
-                // 3. 주가 정보 조회를 위한 기간 설정 (조회된 배당 내역의 기간을 커버하도록)
-                // dtoList가 비어있지 않다고 가정
+                // 3. 주가 정보 조회를 위한 기간 설정
                 if (!dtoList.isEmpty()) {
                         try {
                                 String minDate = dtoList.get(dtoList.size() - 1).getRecordDate(); // 오래된 날짜
                                 String maxDate = dtoList.get(0).getRecordDate(); // 최근 날짜
 
-                                // 주말 등 고려하여 앞뒤로 여유 기간을 둠
                                 LocalDate minLocalDate = LocalDate
                                                 .parse(minDate, DateTimeFormatter.ofPattern("yyyyMMdd")).minusDays(7);
                                 LocalDate maxLocalDate = LocalDate
@@ -178,11 +172,9 @@ public class DividendService {
                                 String queryStart = minLocalDate.format(DateTimeFormatter.ofPattern("yyyyMMdd"));
                                 String queryEnd = maxLocalDate.format(DateTimeFormatter.ofPattern("yyyyMMdd"));
 
-                                // 일별 주가 조회 (API 호출) - KisStockService에 getStockChart 메서드 활용
                                 StockChartResponseDto chartResponse = kisStockService.getStockChart(stockCode,
                                                 queryStart, queryEnd, "D");
 
-                                // 날짜별 종가 매핑 (빠른 검색을 위해 Map 사용)
                                 TreeMap<String, BigDecimal> priceMap = new java.util.TreeMap<>();
                                 if (chartResponse != null && chartResponse.getPriceList() != null) {
                                         for (StockChartPriceDto p : chartResponse.getPriceList()) {
@@ -190,28 +182,22 @@ public class DividendService {
                                         }
                                 }
 
-                                // 4. 배당률 재계산 및 DB 저장
                                 List<StockDividend> entitiesToSave = new ArrayList<>();
 
                                 for (StockDividendInfoDto dto : dtoList) {
                                         String recordDate = dto.getRecordDate();
-
-                                        // 해당 날짜의 종가 찾기 OR 가장 가까운 과거 날짜 찾기
                                         Entry<String, BigDecimal> entry = priceMap.floorEntry(recordDate);
                                         BigDecimal closePrice = (entry != null) ? entry.getValue() : BigDecimal.ZERO;
 
                                         if (closePrice.compareTo(BigDecimal.ZERO) > 0) {
-                                                // 배당률 = (배당금 / 주가) * 100
                                                 double calculatedRate = dto.getDividendAmount()
                                                                 .divide(closePrice, 4, RoundingMode.HALF_UP)
                                                                 .multiply(new BigDecimal(100))
                                                                 .doubleValue();
 
-                                                // DTO 업데이트
                                                 dto.setDividendRate(Double
                                                                 .parseDouble(String.format("%.2f", calculatedRate)));
 
-                                                // Entity 생성 (중복 체크)
                                                 if (!stockDividendRepository.existsByStock_StockCodeAndRecordDate(
                                                                 stockCode, recordDate)) {
                                                         entitiesToSave.add(
@@ -230,18 +216,49 @@ public class DividendService {
                                         }
                                 }
 
-                                // 일괄 저장
                                 if (!entitiesToSave.isEmpty()) {
                                         stockDividendRepository.saveAll(entitiesToSave);
                                 }
 
                         } catch (Exception e) {
                                 log.warn("Failed to update dividend rates with historical prices: {}", e.getMessage());
-                                // 실패해도 원래 API 데이터는 반환
                         }
                 }
 
                 return dtoList;
+        }
+
+        @Caching(evict = {
+                        @CacheEvict(value = "stockDividendDetail", key = "#stockCode"),
+                        @CacheEvict(value = "stockDividend", allEntries = true)
+        })
+        public List<StockDividendInfoDto> refreshStockDividend(String stockCode, String startDate, String endDate) {
+                log.info("Refreshing dividend data for stock: {} ({}-{})", stockCode, startDate, endDate);
+                return fetchAndSaveDividendsFromApi(stockCode, startDate, endDate);
+        }
+
+        @CacheEvict(value = { "stockDividend", "stockDividendDetail" }, allEntries = true)
+        public void refreshAllDividends(String startDate, String endDate) {
+                log.info("Starting batch dividend refresh for period: {} ~ {}", startDate, endDate);
+                List<Stock> allStocks = stockRepository.findAll();
+                int count = 0;
+
+                for (Stock stock : allStocks) {
+                        try {
+                                // Rate limit
+                                TimeUnit.MILLISECONDS.sleep(100);
+
+                                fetchAndSaveDividendsFromApi(stock.getStockCode(), startDate, endDate);
+                                count++;
+
+                                if (count % 10 == 0) {
+                                        log.info("Refreshed dividend data for {} stocks...", count);
+                                }
+                        } catch (Exception e) {
+                                log.warn("Failed to refresh dividend for {}: {}", stock.getStockCode(), e.getMessage());
+                        }
+                }
+                log.info("Completed batch dividend refresh. Total: {}", count);
         }
 
         @Cacheable(value = "dividendRank", key = "'all'", sync = true)
@@ -292,8 +309,9 @@ public class DividendService {
         }
 
         @Transactional
+        @CacheEvict(value = "dividendRank", key = "'all'")
         public void refreshDividendRank() {
-                log.info("Starting batch dividend rank refresh...");
+                log.info("Starting batch dividend rank refresh (DB Based)...");
 
                 // 1. Get all stocks
                 List<Stock> allStocks = stockRepository.findAll();
@@ -307,25 +325,30 @@ public class DividendService {
 
                 for (Stock stock : allStocks) {
                         try {
-                                // Rate limit
-                                TimeUnit.MILLISECONDS.sleep(100);
-
-                                // 2. Get Dividend Info
-                                List<StockDividendInfoDto> dividends = getDividendInfo(stock.getStockCode(), startDate,
-                                                endDate);
+                                // 2. Get Dividend Info FROM DB (No API Call)
+                                // We assume DB is populated via refreshAllDividends or individual queries
+                                List<StockDividend> dividends = stockDividendRepository
+                                                .findByStock_StockCodeAndRecordDateBetweenOrderByRecordDateDesc(
+                                                                stock.getStockCode(), startDate, endDate);
 
                                 if (dividends.isEmpty())
                                         continue;
 
                                 BigDecimal totalDividend = BigDecimal.ZERO;
-                                for (StockDividendInfoDto info : dividends) {
+                                for (StockDividend info : dividends) {
                                         totalDividend = totalDividend.add(info.getDividendAmount());
                                 }
 
                                 if (totalDividend.compareTo(BigDecimal.ZERO) == 0)
                                         continue;
 
-                                // 3. Get Current Price (Only for calculation)
+                                // 3. Get Current Price (Still needs API or Cache)
+                                // Optimization: If we have many stocks, this loop is still slow due to Price
+                                // API.
+                                // However, we can't rank without current price.
+                                // Rate limit handled in getStockPrice internally or we add sleep here.
+                                TimeUnit.MILLISECONDS.sleep(50); // Reduced sleep as we skipped dividend API
+
                                 StockPriceDto priceDto = kisStockService.getStockPrice(stock.getStockCode());
                                 if (priceDto == null || priceDto.getStockPrice() == null)
                                         continue;
@@ -340,7 +363,7 @@ public class DividendService {
                                 double yield = totalDividend.divide(currentPrice, 4, RoundingMode.HALF_UP)
                                                 .multiply(new BigDecimal(100)).doubleValue();
 
-                                // Add to list (without saving currentPrice)
+                                // Add to list
                                 StockDividendRank rankEntity = StockDividendRank.builder()
                                                 .stockCode(stock.getStockCode())
                                                 .stockName(stock.getStockName())
@@ -352,12 +375,13 @@ public class DividendService {
                                 newRankList.add(rankEntity);
                                 count++;
 
-                                if (count % 10 == 0) {
-                                        log.info("Processed {} stocks...", count);
+                                if (count % 50 == 0) {
+                                        log.info("Calculated rank for {} stocks...", count);
                                 }
 
                         } catch (Exception e) {
-                                log.warn("Failed to process dividend for {}: {}", stock.getStockCode(), e.getMessage());
+                                log.warn("Failed to process dividend rank for {}: {}", stock.getStockCode(),
+                                                e.getMessage());
                         }
                 }
 

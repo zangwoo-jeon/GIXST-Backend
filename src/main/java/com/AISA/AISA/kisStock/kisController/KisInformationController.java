@@ -104,10 +104,12 @@ public class KisInformationController {
         }
 
         @GetMapping("/rank/market-cap")
-        @Operation(summary = "시가총액 순위 조회 (100위)", description = "DB에 저장된 시가총액 정보를 기준으로 상위 100개 종목을 반환합니다.")
-        public ResponseEntity<SuccessResponse<List<StockSearchResponseDto>>> getMarketCapRank() {
-                return ResponseEntity.ok(new SuccessResponse<>(true, "시가총액 순위 조회 성공",
-                                kisStockService.getMarketCapRanking()));
+        @Operation(summary = "시가총액 순위 조회 (범위 지정 가능)", description = "DB에 저장된 시가총액 정보를 기준으로 순위를 조회합니다. (start, end 파라미터로 범위 지정, 기본값 1~100)")
+        public ResponseEntity<SuccessResponse<List<StockSearchResponseDto>>> getMarketCapRank(
+                        @RequestParam(defaultValue = "1") int start,
+                        @RequestParam(defaultValue = "100") int end) {
+                return ResponseEntity.ok(new SuccessResponse<>(true, "시가총액 순위 조회 성공 (" + start + "~" + end + ")",
+                                kisStockService.getMarketCapRanking(start, end)));
         }
 
         @PostMapping("/rank/market-cap/init-all")

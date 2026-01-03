@@ -25,6 +25,8 @@ import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.data.domain.Pageable;
+import com.AISA.AISA.global.util.OffsetBasedPageRequest;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -596,7 +598,21 @@ public class KisStockService {
         }
 
         public List<StockSearchResponseDto> getMarketCapRanking() {
-                List<StockMarketCap> marketCaps = stockMarketCapRepository.findTop100ByOrderByMarketCapDesc();
+                return getMarketCapRanking(1, 100);
+        }
+
+        public List<StockSearchResponseDto> getMarketCapRanking(int start, int end) {
+                if (start < 1)
+                        start = 1;
+                if (end < start)
+                        end = start;
+
+                int limit = end - start + 1;
+                long offset = start - 1;
+
+                Pageable pageable = new OffsetBasedPageRequest(offset, limit);
+                List<StockMarketCap> marketCaps = stockMarketCapRepository.findByOrderByMarketCapDesc(pageable);
+
                 return marketCaps.stream()
                                 .map(smc -> {
                                         Stock stock = smc.getStock();

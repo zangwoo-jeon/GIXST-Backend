@@ -5,6 +5,7 @@ import com.AISA.AISA.global.jwt.RefreshToken;
 import com.AISA.AISA.global.jwt.RefreshTokenRepository;
 import com.AISA.AISA.member.adapter.in.Member;
 import com.AISA.AISA.member.adapter.in.MemberRepository;
+import com.AISA.AISA.global.oauth.repository.HttpCookieOAuth2AuthorizationRequestRepository;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -12,8 +13,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
-import java.io.IOException;
-
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.security.web.authentication.SimpleUrlAuthenticationSuccessHandler;
@@ -28,44 +27,46 @@ import java.util.Collection;
 @RequiredArgsConstructor
 public class OAuth2SuccessHandler extends SimpleUrlAuthenticationSuccessHandler {
 
-    private final JwtTokenProvider jwtTokenProvider;
-    private final RefreshTokenRepository refreshTokenRepository;
-    private final MemberRepository memberRepository;
+        private final JwtTokenProvider jwtTokenProvider;
+        private final RefreshTokenRepository refreshTokenRepository;
+        private final MemberRepository memberRepository;
+        private final HttpCookieOAuth2AuthorizationRequestRepository httpCookieOAuth2AuthorizationRequestRepository; // Injected
 
-    @Override
-    public void onAuthenticationSuccess(HttpServletRequest request, HttpServletResponse response,
-            Authentication authentication) throws IOException, ServletException {
-        OAuth2User oAuth2User = (OAuth2User) authentication.getPrincipal();
-        // CustomOAuth2UserService에서 넣어준 userName 사용 (가장 확실한 식별자)
-        String userName = (String) oAuth2User.getAttributes().get("userName");
+        @Override
+        public void onAuthenticationSuccess(HttpServletRequest request, HttpServletResponse response,
+                        Authentication authentication) throws IOException, ServletException {
+                OAuth2User oAuth2User = (OAuth2User) authentication.getPrincipal();
+                // CustomOAuth2UserService에서 넣어준 userName 사용 (가장 확실한 식별자)
+                String userName = (String) oAuth2User.getAttributes().get("userName");
 
-        Member member = memberRepository.findByUserName(userName)
-                .orElseThrow(() -> new RuntimeException("회원 정보를 찾을 수 없습니다."));
+                Member member = memberRepository.findByUserName(userName)
+                                .orElseThrow(() -> new RuntimeException("회원 정보를 찾을 수 없습니다."));
 
-        Authentication auth = new UsernamePasswordAuthenticationToken(member.getUserName(), null,
-                authentication.getAuthorities());
+                Authentication auth = new UsernamePasswordAuthenticationToken(member.getUserName(), null,
+                                authentication.getAuthorities());
 
-        String accessToken = jwtTokenProvider.createAccessToken(auth);
-        String refreshToken = jwtTokenProvider.createRefreshToken(auth);
+                String accessToken = jwtTokenProvider.createAccessToken(auth);
+                String refreshToken = jwtTokenProvider.createRefreshToken(auth);
 
-        // 리프레시 토큰 저장
-        RefreshToken token = refreshTokenRepository.findByUserName(member.getUserName())
-                .map(t -> {
-                    t.updateToken(refreshToken);
-                    return t;
-                })
-                .orElse(RefreshToken.builder()
-                        .userName(member.getUserName())
-                        .token(refreshToken)
-                        .build());
+                // 리프레시 토큰 저장
+                RefreshToken token = refreshTokenRepository.findByUserName(member.getUserName())
+                                .map(t -> {
+                                        t.updateToken(refreshToken);
+                                        return t;
+                                })
+                                .orElse(RefreshToken.builder()
+                                                .userName(member.getUserName())
+                                                .token(refreshToken)
+                                                .build());
 
-        refreshTokenRepository.save(token);
+                refreshTokenRepository.save(token);
 
-        String targetUrl = UriComponentsBuilder.fromUriString("https://gixst.vercel.app/oauth2/redirect")
-                .queryParam("accessToken", accessToken)
-                .queryParam("refreshToken", refreshToken)
-                .build().toUriString();
+                String targetUrl = UriComponentsBuilder.fromUriString("https://gixst.vercel.app/oauth2/redirect")
+                                .queryParam("accessToken", accessToken)
+                                .queryParam("refreshToken", refreshToken)
+                                .build().toUriString();
 
-        getRedirectStrategy().sendRedirect(request, response, targetUrl);
-    }
+                httpCookieOAuth2AuthorizationRequestRepository.removeAuthorizationRequestCookies(request, response);
+                getRedirectStrategy().sendRedirect(request, response, targetUrl);
+        }
 }

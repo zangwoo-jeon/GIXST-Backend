@@ -95,7 +95,7 @@ jobs:
               -e SPRING_JPA_HIBERNATE_DDL_AUTO="update" \
               -e SPRING_JPA_SHOW_SQL="true" \
               -e SPRING_JPA_PROPERTIES_HIBERNATE_FORMAT_SQL="true" \
-              -e SERVER_FORWARD_HEADERS_STRATEGY="framework" \
+              -e SERVER_FORWARD_HEADERS_STRATEGY="native" \
               -e SERVER_TOMCAT_REMOTEIP_INTERNAL_PROXIES=".*" \
               \
               -e KIS_BASE_URL="https://openapi.koreainvestment.com:9443" \

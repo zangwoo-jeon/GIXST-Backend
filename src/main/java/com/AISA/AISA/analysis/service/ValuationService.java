@@ -1,10 +1,10 @@
 package com.AISA.AISA.analysis.service;
 
 import com.AISA.AISA.analysis.dto.ValuationDto;
-import com.AISA.AISA.analysis.dto.ValuationDto.Response;
-import com.AISA.AISA.analysis.dto.ValuationDto.Summary;
-import com.AISA.AISA.analysis.dto.ValuationDto.ValuationBand;
-import com.AISA.AISA.analysis.dto.ValuationDto.ValuationResult;
+import com.AISA.AISA.analysis.dto.ValuationDto.*;
+import com.AISA.AISA.analysis.dto.ValuationDto.Summary.AiVerdict;
+import com.AISA.AISA.analysis.dto.ValuationDto.Summary.ModelVerdict;
+import com.AISA.AISA.analysis.dto.ValuationDto.Summary.Verdicts;
 import com.AISA.AISA.analysis.entity.StockAiSummary;
 import com.AISA.AISA.analysis.entity.StockStaticAnalysis; // NEW
 import com.AISA.AISA.analysis.repository.StockAiSummaryRepository;
@@ -20,7 +20,12 @@ import com.AISA.AISA.kisStock.repository.StockFinancialStatementRepository;
 import com.AISA.AISA.kisStock.repository.StockBalanceSheetRepository;
 import com.AISA.AISA.kisStock.repository.StockRepository;
 import com.AISA.AISA.kisStock.kisService.KisMacroService;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
 import lombok.RequiredArgsConstructor;
+import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -75,8 +80,8 @@ public class ValuationService {
     @Transactional
     public Response getStandardizedValuationReport(String stockCode) {
         // 1. Calculate Standard Valuation (Neutral)
-        ValuationDto.Request standardRequest = ValuationDto.Request.builder()
-                .userPropensity(ValuationDto.UserPropensity.NEUTRAL)
+        Request standardRequest = Request.builder()
+                .userPropensity(UserPropensity.NEUTRAL)
                 .build();
         Response response = calculateValuation(stockCode, standardRequest);
 
@@ -88,7 +93,7 @@ public class ValuationService {
         return buildResponseWithAi(response, aiAnalysis);
     }
 
-    public Response calculateValuation(String stockCode, ValuationDto.Request request) {
+    public Response calculateValuation(String stockCode, Request request) {
         Stock stock = stockRepository.findByStockCode(stockCode)
                 .orElseThrow(() -> new IllegalArgumentException("Stock not found: " + stockCode));
 
@@ -186,7 +191,7 @@ public class ValuationService {
         return value.toString() + "원";
     }
 
-    private ValuationDto.DiscountRateInfo determineCOE(ValuationDto.Request request) {
+    private ValuationDto.DiscountRateInfo determineCOE(Request request) {
         // 1. Advanced Mode (Custom Input)
         if (request != null && request.getExpectedTotalReturn() != null) {
             String value = BigDecimal.valueOf(request.getExpectedTotalReturn()).multiply(new BigDecimal(100))
@@ -941,7 +946,7 @@ public class ValuationService {
         return "FAIR";
     }
 
-    public Response calculateValuationWithAi(String stockCode, ValuationDto.Request request) {
+    public Response calculateValuationWithAi(String stockCode, Request request) {
         // 1. Calculate Base Valuation
         Response response = calculateValuation(stockCode, request);
 
@@ -973,13 +978,39 @@ public class ValuationService {
     private Response buildResponseWithAi(Response response, String aiAnalysis) {
         if (response.getSummary() != null) {
             Summary oldSummary = response.getSummary();
+
+            // Parse AI Response (Container containing both AiVerdict and BeginnerVerdict)
+            AiResponseJson aiResponse = parseAiResponse(aiAnalysis);
+
+            // Create Model Verdict
+            ModelVerdict modelVerdictObj = createModelVerdict(oldSummary);
+
+            Verdicts verdicts = Verdicts.builder()
+                    .modelVerdict(modelVerdictObj)
+                    .aiVerdict(aiResponse.getAiVerdict())
+                    .principles(new ValuationDto.Summary.Principles())
+                    .build();
+
+            // Create Display Layer
+            ValuationDto.Summary.Display display = ValuationDto.Summary.Display.builder()
+                    .verdict(modelVerdictObj.getRating())
+                    .verdictLabel(mapVerdictToLabel(modelVerdictObj.getRating(), aiResponse.getAiVerdict().getStance()))
+                    .summary(aiResponse.getBeginnerVerdict().getSummarySentence())
+                    .risk(aiResponse.getAiVerdict().getRiskLevel() != null
+                            ? aiResponse.getAiVerdict().getRiskLevel().name()
+                            : "UNKNOWN")
+                    .build();
+
             Summary newSummary = Summary.builder()
                     .overallVerdict(oldSummary.getOverallVerdict())
                     .confidence(oldSummary.getConfidence())
                     .keyInsight(oldSummary.getKeyInsight())
                     .valuationLogic(oldSummary.getValuationLogic())
                     .decisionRule(oldSummary.getDecisionRule())
-                    .aiAnalysis(aiAnalysis)
+                    .aiAnalysis(aiAnalysis) // Keep raw text (Hidden by @JsonIgnore)
+                    .verdicts(verdicts)
+                    .beginnerVerdict(aiResponse.getBeginnerVerdict())
+                    .display(display)
                     .build();
 
             return Response.builder()
@@ -996,7 +1027,96 @@ public class ValuationService {
                     .summary(newSummary)
                     .build();
         }
+
+        // If no AI Analysis, return original response
         return response;
+    }
+
+    private String mapVerdictToLabel(String modelRating, ValuationDto.Stance aiStance) {
+        // 1. If AI Stance is explicit BUY/ACCUMULATE, use "분할 매수"
+        // (Assuming model isn't SELL. If model is SELL but AI is BUY, it's a conflict
+        // based on principle,
+        // but here we just map for display. Let's follow the user's simple suggestion:
+        // Model Verdict 기준 + AI Correction)
+
+        if ("BUY".equals(modelRating)) {
+            if (aiStance == ValuationDto.Stance.ACCUMULATE)
+                return "분할 매수";
+            return "매수";
+        } else if ("SELL".equals(modelRating)) {
+            if (aiStance == ValuationDto.Stance.REDUCE)
+                return "비중 축소";
+            return "매도";
+        } else {
+            // HOLD
+            if (aiStance == ValuationDto.Stance.ACCUMULATE)
+                return "분할 매수 (관망)";
+            if (aiStance == ValuationDto.Stance.REDUCE)
+                return "비중 축소 (관망)";
+            return "관망";
+        }
+    }
+
+    private ModelVerdict createModelVerdict(Summary summary) {
+        // Reverse engineer score (Optional: Pass score from generateSummary if
+        // refactored)
+        int score = 0;
+        String verdict = summary.getOverallVerdict();
+        if ("BUY".equals(verdict))
+            score = 4; // Approx
+        else if ("SELL".equals(verdict))
+            score = -4; // Approx
+        else
+            score = 0;
+
+        return ModelVerdict.builder()
+                .rating(verdict)
+                .score(score)
+                .confidence(summary.getConfidence())
+                .question("내재가치 대비 저평가되었는가?")
+                .build();
+    }
+
+    @Getter
+    @Setter
+    @NoArgsConstructor
+    private static class AiResponseJson {
+        private AiVerdict aiVerdict;
+        private ValuationDto.Summary.BeginnerVerdict beginnerVerdict;
+    }
+
+    private AiResponseJson parseAiResponse(String jsonText) {
+        try {
+            String json = extractJson(jsonText);
+            ObjectMapper mapper = new ObjectMapper();
+            mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+            return mapper.readValue(json, AiResponseJson.class);
+        } catch (Exception e) {
+            log.error("Failed to parse AI Response JSON: {}", e.getMessage());
+            // Fallback
+            AiResponseJson fallback = new AiResponseJson();
+            fallback.setAiVerdict(AiVerdict.builder()
+                    .stance(ValuationDto.Stance.HOLD)
+                    .timing(ValuationDto.Timing.UNCERTAIN)
+                    .riskLevel(ValuationDto.RiskLevel.MEDIUM)
+                    .guidance("AI 분석 데이터를 불러오는 데 실패했습니다.")
+                    .alignmentNote("데이터 파싱 오류")
+                    .build());
+
+            fallback.setBeginnerVerdict(ValuationDto.Summary.BeginnerVerdict.builder()
+                    .summarySentence("분석 데이터를 불러오는 중 오류가 발생했어요. 잠시 후 다시 시도해주세요.")
+                    .build());
+            return fallback;
+        }
+    }
+
+    private String extractJson(String text) {
+        int start = text.indexOf("{");
+        int end = text.lastIndexOf("}");
+        if (start >= 0 && end > start) {
+            return text.substring(start, end + 1);
+        }
+        return "{}";
     }
 
     @Transactional
@@ -1042,8 +1162,8 @@ public class ValuationService {
     @Transactional
     public String getValuationAnalysis(String stockCode) {
         // 1. Calculate Standard Valuation (Neutral)
-        ValuationDto.Request standardRequest = ValuationDto.Request.builder()
-                .userPropensity(ValuationDto.UserPropensity.NEUTRAL)
+        Request standardRequest = Request.builder()
+                .userPropensity(UserPropensity.NEUTRAL)
                 .build();
         Response val = calculateValuation(stockCode, standardRequest);
         return getValuationAnalysis(stockCode, val);
@@ -1084,16 +1204,32 @@ public class ValuationService {
 
         String analysis = generateValuationAnalysisText(val, latestRatio, latestBalanceSheet, recentQuarters);
 
+        // Parse for Display Fields (Optimize for fast read)
+        AiResponseJson aiJson = parseAiResponse(analysis);
+        ModelVerdict modelVerdict = createModelVerdict(val.getSummary());
+
+        String displayVerdict = modelVerdict.getRating();
+        String displayLabel = mapVerdictToLabel(displayVerdict, aiJson.getAiVerdict().getStance());
+        String displaySummary = aiJson.getBeginnerVerdict() != null ? aiJson.getBeginnerVerdict().getSummarySentence()
+                : "";
+        String displayRisk = aiJson.getAiVerdict().getRiskLevel() != null ? aiJson.getAiVerdict().getRiskLevel().name()
+                : "UNKNOWN";
+
         // 4. Save
         if (cachedSummary.isPresent()) {
             StockAiSummary existing = cachedSummary.get();
-            existing.updateValuationAnalysis(analysis, currentPrice);
+            existing.updateValuationAnalysis(analysis, currentPrice, displayVerdict, displayLabel, displaySummary,
+                    displayRisk);
             stockAiSummaryRepository.save(existing);
         } else {
             StockAiSummary newSummary = StockAiSummary.builder()
                     .stockCode(stockCode)
                     .valuationAnalysis(analysis)
                     .referencePrice(currentPrice)
+                    .displayVerdict(displayVerdict)
+                    .displayLabel(displayLabel)
+                    .displaySummary(displaySummary)
+                    .displayRisk(displayRisk)
                     .lastModifiedDate(LocalDateTime.now())
                     .createdDate(LocalDateTime.now())
                     .build();
@@ -1149,83 +1285,64 @@ public class ValuationService {
         // 1. Detect Growth/Turnaround Context
         boolean isGrowthMode = isGrowthOrTurnaroundCase(latestRatio, recentQuarters);
 
-        if (isGrowthMode) {
-            prompt.append("다음 종목은 **현재 이익이 낮거나 적자이지만 성장성이 기대되는 기업**이야. 이에 맞춰 **성장주/턴어라운드 관점**에서 가치평가를 해석해줘.\n\n");
-        } else {
-            prompt.append("다음 종목의 **가치평가(Valuation)** 결과를 해석하고 투자 판단을 내려줘.\n\n");
-        }
-
-        prompt.append(String.format("종목명: %s (%s)\n", val.getStockName(), val.getStockCode()));
-        prompt.append(String.format("현재가: %s원 (시가총액: %s)\n", val.getCurrentPrice(), val.getMarketCap()));
-
-        // Add Balance Sheet Data
-        if (balanceSheet != null) {
-            prompt.append("\n[재무상태표 (최근 연간)]\n");
-            prompt.append(String.format("- 자산총계: %s\n", balanceSheet.getTotalAssets()));
-            prompt.append(String.format("- 부채총계: %s\n", balanceSheet.getTotalLiabilities()));
-            prompt.append(String.format("- 자본총계: %s\n", balanceSheet.getTotalCapital()));
-        }
-
-        // Add Quarterly Trend Data
-        if (recentQuarters != null && !recentQuarters.isEmpty()) {
-            prompt.append("\n[최근 5분기 실적 추이]\n");
-            for (int i = recentQuarters.size() - 1; i >= 0; i--) {
-                StockFinancialStatement q = recentQuarters.get(i);
-                String yoyInfo = "";
-                if (i + 4 < recentQuarters.size()) {
-                    yoyInfo = calculateQuarterlyYoY(q, recentQuarters.get(i + 4));
-                }
-                prompt.append(String.format("- %s: 매출 %s / 영익 %s / 순익 %s %s\n",
-                        q.getStacYymm(), q.getSaleAccount(), q.getOperatingProfit(), q.getNetIncome(), yoyInfo));
-            }
-        }
+        prompt.append("너는 금융 투자 전문가로서 정량적 가치평가 모델의 결과를 해석하고, 현재 상황에 맞는 실행 전략을 제시해야 해.\n\n");
+        prompt.append("다음 데이터를 참고해:\n");
+        prompt.append(String.format("- 종목명: %s (%s)\n", val.getStockName(), val.getStockCode()));
+        prompt.append(String.format("- 현재가: %s원 (시가총액: %s)\n", val.getCurrentPrice(), val.getMarketCap()));
+        prompt.append(String.format("- 정량적 투자의견(Model Verdict): **%s** (Confidence: %s)\n",
+                val.getSummary().getOverallVerdict(), val.getSummary().getConfidence()));
 
         // Add Financial Ratios (Differ by Mode)
         if (latestRatio != null) {
             prompt.append("\n[주요 재무 비율]\n");
             if (isGrowthMode) {
-                // Growth Mode: Emphasize PSR and Revenue Growth
                 if (latestRatio.getPsr() != null) {
-                    prompt.append(String.format("- **PSR (주가매출비율)**: %s배 (적자 기업 핵심 지표)\n", latestRatio.getPsr()));
+                    prompt.append(String.format("- PSR: %s배\n", latestRatio.getPsr()));
                 }
                 prompt.append(String.format("- 매출 성장률(YoY): %s%%\n", latestRatio.getSalesGrowth()));
             }
-
-            // Common Ratios
             prompt.append(String.format("- 부채비율: %s%%\n", latestRatio.getDebtRatio()));
             prompt.append(String.format("- 유보율: %s%%\n", latestRatio.getReserveRatio()));
             prompt.append(String.format("- 영업이익 성장률(YoY): %s%%\n", latestRatio.getOperatingProfitGrowth()));
         }
 
-        prompt.append("\n[모델별 평가 결과]\n");
-        prompt.append(String.format("1. S-RIM: %s (Gap: %s%%) - %s\n",
-                val.getSrim().getVerdict(), val.getSrim().getGapRate(), val.getSrim().getDescription()));
-        prompt.append(String.format("2. PER: %s (Gap: %s%%) - %s\n",
-                val.getPer().getVerdict(), val.getPer().getGapRate(), val.getPer().getDescription()));
-        prompt.append(String.format("3. PBR: %s (Gap: %s%%) - %s\n",
-                val.getPbr().getVerdict(), val.getPbr().getGapRate(), val.getPbr().getDescription()));
-
-        prompt.append("\n[종합 요약]\n");
-        prompt.append(String.format("이전 결론: %s (Confidence: %s)\n",
-                val.getSummary().getOverallVerdict(), val.getSummary().getConfidence()));
-        prompt.append(String.format("핵심: %s\n", val.getSummary().getKeyInsight()));
+        // Add Model Details
+        prompt.append("\n[모델별 상세 결과]\n");
+        prompt.append(
+                String.format("- S-RIM: %s (Gap: %s%%)\n", val.getSrim().getVerdict(), val.getSrim().getGapRate()));
+        prompt.append(String.format("- PER: %s (Gap: %s%%)\n", val.getPer().getVerdict(), val.getPer().getGapRate()));
+        prompt.append(String.format("- PBR: %s (Gap: %s%%)\n", val.getPbr().getVerdict(), val.getPbr().getGapRate()));
 
         prompt.append("\n[요청사항]\n");
-        prompt.append("1. 위 가치평가 모델 결과를 바탕으로 **가치평가 해석** 항목을 작성해.\n");
+        prompt.append("1. 위 데이터를 바탕으로 감정적인 투자 실행 전략(`aiVerdict`)과 초보자를 위한 요약(`beginnerVerdict`)을 수립해.\n");
+        prompt.append("2. **aiVerdict 작성 시**: 정량적 투자의견(Model Verdict)을 부정하지 말고, 리스크와 모멘텀을 고려해 구체적인 행동 전략을 제시해.\n");
+        prompt.append("3. **beginnerVerdict 작성 시 (중요)**:\n");
+        prompt.append("   - `aiVerdict`의 내용을 **'초등학생도 이해할 수 있는 쉬운 말'로 번역/요약**한 것이다. 절대 새로운 판단을 추가하거나 변경하지 마.\n");
+        prompt.append(
+                "   - `summarySentence`는 행동(`action`), 시기(`timing`), 위험(`risk`), 이유(`oneLineReason`), 주의(`warning`) 내용을 내부적으로 고려하여 모두 녹여낸 뒤, **자연스러운 한국어 한 문장**으로 합쳐서 출력해. (JSON에는 이 문장만 포함)\n");
+
+        prompt.append("4. 반드시 아래 JSON 포맷을 엄격히 준수하여 출력해 (JSON 외 다른 말 덧붙이지 마).\n");
+
+        prompt.append("\n```json\n");
+        prompt.append("{\n");
+        prompt.append("  \"aiVerdict\": {\n");
+        prompt.append("    \"stance\": \"[BUY, ACCUMULATE, HOLD, REDUCE, SELL 중 택1]\",\n");
+        prompt.append("    \"timing\": \"[EARLY, MID, LATE, UNCERTAIN 중 택1]\",\n");
+        prompt.append("    \"riskLevel\": \"[LOW, MEDIUM, HIGH 중 택1]\",\n");
+        prompt.append("    \"guidance\": \"전문가용 한 줄 요약\",\n");
+        prompt.append("    \"alignmentNote\": \"정량적 의견(Check Model Verdict)과 네 전략(Stance)의 뉘앙스 차이를 설명\"\n");
+        prompt.append("  },\n");
+        prompt.append("  \"beginnerVerdict\": {\n");
+        prompt.append("    \"summarySentence\": \"행동 가이드 중심의 쉬운 한 문장 (예: 지금은 싸 보이지만 아직 회복 중이라 천천히 나눠서 사는 게 좋아요.)\"\n");
+        prompt.append("  }\n");
+        prompt.append("}\n");
+        prompt.append("```\n");
 
         if (isGrowthMode) {
+            prompt.append("\n[참고: 성장주/턴어라운드 모드]\n");
             prompt.append(
-                    "2. **[성장주 모드]**: 현재 이익이 부족하므로 PER/S-RIM보다 **PSR(주가매출비율)**과 **매출 성장세(Top-line Growth)**, **흑자 전환 가능성**에 집중해서 평가해.\n");
-            prompt.append("3. 적자 상황에서 PBR이 너무 높지는 않은지(버블 여부), 현금 흐름에 문제는 없는지(부채비율) 체크해.\n");
-            prompt.append("4. 단순 '고평가' 판정보다는 '미래 성장성을 선반영 중인지' 논리적으로 서술해.\n");
-
-        } else {
-            prompt.append("2. 현재 주가가 적정 가치 대비 저평가/고평가인지 명확히 논리적으로 설명해.\n");
-            prompt.append("3. 재무 건전성(부채비율 등)과 실적 추이(분기 실적)를 근거로 모델 신뢰도를 보강해.\n");
+                    "이 기업은 현재 이익보다 미래 성장성과 매출 추이가 중요해. PSR과 흑자 전환 가능성을 높게 평가하고, 타이밍은 'EARLY' 또는 'UNCERTAIN'일 가능성이 높아.");
         }
-
-        prompt.append("4. **매수/보유/매도**에 대한 의견을 뉘앙스로 제시하되, 직접적인 권유보다는 객관적 지표 해석에 집중해.\n");
-        prompt.append("5. 300자 이내로 핵심만 요약.\n");
 
         return geminiService.generateAdvice(prompt.toString());
     }

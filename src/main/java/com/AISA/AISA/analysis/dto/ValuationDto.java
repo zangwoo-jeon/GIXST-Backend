@@ -1,5 +1,6 @@
 package com.AISA.AISA.analysis.dto;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -34,8 +35,10 @@ public class ValuationDto {
         private String stockName;
         private String currentPrice;
         private String marketCap; // Added Market Cap
+        @JsonIgnore
         private String targetReturn; // 적용된 할인율 (Display String)
 
+        @JsonIgnore
         private DiscountRateInfo discountRate; // Detailed Discount Rate Info
 
         private ValuationResult srim;
@@ -52,14 +55,112 @@ public class ValuationDto {
     @AllArgsConstructor
     @Builder
     public static class Summary {
-        private String overallVerdict; // BUY, SELL, HOLD
+        private String overallVerdict; // BUY, SELL, HOLD (Legacy)
         private String confidence; // HIGH, MEDIUM, LOW
         private String keyInsight; // One line summary
 
         // Phase 2
+        @JsonIgnore
         private String valuationLogic; // Detailed logic description
+        @JsonIgnore
         private String decisionRule;
-        private String aiAnalysis; // Gemini LLM Analysis // Explanation of the verdict rule
+        @JsonIgnore
+        private String aiAnalysis; // (Legacy)
+
+        // Phase 3: Dual Verdict System
+        private Verdicts verdicts;
+        // Phase 4: Beginner Verdict
+        @JsonIgnore
+        private BeginnerVerdict beginnerVerdict;
+        // Phase 5: Display Layer (Compact View)
+        private Display display;
+
+        @Getter
+        @Setter
+        @NoArgsConstructor
+        @AllArgsConstructor
+        @Builder
+        public static class Display {
+            private String verdict; // "HOLD" (System Code)
+            private String verdictLabel; // "관망" (User Friendly Label)
+            private String summary; // "한 줄 요약"
+            private String risk; // "MEDIUM" (Safe String)
+        }
+
+        @Getter
+        @Setter
+        @NoArgsConstructor
+        @AllArgsConstructor
+        @Builder
+        public static class Verdicts {
+            @JsonIgnore
+            private ModelVerdict modelVerdict;
+            private AiVerdict aiVerdict;
+            @Builder.Default
+            @JsonIgnore
+            private Principles principles = new Principles();
+        }
+
+        @Getter
+        @Setter
+        @NoArgsConstructor
+        @AllArgsConstructor
+        @Builder
+        public static class BeginnerVerdict {
+            private String summarySentence; // 초보자용 대표 문장 (행동 가이드)
+        }
+
+        @Getter
+        @Setter
+        @NoArgsConstructor
+        @AllArgsConstructor
+        @Builder
+        public static class Principles {
+            @Builder.Default
+            private boolean aiOverrideAllowed = false;
+            @Builder.Default
+            private String aiRole = "EXECUTION_GUIDANCE";
+        }
+
+        @Getter
+        @Setter
+        @NoArgsConstructor
+        @AllArgsConstructor
+        @Builder
+        public static class ModelVerdict {
+            private String rating; // BUY, HOLD, SELL
+            private int score;
+            private String confidence;
+            @Builder.Default
+            @JsonIgnore
+            private String question = "내재가치 대비 저평가되었는가?";
+        }
+
+        @Getter
+        @Setter
+        @NoArgsConstructor
+        @AllArgsConstructor
+        @Builder
+        public static class AiVerdict {
+            private Stance stance;
+            private Timing timing;
+            private RiskLevel riskLevel;
+            private String guidance;
+            @JsonIgnore
+            private String alignmentNote;
+        }
+    }
+
+    public enum Stance {
+        BUY, ACCUMULATE, HOLD, REDUCE, SELL
+    }
+
+    public enum Timing {
+        EARLY, MID, LATE, UNCERTAIN
+    }
+
+    public enum RiskLevel {
+        LOW, MEDIUM, HIGH
     }
 
     @Getter
@@ -75,10 +176,13 @@ public class ValuationDto {
 
         // Phase 1.5
         private boolean available; // 모델 적용 가능 여부
+        @JsonIgnore
         private String reason; // 적용 불가 사유 (e.g. "EPS 적자")
+        @JsonIgnore
         private String roeType; // 사용된 ROE 타입 (e.g. "3Y_AVG", "LATEST")
 
         // Phase 2
+        @JsonIgnore
         private Map<String, ValuationResult> scenarios; // CONSERVATIVE, BASE, OPTIMISTIC
     }
 

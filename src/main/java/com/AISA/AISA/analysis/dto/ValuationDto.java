@@ -7,6 +7,8 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import com.AISA.AISA.kisStock.dto.InvestorTrend.InvestorTrendDto;
+import java.util.List;
 import java.util.Map;
 
 public class ValuationDto {
@@ -47,6 +49,46 @@ public class ValuationDto {
 
         private ValuationBand band;
         private Summary summary;
+
+        // Phase 6: Strategist Details
+        private AnalysisDetails analysisDetails;
+    }
+
+    @Getter
+    @Setter
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    public static class AnalysisDetails {
+        private String upsidePotential; // "23.28%"
+        private String downsideRisk; // "-10.93%"
+        private String investmentTerm; // "6-12 Months"
+        private List<String> catalysts; // 상승 동력
+        private List<String> risks; // 리스크 요인
+        private PeerComparison peerComparison; // 경쟁사 비교
+        private InvestorTrendDto investorTrend; // 수급 요약
+    }
+
+    @Getter
+    @Setter
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    public static class PeerComparison {
+        private String sectorAvgPer;
+        private String status; // "BELOW_SECTOR_AVG"
+        private List<PeerInfo> peers;
+    }
+
+    @Getter
+    @Setter
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    public static class PeerInfo {
+        private String name;
+        private String per;
+        private String pbr;
     }
 
     @Getter

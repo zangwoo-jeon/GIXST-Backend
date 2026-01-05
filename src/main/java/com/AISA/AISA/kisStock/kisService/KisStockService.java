@@ -16,9 +16,14 @@ import com.AISA.AISA.kisStock.dto.StockPrice.StockPriceDto;
 import com.AISA.AISA.kisStock.dto.StockPrice.StockPriceResponse;
 import com.AISA.AISA.kisStock.exception.KisApiErrorCode;
 import com.AISA.AISA.kisStock.kisService.Auth.KisAuthService;
+import com.AISA.AISA.kisStock.dto.InvestorTrend.InvestorTrendDto;
+import com.AISA.AISA.kisStock.dto.InvestorTrend.StockInvestorDailyDto; // New DTO
+import com.AISA.AISA.kisStock.dto.InvestorTrend.KisInvestorDailyResponse; // New DTO
+import com.AISA.AISA.kisStock.Entity.stock.StockInvestorDaily;
 import com.AISA.AISA.kisStock.repository.StockDailyDataRepository;
 import com.AISA.AISA.kisStock.repository.StockMarketCapRepository;
 import com.AISA.AISA.kisStock.repository.StockRepository;
+import com.AISA.AISA.kisStock.repository.StockInvestorDailyRepository; // New Repo
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.Cacheable;
@@ -52,6 +57,7 @@ public class KisStockService {
         private final StockRepository stockRepository;
         private final StockDailyDataRepository stockDailyDataRepository;
         private final StockMarketCapRepository stockMarketCapRepository; // Added repo
+        private final StockInvestorDailyRepository stockInvestorDailyRepository; // New Repo field
         private final KisMacroService kisMacroService;
         private final ObjectMapper objectMapper;
 
@@ -732,5 +738,200 @@ public class KisStockService {
                         result.add(newDto);
                 }
                 return result;
+        }
+
+        @Transactional(readOnly = true)
+        public List<StockInvestorDailyDto> getDailyInvestorTrend(String stockCode) {
+                Stock stock = stockRepository.findByStockCode(stockCode)
+                                .orElseThrow(() -> new IllegalArgumentException("Stock not found"));
+
+                // Fetch last 3 months
+                LocalDate today = LocalDate.now();
+                LocalDate threeMonthsAgo = today.minusMonths(3);
+
+                List<StockInvestorDaily> dailyData = stockInvestorDailyRepository
+                                .findByStockAndDateBetweenOrderByDateAsc(stock, threeMonthsAgo, today);
+
+                return dailyData.stream().map(d -> StockInvestorDailyDto.builder()
+                                .date(d.getDate().toString())
+                                .foreignerNetBuyAmount(String.valueOf(d.getForeignerNetBuyAmount().longValue()))
+                                .institutionNetBuyAmount(String.valueOf(d.getInstitutionNetBuyAmount().longValue()))
+                                .personalNetBuyAmount(String.valueOf(d.getPersonalNetBuyAmount().longValue()))
+                                .etcCorporateNetBuyAmount(d.getEtcCorporateNetBuyAmount() != null
+                                                ? String.valueOf(d.getEtcCorporateNetBuyAmount().longValue())
+                                                : "0")
+                                .foreignerNetBuyQuantity(d.getForeignerNetBuyQuantity() != null
+                                                ? String.valueOf(d.getForeignerNetBuyQuantity())
+                                                : "0")
+                                .institutionNetBuyQuantity(d.getInstitutionNetBuyQuantity() != null
+                                                ? String.valueOf(d.getInstitutionNetBuyQuantity())
+                                                : "0")
+                                .personalNetBuyQuantity(d.getPersonalNetBuyQuantity() != null
+                                                ? String.valueOf(d.getPersonalNetBuyQuantity())
+                                                : "0")
+                                .build())
+                                .collect(Collectors.toList());
+        }
+
+        @Transactional
+        public InvestorTrendDto getInvestorTrend(String stockCode) {
+                // 1. Check if we have recent data in DB (e.g. within last 3 days or today's
+                // data depending on batch)
+                // For simplicity, we check if ANY data exists for recent 3 months.
+                // Or simplified: Just Query DB. If empty, try fetch.
+
+                Stock stock = stockRepository.findByStockCode(stockCode)
+                                .orElseThrow(() -> new IllegalArgumentException("Stock not found"));
+
+                LocalDate today = LocalDate.now();
+                LocalDate threeMonthsAgo = today.minusMonths(3);
+
+                // Lazy Load Check
+                boolean hasData = stockInvestorDailyRepository.findLatestDateByStock(stock).isPresent();
+                if (!hasData) {
+                        log.info("No investor trend data for {}. Fetching from API...", stockCode);
+                        fetchAndSaveInvestorTrend(stockCode);
+                }
+
+                // 2. Query DB
+                List<StockInvestorDaily> dailyData = stockInvestorDailyRepository
+                                .findByStockAndDateBetweenOrderByDateAsc(stock, threeMonthsAgo, today);
+
+                // 3. Sum up
+                BigDecimal foreignerSum = BigDecimal.ZERO;
+                BigDecimal institutionSum = BigDecimal.ZERO;
+
+                for (StockInvestorDaily daily : dailyData) {
+                        foreignerSum = foreignerSum.add(daily.getForeignerNetBuyAmount());
+                        institutionSum = institutionSum.add(daily.getInstitutionNetBuyAmount());
+                }
+
+                // 4. Determine Trend
+                String trend = "중립";
+                BigDecimal tenBillion = new BigDecimal("10000000000");
+
+                boolean isFrgnBuy = foreignerSum.compareTo(tenBillion) > 0;
+                boolean isInstBuy = institutionSum.compareTo(tenBillion) > 0;
+                boolean isFrgnSell = foreignerSum.compareTo(tenBillion.negate()) < 0;
+                boolean isInstSell = institutionSum.compareTo(tenBillion.negate()) < 0;
+
+                if (isFrgnBuy && isInstBuy)
+                        trend = "양매수 (강력 매수 우위)";
+                else if (isFrgnBuy)
+                        trend = "외국인 주도 매수";
+                else if (isInstBuy)
+                        trend = "기관 주도 매수";
+                else if (isFrgnSell && isInstSell)
+                        trend = "양매도 (매도 우위)";
+                else if (isFrgnSell)
+                        trend = "외국인 매도세";
+                else if (isInstSell)
+                        trend = "기관 매도세";
+
+                return InvestorTrendDto.builder()
+                                .recent3MonthForeignerNetBuy(String.valueOf(foreignerSum.longValue()))
+                                .recent3MonthInstitutionNetBuy(String.valueOf(institutionSum.longValue()))
+                                .trendStatus(trend)
+                                .build();
+        }
+
+        @Transactional
+        public void fetchAndSaveInvestorTrend(String stockCode) {
+                String accessToken = kisAuthService.getAccessToken();
+                String url = kisApiProperties.getInvestorTrendDailyUrl();
+
+                if (url == null || url.isEmpty()) {
+                        log.error("KisApiProperties.investorTrendDailyUrl is NULL. Check application.yml");
+                        return;
+                }
+
+                Stock stock = stockRepository.findByStockCode(stockCode)
+                                .orElseThrow(() -> new IllegalArgumentException("Stock not found"));
+
+                try {
+                        // API Call
+                        KisInvestorDailyResponse response = webClient.get()
+                                        .uri(uriBuilder -> uriBuilder
+                                                        .path(url)
+                                                        .queryParam("FID_COND_MRKT_DIV_CODE", "J")
+                                                        .queryParam("FID_INPUT_ISCD", stockCode)
+                                                        .queryParam("FID_INPUT_DATE_1", LocalDate.now().format(
+                                                                        DateTimeFormatter.BASIC_ISO_DATE))
+                                                        .queryParam("FID_ORG_ADJ_PRC", "0")
+                                                        .queryParam("FID_ETC_CLS_CODE", "0")
+                                                        .build())
+                                        .header("content-type", "application/json; charset=utf-8")
+                                        .header("authorization", accessToken)
+                                        .header("appkey", kisApiProperties.getAppkey())
+                                        .header("appsecret", kisApiProperties.getAppsecret())
+                                        .header("tr_id", "FHPTJ04160001")
+                                        .header("custtype", "P")
+                                        .retrieve()
+                                        .bodyToMono(KisInvestorDailyResponse.class)
+                                        .block();
+
+                        if (response == null || response.getOutput() == null) {
+                                log.warn("No daily investor data received for {}", stockCode);
+                                return;
+                        }
+
+                        // Parse and Save
+                        for (KisInvestorDailyResponse.InvestorDailyOutput item : response.getOutput()) {
+                                LocalDate date = LocalDate.parse(item.getStckBsopDate(),
+                                                DateTimeFormatter.BASIC_ISO_DATE);
+
+                                // Check duplicate
+                                if (stockInvestorDailyRepository.existsByStockAndDate(stock, date)) {
+                                        continue; // Skip if exists (or could update)
+                                }
+
+                                BigDecimal frgn = parseBigDec(item.getFrgnNtbyTrPbmn());
+                                BigDecimal prsn = parseBigDec(item.getPrsnNtbyTrPbmn());
+                                BigDecimal orgn = parseBigDec(item.getOrgnNtbyTrPbmn());
+                                BigDecimal etc = parseBigDec(item.getEtcCorpNtbyTrPbmn());
+
+                                Long frgnQty = parseLong(item.getFrgnNtbyQty());
+                                Long prsnQty = parseLong(item.getPrsnNtbyQty());
+                                Long orgnQty = parseLong(item.getOrgnNtbyQty());
+
+                                StockInvestorDaily entity = StockInvestorDaily.builder()
+                                                .stock(stock)
+                                                .date(date)
+                                                .foreignerNetBuyAmount(frgn)
+                                                .personalNetBuyAmount(prsn)
+                                                .institutionNetBuyAmount(orgn)
+                                                .etcCorporateNetBuyAmount(etc)
+                                                .foreignerNetBuyQuantity(frgnQty)
+                                                .personalNetBuyQuantity(prsnQty)
+                                                .institutionNetBuyQuantity(orgnQty)
+                                                .build();
+
+                                stockInvestorDailyRepository.save(entity);
+                        }
+                        log.info("Saved investor trend data for {}", stockCode);
+
+                } catch (Exception e) {
+                        log.error("Failed to fetch/save investor trend daily for {}: {}", stockCode, e.getMessage());
+                }
+        }
+
+        private BigDecimal parseBigDec(String val) {
+                if (val == null || val.isEmpty() || val.equals("-"))
+                        return BigDecimal.ZERO;
+                try {
+                        return new BigDecimal(val.replace(",", "").trim());
+                } catch (Exception e) {
+                        return BigDecimal.ZERO;
+                }
+        }
+
+        private Long parseLong(String val) {
+                if (val == null || val.isEmpty() || val.equals("-"))
+                        return 0L;
+                try {
+                        return Long.parseLong(val.replace(",", "").trim());
+                } catch (Exception e) {
+                        return 0L;
+                }
         }
 }

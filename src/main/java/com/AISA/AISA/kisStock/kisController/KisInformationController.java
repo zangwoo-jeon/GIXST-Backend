@@ -8,7 +8,10 @@ import com.AISA.AISA.kisStock.dto.FinancialRank.FinancialRatioRankDto;
 import com.AISA.AISA.kisStock.dto.FinancialRank.InvestmentMetricDto;
 import com.AISA.AISA.kisStock.dto.StockSearchResponseDto;
 import com.AISA.AISA.kisStock.kisService.KisInformationService;
-import com.AISA.AISA.kisStock.kisService.KisStockService; // Added import
+import com.AISA.AISA.kisStock.kisService.KisStockService;
+import com.AISA.AISA.kisStock.dto.InvestorTrend.InvestorTrendDto;
+import com.AISA.AISA.kisStock.dto.InvestorTrend.StockInvestorDailyDto; // New DTO
+import com.AISA.AISA.kisStock.repository.StockRepository; // Add Repo
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -24,7 +27,8 @@ import java.util.List;
 public class KisInformationController {
 
         private final KisInformationService kisInformationService;
-        private final KisStockService kisStockService; // Added service
+        private final KisStockService kisStockService;
+        private final StockRepository stockRepository;
 
         @GetMapping("/balance-sheet/{stockCode}")
         @Operation(summary = "특정 종목 대차대조표 조회 (DB)", description = "특정 종목의 자산/부채/자본 정보를 DB에서 조회합니다. (0:년, 1:분기)")
@@ -117,6 +121,36 @@ public class KisInformationController {
         public ResponseEntity<SuccessResponse<String>> initAllMarketCaps() {
                 new Thread(() -> kisStockService.initAllStocksMarketCap()).start();
                 return ResponseEntity.ok(new SuccessResponse<>(true, "전체 종목 시가총액 갱신 작업 시작 (백그라운드)",
+                                "Started background task."));
+        }
+
+        @GetMapping("/investor-trend/{stockCode}")
+        @Operation(summary = "종목별 투자자 수급(거래대금) 조회", description = "최근 3개월간 외국인/기관의 순매수 거래대금 추이를 조회합니다.")
+        public ResponseEntity<SuccessResponse<InvestorTrendDto>> getInvestorTrend(@PathVariable String stockCode) {
+                return ResponseEntity.ok(new SuccessResponse<>(true, "투자자 수급 조회 성공",
+                                kisStockService.getInvestorTrend(stockCode)));
+        }
+
+        @GetMapping("/investor-trend/daily/{stockCode}")
+        @Operation(summary = "종목별 일자별 수급 데이터 조회 (최근 3개월)", description = "DB에 저장된 특정 종목의 일자별 외국인/기관/개인 순매수 정보를 조회합니다.")
+        public ResponseEntity<SuccessResponse<List<StockInvestorDailyDto>>> getDailyInvestorTrend(
+                        @PathVariable String stockCode) {
+                return ResponseEntity.ok(new SuccessResponse<>(true, "일자별 투자자 수급 조회 성공",
+                                kisStockService.getDailyInvestorTrend(stockCode)));
+        }
+
+        @PostMapping("/investor-trend/init-all")
+        @Operation(summary = "전체 종목 투자자 수급 데이터 초기화 (DB)", description = "모든 종목에 대해 최근 3개월치 일자별 수급 데이터를 가져와 DB에 저장합니다. (비동기)")
+        public ResponseEntity<SuccessResponse<String>> initAllInvestorTrends() {
+                new Thread(() -> stockRepository.findAll().forEach(stock -> {
+                        try {
+                                kisStockService.fetchAndSaveInvestorTrend(stock.getStockCode());
+                                Thread.sleep(200); // 0.2s Term (API Limit Safety)
+                        } catch (Exception e) {
+                                // Log error
+                        }
+                })).start();
+                return ResponseEntity.ok(new SuccessResponse<>(true, "전체 종목 수급 데이터 초기화 시작 (백그라운드)",
                                 "Started background task."));
         }
 

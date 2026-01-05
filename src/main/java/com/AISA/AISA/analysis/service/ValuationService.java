@@ -15,6 +15,7 @@ import com.AISA.AISA.kisStock.Entity.stock.StockFinancialStatement;
 import com.AISA.AISA.kisStock.Entity.stock.StockBalanceSheet;
 import com.AISA.AISA.kisStock.kisService.KisStockService;
 import com.AISA.AISA.kisStock.dto.StockPrice.StockPriceDto;
+import com.AISA.AISA.kisStock.dto.InvestorTrend.InvestorTrendDto;
 import com.AISA.AISA.kisStock.repository.StockFinancialRatioRepository;
 import com.AISA.AISA.kisStock.repository.StockFinancialStatementRepository;
 import com.AISA.AISA.kisStock.repository.StockBalanceSheetRepository;
@@ -1025,6 +1026,7 @@ public class ValuationService {
                     .pbr(response.getPbr())
                     .band(response.getBand())
                     .summary(newSummary)
+                    .analysisDetails(aiResponse.getAnalysisDetails())
                     .build();
         }
 
@@ -1083,6 +1085,7 @@ public class ValuationService {
     private static class AiResponseJson {
         private AiVerdict aiVerdict;
         private ValuationDto.Summary.BeginnerVerdict beginnerVerdict;
+        private ValuationDto.AnalysisDetails analysisDetails;
     }
 
     private AiResponseJson parseAiResponse(String jsonText) {
@@ -1202,7 +1205,16 @@ public class ValuationService {
         List<StockFinancialStatement> recentQuarters = stockFinancialStatementRepository
                 .findTop5ByStockCodeAndDivCodeOrderByStacYymmDesc(stockCode, "1");
 
-        String analysis = generateValuationAnalysisText(val, latestRatio, latestBalanceSheet, recentQuarters);
+        // Fetch Investor Trend (Real-time)
+        InvestorTrendDto investorTrend = null;
+        try {
+            investorTrend = kisStockService.getInvestorTrend(stockCode);
+        } catch (Exception e) {
+            log.warn("Failed to fetch investor trend: {}", e.getMessage());
+        }
+
+        String analysis = generateValuationAnalysisText(val, latestRatio, latestBalanceSheet, recentQuarters,
+                investorTrend);
 
         // Parse for Display Fields (Optimize for fast read)
         AiResponseJson aiJson = parseAiResponse(analysis);
@@ -1279,70 +1291,96 @@ public class ValuationService {
 
     private String generateValuationAnalysisText(Response val, StockFinancialRatio latestRatio,
             StockBalanceSheet balanceSheet,
-            List<StockFinancialStatement> recentQuarters) {
+            List<StockFinancialStatement> recentQuarters,
+            InvestorTrendDto investorTrend) {
         StringBuilder prompt = new StringBuilder();
 
         // 1. Detect Growth/Turnaround Context
         boolean isGrowthMode = isGrowthOrTurnaroundCase(latestRatio, recentQuarters);
 
-        prompt.append("너는 금융 투자 전문가로서 정량적 가치평가 모델의 결과를 해석하고, 현재 상황에 맞는 실행 전략을 제시해야 해.\n\n");
-        prompt.append("다음 데이터를 참고해:\n");
+        prompt.append("너는 '주식 투자 전략가(Strategist)'이다. 단순한 숫자 해석을 넘어, 구체적인 매매 전략과 통찰력을 제시해야 한다.\n\n");
+        prompt.append("[분석 대상]\n");
         prompt.append(String.format("- 종목명: %s (%s)\n", val.getStockName(), val.getStockCode()));
         prompt.append(String.format("- 현재가: %s원 (시가총액: %s)\n", val.getCurrentPrice(), val.getMarketCap()));
-        prompt.append(String.format("- 정량적 투자의견(Model Verdict): **%s** (Confidence: %s)\n",
+        prompt.append(String.format("- 정량적 모델 의견(Model Verdict): **%s** (Confidence: %s)\n",
                 val.getSummary().getOverallVerdict(), val.getSummary().getConfidence()));
 
         // Add Financial Ratios (Differ by Mode)
         if (latestRatio != null) {
-            prompt.append("\n[주요 재무 비율]\n");
+            prompt.append("\n[핵심 재무 지표]\n");
             if (isGrowthMode) {
                 if (latestRatio.getPsr() != null) {
-                    prompt.append(String.format("- PSR: %s배\n", latestRatio.getPsr()));
+                    prompt.append(String.format("- PSR: %s배 (성장주/턴어라운드 관점 적용)\n", latestRatio.getPsr()));
                 }
                 prompt.append(String.format("- 매출 성장률(YoY): %s%%\n", latestRatio.getSalesGrowth()));
             }
-            prompt.append(String.format("- 부채비율: %s%%\n", latestRatio.getDebtRatio()));
-            prompt.append(String.format("- 유보율: %s%%\n", latestRatio.getReserveRatio()));
+            prompt.append(String.format("- 부채비율: %s%%, 유보율: %s%%\n", latestRatio.getDebtRatio(),
+                    latestRatio.getReserveRatio()));
             prompt.append(String.format("- 영업이익 성장률(YoY): %s%%\n", latestRatio.getOperatingProfitGrowth()));
         }
 
+        // Add Investor Trend
+        if (investorTrend != null) {
+            prompt.append("\n[최근 3개월 수급(Investor Trend)]\n");
+            prompt.append(String.format("- 외국인 순매수: %s원\n",
+                    formatLargeNumber(new BigDecimal(investorTrend.getRecent3MonthForeignerNetBuy()))));
+            prompt.append(String.format("- 기관 순매수: %s원\n",
+                    formatLargeNumber(new BigDecimal(investorTrend.getRecent3MonthInstitutionNetBuy()))));
+            prompt.append(String.format("- 수급 상태: %s\n", investorTrend.getTrendStatus()));
+        }
+
         // Add Model Details
-        prompt.append("\n[모델별 상세 결과]\n");
+        prompt.append("\n[가치평가 모델 상세]\n");
         prompt.append(
-                String.format("- S-RIM: %s (Gap: %s%%)\n", val.getSrim().getVerdict(), val.getSrim().getGapRate()));
-        prompt.append(String.format("- PER: %s (Gap: %s%%)\n", val.getPer().getVerdict(), val.getPer().getGapRate()));
-        prompt.append(String.format("- PBR: %s (Gap: %s%%)\n", val.getPbr().getVerdict(), val.getPbr().getGapRate()));
+                String.format("- S-RIM: %s (괴리율: %s%%)\n", val.getSrim().getVerdict(), val.getSrim().getGapRate()));
+        prompt.append(String.format("- PER: %s (괴리율: %s%%)\n", val.getPer().getVerdict(), val.getPer().getGapRate()));
+        prompt.append(String.format("- PBR: %s (괴리율: %s%%)\n", val.getPbr().getVerdict(), val.getPbr().getGapRate()));
 
-        prompt.append("\n[요청사항]\n");
-        prompt.append("1. 위 데이터를 바탕으로 감정적인 투자 실행 전략(`aiVerdict`)과 초보자를 위한 요약(`beginnerVerdict`)을 수립해.\n");
-        prompt.append("2. **aiVerdict 작성 시**: 정량적 투자의견(Model Verdict)을 부정하지 말고, 리스크와 모멘텀을 고려해 구체적인 행동 전략을 제시해.\n");
-        prompt.append("3. **beginnerVerdict 작성 시 (중요)**:\n");
-        prompt.append("   - `aiVerdict`의 내용을 **'초등학생도 이해할 수 있는 쉬운 말'로 번역/요약**한 것이다. 절대 새로운 판단을 추가하거나 변경하지 마.\n");
-        prompt.append(
-                "   - `summarySentence`는 행동(`action`), 시기(`timing`), 위험(`risk`), 이유(`oneLineReason`), 주의(`warning`) 내용을 내부적으로 고려하여 모두 녹여낸 뒤, **자연스러운 한국어 한 문장**으로 합쳐서 출력해. (JSON에는 이 문장만 포함)\n");
+        prompt.append("\n[전략가로서의 미션]\n");
+        prompt.append("1. **Google Search (필수)**를 사용하여 동종 업계 경쟁사(Peers)의 PER/PBR 수준을 확인하고 비교 평가하라.\n");
+        prompt.append("2. 위 정량적 데이터와 수급 현황을 종합하여, 실전 매매 가이드를 수립하라 (가격 밴드, 타임라인).\n");
+        prompt.append("3. 낙관/비관 시나리오에 따른 대응책을 마련하라.\n");
+        prompt.append("4. **초보자 코멘트**는 정말 쉽고 친근하게(존댓말) 작성하라.\n");
 
-        prompt.append("4. 반드시 아래 JSON 포맷을 엄격히 준수하여 출력해 (JSON 외 다른 말 덧붙이지 마).\n");
-
-        prompt.append("\n```json\n");
+        prompt.append("\n[출력 포맷 (JSON 엄수)]\n");
+        prompt.append("```json\n");
         prompt.append("{\n");
         prompt.append("  \"aiVerdict\": {\n");
-        prompt.append("    \"stance\": \"[BUY, ACCUMULATE, HOLD, REDUCE, SELL 중 택1]\",\n");
-        prompt.append("    \"timing\": \"[EARLY, MID, LATE, UNCERTAIN 중 택1]\",\n");
-        prompt.append("    \"riskLevel\": \"[LOW, MEDIUM, HIGH 중 택1]\",\n");
-        prompt.append("    \"guidance\": \"전문가용 한 줄 요약\",\n");
-        prompt.append("    \"alignmentNote\": \"정량적 의견(Check Model Verdict)과 네 전략(Stance)의 뉘앙스 차이를 설명\"\n");
+        prompt.append("    \"stance\": \"[BUY, ACCUMULATE, HOLD, REDUCE, SELL]\",\n");
+        prompt.append("    \"timing\": \"[EARLY, MID, LATE, UNCERTAIN]\",\n");
+        prompt.append("    \"riskLevel\": \"[LOW, MEDIUM, HIGH]\",\n");
+        prompt.append("    \"guidance\": \"전략 요약 (예: 수급 개선 확인 후 분할 매수)\",\n");
+        prompt.append("    \"alignmentNote\": \"수급과 가치평가 간의 괴리 설명\"\n");
+        prompt.append("  },\n");
+        prompt.append("  \"analysisDetails\": {\n");
+        prompt.append("    \"upsidePotential\": \"숫자% (예: +25.4%)\",\n");
+        prompt.append("    \"downsideRisk\": \"숫자% (예: -10.2%)\",\n");
+        prompt.append("    \"investmentTerm\": \"기간 (예: 6-12개월)\",\n");
+        prompt.append("    \"catalysts\": [\"호재1\", \"호재2\"],\n");
+        prompt.append("    \"risks\": [\"리스크1\", \"리스크2\"],\n");
+        prompt.append("    \"peerComparison\": {\n");
+        prompt.append("      \"sectorAvgPer\": \"숫자 (예: 15.2)\",\n");
+        prompt.append("      \"status\": \"[BELOW_SECTOR_AVG, SIMILAR, ABOVE_SECTOR_AVG]\",\n");
+        prompt.append("      \"peers\": [\n");
+        prompt.append("        {\"name\": \"경쟁사A\", \"per\": \"12.5\", \"pbr\": \"1.1\"},\n");
+        prompt.append("        {\"name\": \"경쟁사B\", \"per\": \"18.0\", \"pbr\": \"2.5\"}\n");
+        prompt.append("      ]\n");
+        prompt.append("    },\n");
+        prompt.append("    \"investorTrend\": {\n");
+        prompt.append("       \"recent3MonthForeignerNetBuy\": \""
+                + (investorTrend != null ? investorTrend.getRecent3MonthForeignerNetBuy() : "0") + "\",\n");
+        prompt.append("       \"recent3MonthInstitutionNetBuy\": \""
+                + (investorTrend != null ? investorTrend.getRecent3MonthInstitutionNetBuy() : "0") + "\",\n");
+        prompt.append(
+                "       \"trendStatus\": \"" + (investorTrend != null ? investorTrend.getTrendStatus() : "N/A")
+                        + "\"\n");
+        prompt.append("    }\n");
         prompt.append("  },\n");
         prompt.append("  \"beginnerVerdict\": {\n");
-        prompt.append("    \"summarySentence\": \"행동 가이드 중심의 쉬운 한 문장 (예: 지금은 싸 보이지만 아직 회복 중이라 천천히 나눠서 사는 게 좋아요.)\"\n");
+        prompt.append("    \"summarySentence\": \"초보자용 쉬운 한 문장 (예: 기관이 꾸준히 사고 있어요, 지금이 기회일 수 있습니다!)\"\n");
         prompt.append("  }\n");
         prompt.append("}\n");
         prompt.append("```\n");
-
-        if (isGrowthMode) {
-            prompt.append("\n[참고: 성장주/턴어라운드 모드]\n");
-            prompt.append(
-                    "이 기업은 현재 이익보다 미래 성장성과 매출 추이가 중요해. PSR과 흑자 전환 가능성을 높게 평가하고, 타이밍은 'EARLY' 또는 'UNCERTAIN'일 가능성이 높아.");
-        }
 
         return geminiService.generateAdvice(prompt.toString());
     }

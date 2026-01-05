@@ -7,16 +7,25 @@ import com.AISA.AISA.kisStock.dto.FinancialRank.FinancialStatementDto;
 import com.AISA.AISA.kisStock.dto.FinancialRank.FinancialRatioRankDto;
 import com.AISA.AISA.kisStock.dto.FinancialRank.InvestmentMetricDto;
 import com.AISA.AISA.kisStock.dto.StockSearchResponseDto;
+import com.AISA.AISA.kisStock.Entity.stock.Stock; // Import
+import com.AISA.AISA.kisStock.kisService.CompetitorAnalysisService;
+import com.AISA.AISA.kisStock.kisService.IndustryCategorizationService; // Import
 import com.AISA.AISA.kisStock.kisService.KisInformationService;
 import com.AISA.AISA.kisStock.kisService.KisStockService;
 import com.AISA.AISA.kisStock.dto.InvestorTrend.InvestorTrendDto;
 import com.AISA.AISA.kisStock.dto.InvestorTrend.StockInvestorDailyDto; // New DTO
+import com.AISA.AISA.kisStock.dto.IndustryResponseDto; // Import DTO
+import com.AISA.AISA.kisStock.enums.Industry; // Import
+import com.AISA.AISA.kisStock.enums.SubIndustry; // Import
 import com.AISA.AISA.kisStock.repository.StockRepository; // Add Repo
+import com.AISA.AISA.global.response.SuccessResponse; // Corrected Import
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import java.util.stream.Collectors; // Import
 
 import java.util.List;
 
@@ -29,6 +38,8 @@ public class KisInformationController {
         private final KisInformationService kisInformationService;
         private final KisStockService kisStockService;
         private final StockRepository stockRepository;
+        private final IndustryCategorizationService industryCategorizationService; // Inject
+        private final CompetitorAnalysisService competitorAnalysisService; // Inject
 
         @GetMapping("/balance-sheet/{stockCode}")
         @Operation(summary = "특정 종목 대차대조표 조회 (DB)", description = "특정 종목의 자산/부채/자본 정보를 DB에서 조회합니다. (0:년, 1:분기)")
@@ -142,16 +153,63 @@ public class KisInformationController {
         @PostMapping("/investor-trend/init-all")
         @Operation(summary = "전체 종목 투자자 수급 데이터 초기화 (DB)", description = "모든 종목에 대해 최근 3개월치 일자별 수급 데이터를 가져와 DB에 저장합니다. (비동기)")
         public ResponseEntity<SuccessResponse<String>> initAllInvestorTrends() {
-                new Thread(() -> stockRepository.findAll().forEach(stock -> {
-                        try {
-                                kisStockService.fetchAndSaveInvestorTrend(stock.getStockCode());
-                                Thread.sleep(200); // 0.2s Term (API Limit Safety)
-                        } catch (Exception e) {
-                                // Log error
-                        }
-                })).start();
+                new Thread(() -> {
+                        kisStockService.updateAllInvestorTrends();
+                }).start();
                 return ResponseEntity.ok(new SuccessResponse<>(true, "전체 종목 수급 데이터 초기화 시작 (백그라운드)",
                                 "Started background task."));
         }
 
+        @PostMapping("/categorize/init")
+        @Operation(summary = "전체 종목 산업 분류 초기화/갱신", description = "모든 종목에 대해 AI를 사용하여 산업 분류를 수행하고 DB에 저장합니다. (비동기, 시간 소요됨)")
+        public ResponseEntity<SuccessResponse<String>> initIndustryCategorization() {
+                new Thread(() -> {
+                        List<Stock> stocks = stockRepository.findAll();
+                        for (Stock stock : stocks) {
+                                industryCategorizationService.categorizeStock(stock.getStockCode());
+                                try {
+                                        Thread.sleep(1000);
+                                } catch (InterruptedException e) {
+                                } // Rate limit for AI
+                        }
+                }).start();
+                return ResponseEntity.ok(new SuccessResponse<>(true, "전체 종목 산업 분류 초기화 시작 (백그라운드)",
+                                "Started background task."));
+        }
+
+        @GetMapping("/competitors/{stockCode}")
+        @Operation(summary = "경쟁사 조회 (산업/시가총액 기반)", description = "해당 종목의 산업 및 시가총액을 분석하여 가장 유사한 경쟁사 TOP 5를 반환합니다.")
+        public ResponseEntity<SuccessResponse<List<StockSearchResponseDto>>> getCompetitors(
+                        @PathVariable String stockCode) {
+                List<Stock> competitors = competitorAnalysisService.findCompetitors(stockCode);
+                List<StockSearchResponseDto> response = competitors.stream()
+                                .map(s -> StockSearchResponseDto.builder()
+                                                .stockCode(s.getStockCode())
+                                                .stockName(s.getStockName())
+                                                .marketName(s.getMarketName())
+                                                .build())
+                                .collect(Collectors.toList());
+                return ResponseEntity.ok(new SuccessResponse<>(true, "경쟁사 조회 성공 (산업/시가총액 기반)", response));
+        }
+
+        @GetMapping("/industry/{stockCode}")
+        @Operation(summary = "종목 산업 분류 조회 (AI 자동 분류)", description = "해당 종목의 산업 및 세부 산업을 조회합니다. 분류가 안 되어있을 경우 AI를 통해 자동 분류 후 반환합니다.")
+        public ResponseEntity<SuccessResponse<IndustryResponseDto>> getIndustry(@PathVariable String stockCode) {
+                // 1. Ensure Categorized (Lazy Loading)
+                industryCategorizationService.categorizeStock(stockCode);
+
+                // 2. Fetch Stock with Industry
+                Stock stock = stockRepository.findByStockCode(stockCode)
+                                .orElseThrow(() -> new IllegalArgumentException("Stock not found: " + stockCode));
+
+                IndustryResponseDto response = IndustryResponseDto.builder()
+                                .stockCode(stock.getStockCode())
+                                .stockName(stock.getStockName())
+                                .industry(stock.getIndustry() != null ? stock.getIndustry().getDescription() : "미분류")
+                                .subIndustry(stock.getSubIndustry() != null ? stock.getSubIndustry().getDescription()
+                                                : "미분류")
+                                .build();
+
+                return ResponseEntity.ok(new SuccessResponse<>(true, "산업 분류 조회 성공", response));
+        }
 }

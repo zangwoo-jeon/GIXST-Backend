@@ -17,4 +17,7 @@ public interface StockMarketCapRepository extends JpaRepository<StockMarketCap, 
 
     @EntityGraph(attributePaths = "stock")
     List<StockMarketCap> findByOrderByMarketCapDesc(Pageable pageable);
+
+    @EntityGraph(attributePaths = "stock")
+    List<StockMarketCap> findByStockIn(List<Stock> stocks);
 }

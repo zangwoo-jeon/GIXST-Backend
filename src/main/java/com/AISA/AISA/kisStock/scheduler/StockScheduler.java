@@ -311,4 +311,16 @@ public class StockScheduler {
             log.error("Failed to warmup market cap prices: {}", e.getMessage());
         }
     }
+
+    // Run at 5 PM every weekday (Investor Trend Data)
+    @Scheduled(cron = "0 0 17 * * MON-FRI")
+    public void updateInvestorTrendData() {
+        log.info("Starting scheduled investor trend data update...");
+        try {
+            kisStockService.updateAllInvestorTrends();
+        } catch (Exception e) {
+            log.error("Failed to update investor trend data: {}", e.getMessage());
+        }
+        log.info("Completed scheduled investor trend data update.");
+    }
 }

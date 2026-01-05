@@ -875,24 +875,33 @@ public class KisStockService {
                                 return;
                         }
 
-                        // Parse and Save
-                        for (KisInvestorDailyResponse.InvestorDailyOutput item : response.getOutput()) {
-                                LocalDate date = LocalDate.parse(item.getStckBsopDate(),
+                        // Parse and Save (Shifted: Value[i] -> Date[i+1])
+                        List<KisInvestorDailyResponse.InvestorDailyOutput> list = response.getOutput();
+                        for (int i = 0; i < list.size() - 1; i++) {
+                                KisInvestorDailyResponse.InvestorDailyOutput valueItem = list.get(i); // Values from
+                                                                                                      // here
+                                KisInvestorDailyResponse.InvestorDailyOutput dateItem = list.get(i + 1); // Date from
+                                                                                                         // here
+                                                                                                         // (Previous
+                                                                                                         // Business
+                                                                                                         // Day)
+
+                                LocalDate date = LocalDate.parse(dateItem.getStckBsopDate(),
                                                 DateTimeFormatter.BASIC_ISO_DATE);
 
                                 // Check duplicate
                                 if (stockInvestorDailyRepository.existsByStockAndDate(stock, date)) {
-                                        continue; // Skip if exists (or could update)
+                                        continue; // Skip if exists
                                 }
 
-                                BigDecimal frgn = parseBigDec(item.getFrgnNtbyTrPbmn());
-                                BigDecimal prsn = parseBigDec(item.getPrsnNtbyTrPbmn());
-                                BigDecimal orgn = parseBigDec(item.getOrgnNtbyTrPbmn());
-                                BigDecimal etc = parseBigDec(item.getEtcCorpNtbyTrPbmn());
+                                BigDecimal frgn = parseBigDec(valueItem.getFrgnNtbyTrPbmn());
+                                BigDecimal prsn = parseBigDec(valueItem.getPrsnNtbyTrPbmn());
+                                BigDecimal orgn = parseBigDec(valueItem.getOrgnNtbyTrPbmn());
+                                BigDecimal etc = parseBigDec(valueItem.getEtcCorpNtbyTrPbmn());
 
-                                Long frgnQty = parseLong(item.getFrgnNtbyQty());
-                                Long prsnQty = parseLong(item.getPrsnNtbyQty());
-                                Long orgnQty = parseLong(item.getOrgnNtbyQty());
+                                Long frgnQty = parseLong(valueItem.getFrgnNtbyQty());
+                                Long prsnQty = parseLong(valueItem.getPrsnNtbyQty());
+                                Long orgnQty = parseLong(valueItem.getOrgnNtbyQty());
 
                                 StockInvestorDaily entity = StockInvestorDaily.builder()
                                                 .stock(stock)
@@ -933,5 +942,25 @@ public class KisStockService {
                 } catch (Exception e) {
                         return 0L;
                 }
+        }
+
+        @Transactional
+        public void deleteAllInvestorData() {
+                stockInvestorDailyRepository.deleteAllInBatch();
+                log.info("All investor trend data deleted.");
+        }
+
+        public void updateAllInvestorTrends() {
+                List<Stock> stocks = stockRepository.findAll();
+                for (Stock stock : stocks) {
+                        try {
+                                fetchAndSaveInvestorTrend(stock.getStockCode());
+                                Thread.sleep(50); // Rate limit (20 req/sec safe limit is ~50ms)
+                        } catch (Exception e) {
+                                log.error("Failed to update investor trend for {}: {}", stock.getStockCode(),
+                                                e.getMessage());
+                        }
+                }
+                log.info("Completed batch update for all investor trends.");
         }
 }

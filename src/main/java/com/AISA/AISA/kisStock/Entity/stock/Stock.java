@@ -1,5 +1,7 @@
 package com.AISA.AISA.kisStock.Entity.stock;
 
+import com.AISA.AISA.kisStock.enums.Industry; // Import
+import com.AISA.AISA.kisStock.enums.SubIndustry; // Import
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -22,6 +24,12 @@ public class Stock {
 
     @Column(nullable = false)
     private String marketName;
+
+    @Enumerated(EnumType.STRING)
+    private Industry industry; // 1차 산업
+
+    @Enumerated(EnumType.STRING)
+    private SubIndustry subIndustry; // 2차 세부 산업
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
@@ -48,5 +56,10 @@ public class Stock {
 
     public void updateStockType(StockType stockType) {
         this.stockType = stockType;
+    }
+
+    public void updateIndustry(Industry industry, SubIndustry subIndustry) {
+        this.industry = industry;
+        this.subIndustry = subIndustry;
     }
 }

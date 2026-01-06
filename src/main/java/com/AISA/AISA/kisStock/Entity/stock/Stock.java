@@ -1,7 +1,9 @@
 package com.AISA.AISA.kisStock.Entity.stock;
 
-import com.AISA.AISA.kisStock.enums.Industry; // Import
-import com.AISA.AISA.kisStock.enums.SubIndustry; // Import
+// import com.AISA.AISA.kisStock.enums.Industry; // Removed
+// import com.AISA.AISA.kisStock.enums.SubIndustry; // Removed
+import java.util.ArrayList;
+import java.util.List;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -25,11 +27,8 @@ public class Stock {
     @Column(nullable = false)
     private String marketName;
 
-    @Enumerated(EnumType.STRING)
-    private Industry industry; // 1차 산업
-
-    @Enumerated(EnumType.STRING)
-    private SubIndustry subIndustry; // 2차 세부 산업
+    @OneToMany(mappedBy = "stock", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<StockIndustry> stockIndustries = new ArrayList<>();
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
@@ -58,8 +57,12 @@ public class Stock {
         this.stockType = stockType;
     }
 
-    public void updateIndustry(Industry industry, SubIndustry subIndustry) {
-        this.industry = industry;
-        this.subIndustry = subIndustry;
+    // Helper to add industry
+    public void addIndustry(StockIndustry stockIndustry) {
+        this.stockIndustries.add(stockIndustry);
+    }
+
+    public void clearIndustries() {
+        this.stockIndustries.clear();
     }
 }

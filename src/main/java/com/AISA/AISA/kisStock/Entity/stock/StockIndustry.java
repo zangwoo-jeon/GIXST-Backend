@@ -1,5 +1,6 @@
 package com.AISA.AISA.kisStock.Entity.stock;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -19,6 +20,7 @@ public class StockIndustry {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "stock_id", nullable = false)
+    @JsonIgnore
     private Stock stock;
 
     @ManyToOne(fetch = FetchType.LAZY)

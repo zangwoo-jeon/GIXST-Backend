@@ -1,9 +1,8 @@
 package com.AISA.AISA.kisStock.kisService;
 
 import com.AISA.AISA.kisStock.Entity.stock.Stock;
+import com.AISA.AISA.kisStock.Entity.stock.StockIndustry;
 import com.AISA.AISA.kisStock.Entity.stock.StockMarketCap;
-import com.AISA.AISA.kisStock.enums.Industry;
-import com.AISA.AISA.kisStock.enums.SubIndustry;
 import com.AISA.AISA.kisStock.repository.StockMarketCapRepository;
 import com.AISA.AISA.kisStock.repository.StockRepository;
 import lombok.RequiredArgsConstructor;
@@ -22,9 +21,9 @@ public class CompetitorAnalysisService {
 
     private final StockRepository stockRepository;
     private final StockMarketCapRepository stockMarketCapRepository;
-    private final IndustryCategorizationService industryCategorizationService; // Inject
+    private final IndustryCategorizationService industryCategorizationService;
 
-    @Transactional // Allow Write
+    @Transactional
     public List<Stock> findCompetitors(String stockCode) {
         // Ensure Categorized (Lazy Loading)
         industryCategorizationService.categorizeStock(stockCode);
@@ -32,20 +31,27 @@ public class CompetitorAnalysisService {
         Stock targetStock = stockRepository.findByStockCode(stockCode)
                 .orElseThrow(() -> new IllegalArgumentException("Stock not found: " + stockCode));
 
-        Industry industry = targetStock.getIndustry();
-        SubIndustry subIndustry = targetStock.getSubIndustry();
+        List<StockIndustry> industries = targetStock.getStockIndustries();
 
-        if (industry == null || subIndustry == null) {
+        if (industries == null || industries.isEmpty()) {
             log.warn("Stock {} has no industry categorization. Skipping competitor analysis.", stockCode);
             return Collections.emptyList();
         }
 
-        // 1. Find candidates (Same SubIndustry first, then Industry if needed)
-        List<Stock> candidates = stockRepository.findBySubIndustryAndStockCodeNot(subIndustry, stockCode);
+        // Use the primary industry (first one) or best fit for comparison
+        // Currently logic: Try to match ANY of the sub-industries.
+        // For simplicity: Use the first one (Primary)
+        StockIndustry primary = industries.get(0);
+        String subCode = primary.getSubIndustry().getCode();
+        String indCode = primary.getSubIndustry().getIndustry().getCode();
+
+        // 1. Find candidates (Same SubIndustry first)
+        List<Stock> candidates = new ArrayList<>(
+                stockRepository.findBySubIndustryCodeAndStockCodeNot(subCode, stockCode));
 
         // If too few candidates in SubIndustry, widen to Industry
         if (candidates.size() < 5) {
-            List<Stock> industryPeers = stockRepository.findByIndustryAndStockCodeNot(industry, stockCode);
+            List<Stock> industryPeers = stockRepository.findByIndustryCodeAndStockCodeNot(indCode, stockCode);
             // Merge without duplicates
             Set<String> existingCodes = candidates.stream().map(Stock::getStockCode).collect(Collectors.toSet());
             for (Stock p : industryPeers) {
@@ -68,8 +74,7 @@ public class CompetitorAnalysisService {
                 .map(StockMarketCap::getMarketCap)
                 .orElse(BigDecimal.ZERO);
 
-        // 3. Sort by Market Cap Proximity (Closest Market Cap first)
-        // If Market Cap is missing (0), put it at the end.
+        // 3. Sort by Market Cap Proximity
         candidates.sort((s1, s2) -> {
             BigDecimal c1 = capMap.getOrDefault(s1.getStockCode(), BigDecimal.ZERO);
             BigDecimal c2 = capMap.getOrDefault(s2.getStockCode(), BigDecimal.ZERO);

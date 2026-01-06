@@ -27,6 +27,7 @@ import com.AISA.AISA.kisStock.repository.StockInvestorDailyRepository; // New Re
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.data.domain.Page;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -962,5 +963,17 @@ public class KisStockService {
                         }
                 }
                 log.info("Completed batch update for all investor trends.");
+        }
+
+        @Transactional(readOnly = true)
+        public Page<StockSearchResponseDto> getStocksBySector(String subIndustryCode,
+                        Pageable pageable) {
+                Page<Stock> stockPage = stockRepository
+                                .findBySubIndustryCode(subIndustryCode, pageable);
+                return stockPage.map(stock -> StockSearchResponseDto.builder()
+                                .stockCode(stock.getStockCode())
+                                .stockName(stock.getStockName())
+                                .marketName(stock.getMarketName())
+                                .build());
         }
 }

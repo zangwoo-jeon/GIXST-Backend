@@ -15,8 +15,6 @@ import com.AISA.AISA.kisStock.kisService.KisStockService;
 import com.AISA.AISA.kisStock.dto.InvestorTrend.InvestorTrendDto;
 import com.AISA.AISA.kisStock.dto.InvestorTrend.StockInvestorDailyDto; // New DTO
 import com.AISA.AISA.kisStock.dto.IndustryResponseDto; // Import DTO
-import com.AISA.AISA.kisStock.enums.Industry; // Import
-import com.AISA.AISA.kisStock.enums.SubIndustry; // Import
 import com.AISA.AISA.kisStock.repository.StockRepository; // Add Repo
 import com.AISA.AISA.global.response.SuccessResponse; // Corrected Import
 import io.swagger.v3.oas.annotations.Operation;
@@ -26,6 +24,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import java.util.stream.Collectors; // Import
+import com.AISA.AISA.kisStock.dto.TaxonomyDto;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.web.PageableDefault;
 
 import java.util.List;
 
@@ -177,6 +180,22 @@ public class KisInformationController {
                                 "Started background task."));
         }
 
+        @GetMapping("/industry/taxonomy")
+        @Operation(summary = "산업 분류 트리 조회", description = "전체 산업(Industry) 및 세부산업(SubIndustry)의 계층 구조를 조회합니다.")
+        public ResponseEntity<SuccessResponse<List<TaxonomyDto>>> getIndustryTaxonomy() {
+                return ResponseEntity.ok(new SuccessResponse<>(true, "산업 분류 트리 조회 성공",
+                                industryCategorizationService.getTaxonomy()));
+        }
+
+        @GetMapping("/industry/{subIndustryCode}/stocks")
+        @Operation(summary = "세부 산업별 종목 리스트 조회", description = "특정 세부 산업에 속한 종목들을 페이징하여 조회합니다.")
+        public ResponseEntity<SuccessResponse<Page<StockSearchResponseDto>>> getStocksBySector(
+                        @PathVariable String subIndustryCode,
+                        @PageableDefault(size = 20, sort = "stockCode", direction = Sort.Direction.ASC) Pageable pageable) {
+                return ResponseEntity.ok(new SuccessResponse<>(true, "세부 산업별 종목 리스트 조회 성공",
+                                kisStockService.getStocksBySector(subIndustryCode, pageable)));
+        }
+
         @GetMapping("/competitors/{stockCode}")
         @Operation(summary = "경쟁사 조회 (산업/시가총액 기반)", description = "해당 종목의 산업 및 시가총액을 분석하여 가장 유사한 경쟁사 TOP 5를 반환합니다.")
         public ResponseEntity<SuccessResponse<List<StockSearchResponseDto>>> getCompetitors(
@@ -202,12 +221,20 @@ public class KisInformationController {
                 Stock stock = stockRepository.findByStockCode(stockCode)
                                 .orElseThrow(() -> new IllegalArgumentException("Stock not found: " + stockCode));
 
+                List<IndustryResponseDto.Classification> classifications = stock.getStockIndustries().stream()
+                                .map(si -> IndustryResponseDto.Classification.builder()
+                                                .industryCode(si.getSubIndustry().getIndustry().getCode())
+                                                .industryName(si.getSubIndustry().getIndustry().getName())
+                                                .subIndustryCode(si.getSubIndustry().getCode())
+                                                .subIndustryName(si.getSubIndustry().getName())
+                                                .isPrimary(si.isPrimary())
+                                                .build())
+                                .collect(Collectors.toList());
+
                 IndustryResponseDto response = IndustryResponseDto.builder()
                                 .stockCode(stock.getStockCode())
                                 .stockName(stock.getStockName())
-                                .industry(stock.getIndustry() != null ? stock.getIndustry().getDescription() : "미분류")
-                                .subIndustry(stock.getSubIndustry() != null ? stock.getSubIndustry().getDescription()
-                                                : "미분류")
+                                .classifications(classifications)
                                 .build();
 
                 return ResponseEntity.ok(new SuccessResponse<>(true, "산업 분류 조회 성공", response));

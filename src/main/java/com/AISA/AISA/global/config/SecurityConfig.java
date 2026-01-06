@@ -99,7 +99,9 @@ public class SecurityConfig {
                                                                 "/api/indices/{marketCode}/chart",
                                                                 "/api/indices/overseas/**",
                                                                 "/api/indices/kospi-usd-ratio",
-                                                                "/api/indices/kosdaq-usd-ratio")
+                                                                "/api/indices/kosdaq-usd-ratio",
+                                                                "/api/analysis/valuation/*/static-report",
+                                                                "/api/stocks/financial/investor-trend/daily/*")
                                                 .permitAll()
                                                 .anyRequest().authenticated())
                                 .oauth2Login(oauth2 -> oauth2

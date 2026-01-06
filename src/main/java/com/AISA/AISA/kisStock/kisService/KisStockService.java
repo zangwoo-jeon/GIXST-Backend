@@ -876,18 +876,14 @@ public class KisStockService {
                                 return;
                         }
 
-                        // Parse and Save (Shifted: Value[i] -> Date[i+1])
+                        // Parse and Save (Direct Mapping: Value[i] -> Date[i])
                         List<KisInvestorDailyResponse.InvestorDailyOutput> list = response.getOutput();
-                        for (int i = 0; i < list.size() - 1; i++) {
-                                KisInvestorDailyResponse.InvestorDailyOutput valueItem = list.get(i); // Values from
-                                                                                                      // here
-                                KisInvestorDailyResponse.InvestorDailyOutput dateItem = list.get(i + 1); // Date from
-                                                                                                         // here
-                                                                                                         // (Previous
-                                                                                                         // Business
-                                                                                                         // Day)
+                        // API returns data in descending order (latest first)
+                        // Iterate all items
+                        for (int i = 0; i < list.size(); i++) {
+                                KisInvestorDailyResponse.InvestorDailyOutput item = list.get(i);
 
-                                LocalDate date = LocalDate.parse(dateItem.getStckBsopDate(),
+                                LocalDate date = LocalDate.parse(item.getStckBsopDate(),
                                                 DateTimeFormatter.BASIC_ISO_DATE);
 
                                 // Check duplicate
@@ -895,14 +891,14 @@ public class KisStockService {
                                         continue; // Skip if exists
                                 }
 
-                                BigDecimal frgn = parseBigDec(valueItem.getFrgnNtbyTrPbmn());
-                                BigDecimal prsn = parseBigDec(valueItem.getPrsnNtbyTrPbmn());
-                                BigDecimal orgn = parseBigDec(valueItem.getOrgnNtbyTrPbmn());
-                                BigDecimal etc = parseBigDec(valueItem.getEtcCorpNtbyTrPbmn());
+                                BigDecimal frgn = parseBigDec(item.getFrgnNtbyTrPbmn());
+                                BigDecimal prsn = parseBigDec(item.getPrsnNtbyTrPbmn());
+                                BigDecimal orgn = parseBigDec(item.getOrgnNtbyTrPbmn());
+                                BigDecimal etc = parseBigDec(item.getEtcCorpNtbyTrPbmn());
 
-                                Long frgnQty = parseLong(valueItem.getFrgnNtbyQty());
-                                Long prsnQty = parseLong(valueItem.getPrsnNtbyQty());
-                                Long orgnQty = parseLong(valueItem.getOrgnNtbyQty());
+                                Long frgnQty = parseLong(item.getFrgnNtbyQty());
+                                Long prsnQty = parseLong(item.getPrsnNtbyQty());
+                                Long orgnQty = parseLong(item.getOrgnNtbyQty());
 
                                 StockInvestorDaily entity = StockInvestorDaily.builder()
                                                 .stock(stock)

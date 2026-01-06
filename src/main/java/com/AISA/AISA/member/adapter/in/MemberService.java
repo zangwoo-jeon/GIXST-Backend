@@ -12,6 +12,7 @@ import com.AISA.AISA.member.adapter.in.dto.EmailChangeRequest;
 import com.AISA.AISA.global.jwt.dto.TokenResponseDto;
 import com.AISA.AISA.member.adapter.in.exception.MemberErrorCode;
 import com.AISA.AISA.member.adapter.out.dto.MemberResponse;
+import com.AISA.AISA.portfolio.PortfolioGroup.PortfolioRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
@@ -34,6 +35,7 @@ public class MemberService {
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider jwtTokenProvider;
     private final RefreshTokenRepository refreshTokenRepository;
+    private final PortfolioRepository portfolioRepository;
 
     @Transactional
     public Member signup(MemberSignupRequest request) {
@@ -102,6 +104,10 @@ public class MemberService {
     public void deleteMemberById(UUID memberId) {
         Member member = memberRepository.findById(memberId)
                 .orElseThrow(() -> new BusinessException(MemberErrorCode.MEMBER_NOT_FOUND));
+
+        // 해당 멤버의 모든 포트폴리오 삭제
+        portfolioRepository.deleteByMemberId(memberId);
+
         memberRepository.delete(member);
     }
 

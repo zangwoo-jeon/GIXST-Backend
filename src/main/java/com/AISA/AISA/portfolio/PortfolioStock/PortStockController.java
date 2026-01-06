@@ -23,11 +23,11 @@ public class PortStockController {
 
     @PostMapping("/add/{portId}")
     @Operation(summary = "포트폴리오 종목 추가", description = "특정 포트폴리오에 종목을 추가합니다.")
-    public ResponseEntity<SuccessResponse<PortStock>> addPortStock(
+    public ResponseEntity<SuccessResponse<PortStockResponse>> addPortStock(
             @PathVariable UUID portId,
             @RequestBody PortStockAddRequest request) {
         PortStock addedStock = portStockService.addStock(portId, request);
-        return ResponseEntity.ok(new SuccessResponse<>(true, "포트폴리오 종목 추가 성공", addedStock));
+        return ResponseEntity.ok(new SuccessResponse<>(true, "포트폴리오 종목 추가 성공", new PortStockResponse(addedStock)));
     }
 
     @DeleteMapping("/{portStockId}")

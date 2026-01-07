@@ -97,6 +97,7 @@ jobs:
               -e SPRING_JPA_PROPERTIES_HIBERNATE_FORMAT_SQL="true" \
               -e SERVER_FORWARD_HEADERS_STRATEGY="native" \
               -e SERVER_TOMCAT_REMOTEIP_INTERNAL_PROXIES=".*" \
+              -e TZ="Asia/Seoul" \
               \
               -e KIS_BASE_URL="https://openapi.koreainvestment.com:9443" \
               -e KIS_AUTH_URL="/oauth2/tokenP" \

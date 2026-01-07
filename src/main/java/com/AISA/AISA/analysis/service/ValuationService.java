@@ -12,7 +12,10 @@ import com.AISA.AISA.analysis.repository.StockStaticAnalysisRepository; // NEW
 import com.AISA.AISA.kisStock.Entity.stock.Stock;
 import com.AISA.AISA.kisStock.Entity.stock.StockFinancialRatio;
 import com.AISA.AISA.kisStock.Entity.stock.StockFinancialStatement;
+import com.AISA.AISA.kisStock.Entity.stock.Stock; // Added for Competitor
 import com.AISA.AISA.kisStock.Entity.stock.StockBalanceSheet;
+import com.AISA.AISA.kisStock.kisService.CompetitorAnalysisService; // Added
+import com.AISA.AISA.kisStock.kisService.DividendService;
 import com.AISA.AISA.kisStock.kisService.KisStockService;
 import com.AISA.AISA.kisStock.dto.StockPrice.StockPriceDto;
 import com.AISA.AISA.kisStock.dto.InvestorTrend.InvestorTrendDto;
@@ -52,8 +55,10 @@ public class ValuationService {
     private final KisStockService kisStockService;
     private final GeminiService geminiService;
     private final StockAiSummaryRepository stockAiSummaryRepository;
-    private final KisMacroService kisMacroService; // Added
-    private final StockStaticAnalysisRepository stockStaticAnalysisRepository; // Added
+    private final KisMacroService kisMacroService;
+    private final StockStaticAnalysisRepository stockStaticAnalysisRepository;
+    private final DividendService dividendService;
+    private final CompetitorAnalysisService competitorAnalysisService;
 
     @Autowired
     public ValuationService(StockRepository stockRepository,
@@ -64,7 +69,9 @@ public class ValuationService {
             GeminiService geminiService,
             StockAiSummaryRepository stockAiSummaryRepository,
             KisMacroService kisMacroService,
-            StockStaticAnalysisRepository stockStaticAnalysisRepository) {
+            StockStaticAnalysisRepository stockStaticAnalysisRepository,
+            DividendService dividendService,
+            CompetitorAnalysisService competitorAnalysisService) {
         this.stockRepository = stockRepository;
         this.stockFinancialRatioRepository = stockFinancialRatioRepository;
         this.stockBalanceSheetRepository = stockBalanceSheetRepository;
@@ -74,6 +81,8 @@ public class ValuationService {
         this.stockAiSummaryRepository = stockAiSummaryRepository;
         this.kisMacroService = kisMacroService;
         this.stockStaticAnalysisRepository = stockStaticAnalysisRepository;
+        this.dividendService = dividendService;
+        this.competitorAnalysisService = competitorAnalysisService;
     }
 
     // 기본 요구 수익률 (Fallback)
@@ -1252,16 +1261,6 @@ public class ValuationService {
     }
 
     // Deprecated or Combined usage
-    private String getOrGenerateCachedAiAnalysis(String stockCode, Response currentValuation,
-            StockFinancialRatio ratio, StockBalanceSheet bs, List<StockFinancialStatement> annuals,
-            List<StockFinancialStatement> quarters) {
-
-        // Return Combined Analysis
-        String staticPart = getStaticAnalysis(stockCode);
-        String dynamicPart = getValuationAnalysis(stockCode);
-
-        return staticPart + "\n\n" + dynamicPart;
-    }
 
     private String generateStaticAnalysisText(Stock stock, List<StockFinancialStatement> recentAnnuals) {
         StringBuilder prompt = new StringBuilder();
@@ -1294,53 +1293,76 @@ public class ValuationService {
             List<StockFinancialStatement> recentQuarters,
             InvestorTrendDto investorTrend) {
         StringBuilder prompt = new StringBuilder();
+        String stockCode = val.getStockCode();
 
-        // 1. Detect Growth/Turnaround Context
-        boolean isGrowthMode = isGrowthOrTurnaroundCase(latestRatio, recentQuarters);
+        // 1. Context Gathering
+        String industryContext = getIndustryContext(stockCode);
+        String investorDetailAnalysis = analyzeInvestorTrendDetails(stockCode);
+        String fundamentalAnalysis = analyzeFundamentals(latestRatio, recentQuarters);
+        String competitorData = analyzeCompetitorData(stockCode);
+        String sectorPer = calculateSectorAveragePer(stockCode); // Added
 
-        prompt.append("너는 '주식 투자 전략가(Strategist)'이다. 단순한 숫자 해석을 넘어, 구체적인 매매 전략과 통찰력을 제시해야 한다.\n\n");
-        prompt.append("[분석 대상]\n");
-        prompt.append(String.format("- 종목명: %s (%s)\n", val.getStockName(), val.getStockCode()));
+        com.AISA.AISA.kisStock.dto.Dividend.DividendDetailDto dividendInfo = null;
+        try {
+            dividendInfo = dividendService.getDividendDetail(stockCode);
+        } catch (Exception e) {
+            log.warn("Failed to fetch dividend info for {}: {}", stockCode, e.getMessage());
+        }
+
+        prompt.append("너는 '주식 투자 전략가(Strategist)'이다. 단순한 숫자 해석을 넘어, 구체적인 매매 전략과 통찰력을 제시해야 한다.\n");
+        prompt.append("\n[분석 대상 핵심 요약]\n");
+        prompt.append(String.format("- 종목: %s (%s)\n", val.getStockName(), stockCode));
+        prompt.append(String.format("- 섹터: %s\n", industryContext));
         prompt.append(String.format("- 현재가: %s원 (시가총액: %s)\n", val.getCurrentPrice(), val.getMarketCap()));
-        prompt.append(String.format("- 정량적 모델 의견(Model Verdict): **%s** (Confidence: %s)\n",
+        prompt.append(String.format("- 모델 의견: **%s** (신뢰도: %s)\n",
                 val.getSummary().getOverallVerdict(), val.getSummary().getConfidence()));
 
-        // Add Financial Ratios (Differ by Mode)
+        prompt.append("\n[펀더멘털 심층 분석]\n");
+        prompt.append(String.format("- 요약: %s\n", fundamentalAnalysis));
         if (latestRatio != null) {
-            prompt.append("\n[핵심 재무 지표]\n");
-            if (isGrowthMode) {
-                if (latestRatio.getPsr() != null) {
-                    prompt.append(String.format("- PSR: %s배 (성장주/턴어라운드 관점 적용)\n", latestRatio.getPsr()));
-                }
-                prompt.append(String.format("- 매출 성장률(YoY): %s%%\n", latestRatio.getSalesGrowth()));
-            }
-            prompt.append(String.format("- 부채비율: %s%%, 유보율: %s%%\n", latestRatio.getDebtRatio(),
-                    latestRatio.getReserveRatio()));
-            prompt.append(String.format("- 영업이익 성장률(YoY): %s%%\n", latestRatio.getOperatingProfitGrowth()));
+            prompt.append(String.format("- PER: %.2f, PBR: %.2f\n", latestRatio.getPer(), latestRatio.getPbr()));
+            if (latestRatio.getEps() != null)
+                prompt.append(String.format("- EPS: %s원, ROE: %.2f%%\n", latestRatio.getEps(), latestRatio.getRoe()));
+
+            prompt.append(String.format("- 성장성: 매출증가율 %.2f%%, 영업이익증가율 %.2f%%\n",
+                    latestRatio.getSalesGrowth(), latestRatio.getOperatingProfitGrowth()));
+            prompt.append(String.format("- 안정성: 부채비율 %.2f%%, 유보율 %.2f%%\n",
+                    latestRatio.getDebtRatio(), latestRatio.getReserveRatio()));
+        }
+        if (dividendInfo != null) {
+            prompt.append(String.format("- 배당: 수익률 %s%%, 성향 %s%%, 주기 %s\n",
+                    dividendInfo.getDividendYield(), dividendInfo.getPayoutRatio(),
+                    dividendInfo.getDividendFrequency()));
         }
 
-        // Add Investor Trend
+        prompt.append("\n[수급 데이터 상세 (Investor Trend)]\n");
+        prompt.append(String.format("- 분석: %s\n", investorDetailAnalysis));
         if (investorTrend != null) {
-            prompt.append("\n[최근 3개월 수급(Investor Trend)]\n");
-            prompt.append(String.format("- 외국인 순매수: %s원\n",
-                    formatLargeNumber(new BigDecimal(investorTrend.getRecent3MonthForeignerNetBuy()))));
-            prompt.append(String.format("- 기관 순매수: %s원\n",
-                    formatLargeNumber(new BigDecimal(investorTrend.getRecent3MonthInstitutionNetBuy()))));
-            prompt.append(String.format("- 수급 상태: %s\n", investorTrend.getTrendStatus()));
+            prompt.append(String.format("- 3개월 누적 API 데이터: 외국인 %s원, 기관 %s원 (%s)\n",
+                    formatLargeNumber(new BigDecimal(investorTrend.getRecent3MonthForeignerNetBuy())),
+                    formatLargeNumber(new BigDecimal(investorTrend.getRecent3MonthInstitutionNetBuy())),
+                    investorTrend.getTrendStatus()));
         }
 
-        // Add Model Details
-        prompt.append("\n[가치평가 모델 상세]\n");
+        prompt.append("\n[Valuation Model 요약]\n");
+        prompt.append("1. S-RIM (초과이익 모델): " + val.getSrim().getVerdict() + " (적정가: " + val.getSrim().getPrice()
+                + ")\n");
         prompt.append(
-                String.format("- S-RIM: %s (괴리율: %s%%)\n", val.getSrim().getVerdict(), val.getSrim().getGapRate()));
-        prompt.append(String.format("- PER: %s (괴리율: %s%%)\n", val.getPer().getVerdict(), val.getPer().getGapRate()));
-        prompt.append(String.format("- PBR: %s (괴리율: %s%%)\n", val.getPbr().getVerdict(), val.getPbr().getGapRate()));
+                "2. PER 모델 (역사적 밴드): " + val.getPer().getVerdict() + " (적정가: " + val.getPer().getPrice() + ")\n");
+        prompt.append(
+                "3. PBR 모델 (자산 가치): " + val.getPbr().getVerdict() + " (적정가: " + val.getPbr().getPrice() + ")\n");
+
+        prompt.append("\n[경쟁사 비교 데이터 (Competitor Data)]\n");
+        prompt.append(competitorData);
+        prompt.append("\n");
 
         prompt.append("\n[전략가로서의 미션]\n");
-        prompt.append("1. **Google Search (필수)**를 사용하여 동종 업계 경쟁사(Peers)의 PER/PBR 수준을 확인하고 비교 평가하라.\n");
-        prompt.append("2. 위 정량적 데이터와 수급 현황을 종합하여, 실전 매매 가이드를 수립하라 (가격 밴드, 타임라인).\n");
-        prompt.append("3. 낙관/비관 시나리오에 따른 대응책을 마련하라.\n");
-        prompt.append("4. **초보자 코멘트**는 정말 쉽고 친근하게(존댓말) 작성하라.\n");
+        prompt.append(
+                String.format("1. **Google Search**와 위 **경쟁사 데이터**를 함께 활용하여 동종 업계 경쟁사(Peers)의 PER/PBR 수준을 비교 평가하라.\n"));
+        prompt.append(String.format("   (업종 평균 PER: %s, 제공된 경쟁사 데이터 우선 반영)\n", sectorPer));
+        prompt.append("2. 위 펀더멘털, 수급, 밸류에이션 데이터를 종합하여, 실전 매매 가이드를 수립하라 (매수/매도/보유 등).\n");
+        prompt.append("3. **Risk Scenarios (민감도 분석)**: 주요 변수(금리, 환율, 업황 등) 변화 시 적정 주가 영향이나 대응 시나리오를 제시하라.\n");
+        prompt.append("4. **초보자 코멘트**는 정말 쉽고 친근하게(존댓말) 작성하라. '안전마진'과 배당 매력을 포함해 설명하라.\n");
 
         prompt.append("\n[출력 포맷 (JSON 엄수)]\n");
         prompt.append("```json\n");
@@ -1349,17 +1371,17 @@ public class ValuationService {
         prompt.append("    \"stance\": \"[BUY, ACCUMULATE, HOLD, REDUCE, SELL]\",\n");
         prompt.append("    \"timing\": \"[EARLY, MID, LATE, UNCERTAIN]\",\n");
         prompt.append("    \"riskLevel\": \"[LOW, MEDIUM, HIGH]\",\n");
-        prompt.append("    \"guidance\": \"전략 요약 (예: 수급 개선 확인 후 분할 매수)\",\n");
-        prompt.append("    \"alignmentNote\": \"수급과 가치평가 간의 괴리 설명\"\n");
+        prompt.append("    \"guidance\": \"종합적인 투자의견 및 구체적인 진입/청산 전략 (300자 내외)\",\n");
+        prompt.append("    \"alignmentNote\": \"수급과 가치평가 간의 괴리 또는 특정 지표(배당 등)가 미치는 영향\"\n");
         prompt.append("  },\n");
         prompt.append("  \"analysisDetails\": {\n");
-        prompt.append("    \"upsidePotential\": \"숫자% (예: +25.4%)\",\n");
-        prompt.append("    \"downsideRisk\": \"숫자% (예: -10.2%)\",\n");
-        prompt.append("    \"investmentTerm\": \"기간 (예: 6-12개월)\",\n");
-        prompt.append("    \"catalysts\": [\"호재1\", \"호재2\"],\n");
-        prompt.append("    \"risks\": [\"리스크1\", \"리스크2\"],\n");
+        prompt.append("    \"upsidePotential\": \"+OO% (목표가 OO원)\",\n");
+        prompt.append("    \"downsideRisk\": \"-OO% (손절가 OO원)\",\n");
+        prompt.append("    \"investmentTerm\": \"추천 투자 기간 (예: 6개월)\",\n");
+        prompt.append("    \"catalysts\": [\"주가 상승 촉매제 1\", \"주가 상승 촉매제 2\"],\n");
+        prompt.append("    \"risks\": [\"리스크 1\", \"리스크 2\"],\n");
         prompt.append("    \"peerComparison\": {\n");
-        prompt.append("      \"sectorAvgPer\": \"숫자 (예: 15.2)\",\n");
+        prompt.append("      \"sectorAvgPer\": \"" + sectorPer + "\",\n");
         prompt.append("      \"status\": \"[BELOW_SECTOR_AVG, SIMILAR, ABOVE_SECTOR_AVG]\",\n");
         prompt.append("      \"peers\": [\n");
         prompt.append("        {\"name\": \"경쟁사A\", \"per\": \"12.5\", \"pbr\": \"1.1\"},\n");
@@ -1377,45 +1399,12 @@ public class ValuationService {
         prompt.append("    }\n");
         prompt.append("  },\n");
         prompt.append("  \"beginnerVerdict\": {\n");
-        prompt.append("    \"summarySentence\": \"초보자용 쉬운 한 문장 (예: 기관이 꾸준히 사고 있어요, 지금이 기회일 수 있습니다!)\"\n");
+        prompt.append("    \"summarySentence\": \"초보자용 쉬운 한 문장 (예: 배당 매력이 높고 기관이 사고 있어요, 분할 매수 추천해요!)\"\n");
         prompt.append("  }\n");
         prompt.append("}\n");
         prompt.append("```\n");
 
         return geminiService.generateAdvice(prompt.toString());
-    }
-
-    private boolean isGrowthOrTurnaroundCase(StockFinancialRatio ratio, List<StockFinancialStatement> recentQuarters) {
-        if (ratio == null)
-            return false;
-
-        // 1. Loss Making (Negative Net Income or Operating Profit)
-        // If EPS is null or <= 0
-        if (ratio.getEps() == null || ratio.getEps().compareTo(BigDecimal.ZERO) <= 0) {
-            return true;
-        }
-
-        // 2. Low Profitability (ROE < 3%)
-        // If ROE is very low, PER might be abnormally high, so use PSR logic
-        if (ratio.getRoe() != null && ratio.getRoe().compareTo(new BigDecimal("3.0")) < 0) {
-            return true;
-        }
-
-        // 3. Quarterly Operating Loss (Recent 2 quarters have loss)
-        if (recentQuarters != null && !recentQuarters.isEmpty()) {
-            int lossCount = 0;
-            int checkLimit = Math.min(recentQuarters.size(), 2);
-            for (int i = 0; i < checkLimit; i++) {
-                BigDecimal op = recentQuarters.get(i).getOperatingProfit();
-                if (op != null && op.compareTo(BigDecimal.ZERO) < 0) {
-                    lossCount++;
-                }
-            }
-            if (lossCount >= 1)
-                return true; // At least 1 recent quarter loss -> Turnaround check needed
-        }
-
-        return false;
     }
 
     // Legacy Support (Wrapper)
@@ -1425,25 +1414,6 @@ public class ValuationService {
         return getStaticAnalysis(val.getStockCode()) + "\n\n" + getValuationAnalysis(val.getStockCode());
     }
 
-    private String calculateQuarterlyYoY(StockFinancialStatement current, StockFinancialStatement past) {
-        try {
-            if (current.getNetIncome() == null || past.getNetIncome() == null)
-                return "";
-
-            double curNet = current.getNetIncome().doubleValue();
-            double pastNet = past.getNetIncome().doubleValue();
-
-            if (pastNet == 0)
-                return "";
-
-            double growth = (curNet - pastNet) / Math.abs(pastNet) * 100.0;
-            return String.format("(YoY %+.1f%%)", growth);
-        } catch (Exception e) {
-            return "";
-        }
-
-    }
-
     public String fetchBondYieldFromEcos() {
         return kisMacroService.getLatestEcosBondYield();
     }
@@ -1451,5 +1421,225 @@ public class ValuationService {
     @Transactional
     public void clearAiSummaryCache() {
         stockAiSummaryRepository.deleteAll();
+    }
+
+    private String analyzeCompetitorData(String stockCode) {
+        StringBuilder sb = new StringBuilder();
+        try {
+            List<Stock> competitors = competitorAnalysisService.findCompetitors(stockCode);
+            if (competitors.isEmpty()) {
+                return "경쟁사 데이터 없음 (검색 필요)";
+            }
+
+            for (Stock comp : competitors) {
+                // Fetch Latest Ratio
+                StockFinancialRatio ratio = stockFinancialRatioRepository
+                        .findTop1ByStockCodeAndDivCodeOrderByStacYymmDesc(comp.getStockCode(), "0");
+
+                String per = (ratio != null && ratio.getPer() != null) ? ratio.getPer().toString() : "N/A";
+                String pbr = (ratio != null && ratio.getPbr() != null) ? ratio.getPbr().toString() : "N/A";
+
+                sb.append(String.format("- %s (%s): PER %s, PBR %s\n",
+                        comp.getStockName(), comp.getStockCode(), per, pbr));
+            }
+        } catch (Exception e) {
+            log.warn("Failed to fetch competitor data for {}: {}", stockCode, e.getMessage());
+            return "경쟁사 데이터 로드 실패 (검색 권장)";
+        }
+        return sb.toString();
+    }
+
+    // --- New Helper Methods for Advanced Analysis ---
+
+    private String getIndustryContext(String stockCode) {
+        try {
+            Stock stock = stockRepository.findByStockCode(stockCode).orElse(null);
+            if (stock != null && !stock.getStockIndustries().isEmpty()) {
+                com.AISA.AISA.kisStock.Entity.stock.StockIndustry mainInd = stock.getStockIndustries().stream()
+                        .filter(com.AISA.AISA.kisStock.Entity.stock.StockIndustry::isPrimary)
+                        .findFirst()
+                        .orElse(stock.getStockIndustries().get(0));
+
+                String indName = mainInd.getSubIndustry().getIndustry().getName();
+                String subIndName = mainInd.getSubIndustry().getName();
+                return String.format("Industry: %s / Sub-Industry: %s", indName, subIndName);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to fetch industry context for {}: {}", stockCode, e.getMessage());
+        }
+        return "Industry: Unknown";
+    }
+
+    private String analyzeInvestorTrendDetails(String stockCode) {
+        StringBuilder analysis = new StringBuilder();
+        try {
+            List<com.AISA.AISA.kisStock.dto.InvestorTrend.StockInvestorDailyDto> trends = kisStockService
+                    .getDailyInvestorTrend(stockCode); // This returns DTO list
+
+            if (trends == null || trends.isEmpty())
+                return "수급 데이터 부족";
+
+            // Sort by date desc just in case
+            trends.sort((t1, t2) -> t2.getDate().compareTo(t1.getDate()));
+
+            // Analyze last 5 days
+            int limit = Math.min(trends.size(), 5);
+            int foreignerBuyCount = 0;
+            int institutionBuyCount = 0;
+            long foreignerNetSum = 0;
+            long institutionNetSum = 0;
+
+            for (int i = 0; i < limit; i++) {
+                com.AISA.AISA.kisStock.dto.InvestorTrend.StockInvestorDailyDto day = trends.get(i);
+
+                // Parse amounts (assuming they are strings like "123456" or "-123")
+                // Check for empty or non-numeric just in case, though DTO usually has valid
+                // strings or "0"
+                long fNet = parseLongSafe(day.getForeignerNetBuyAmount());
+                long iNet = parseLongSafe(day.getInstitutionNetBuyAmount());
+
+                if (fNet > 0)
+                    foreignerBuyCount++;
+                if (iNet > 0)
+                    institutionBuyCount++;
+                foreignerNetSum += fNet;
+                institutionNetSum += iNet;
+            }
+
+            analysis.append(String.format("최근 %d거래일 중 외국인 %d일 순매수", limit, foreignerBuyCount));
+            if (foreignerBuyCount >= 4)
+                analysis.append("(강한 매수세), ");
+            else
+                analysis.append(", ");
+
+            analysis.append(String.format("기관 %d일 순매수", institutionBuyCount));
+            if (institutionBuyCount >= 4)
+                analysis.append("(강한 매수세). ");
+            else
+                analysis.append(". ");
+
+            if (foreignerNetSum > 0 && institutionNetSum > 0)
+                analysis.append("양매수 유입 중. ");
+            else if (foreignerNetSum < 0 && institutionNetSum < 0)
+                analysis.append("양매도 출회 중. ");
+
+        } catch (Exception e) {
+            log.warn("Failed to analyze investor trend details for {}: {}", stockCode, e.getMessage());
+            return "수급 분석 실패";
+        }
+        return analysis.toString();
+    }
+
+    private long parseLongSafe(String value) {
+        try {
+            if (value == null || value.trim().isEmpty())
+                return 0;
+            return Long.parseLong(value.trim());
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
+    private String analyzeFundamentals(StockFinancialRatio ratio, List<StockFinancialStatement> recentQuarters) {
+        if (ratio == null)
+            return "데이터 부족";
+
+        StringBuilder sb = new StringBuilder();
+
+        // 1. Profitability
+        if (ratio.getRoe() != null) {
+            sb.append(String.format("ROE: %.2f%% ", ratio.getRoe()));
+            if (ratio.getRoe().compareTo(new BigDecimal(15)) >= 0)
+                sb.append("(고수익성), ");
+            else if (ratio.getRoe().compareTo(new BigDecimal(5)) < 0)
+                sb.append("(저수익성), ");
+            else
+                sb.append(", ");
+        }
+
+        if (ratio.getSalesGrowth() != null) {
+            sb.append(String.format("매출증가율: %.2f%% ", ratio.getSalesGrowth()));
+            if (ratio.getSalesGrowth().compareTo(BigDecimal.ZERO) > 0)
+                sb.append("(외형성장), ");
+            else
+                sb.append("(역성장), ");
+        }
+
+        if (ratio.getOperatingProfitGrowth() != null) {
+            sb.append(String.format("영업이익증가율: %.2f%% ", ratio.getOperatingProfitGrowth()));
+            if (ratio.getOperatingProfitGrowth().compareTo(BigDecimal.ZERO) > 0)
+                sb.append("(성장), ");
+            else
+                sb.append("(역성장), ");
+        }
+
+        // 2. Stability
+        if (ratio.getDebtRatio() != null) {
+            sb.append(String.format("부채비율: %.2f%%", ratio.getDebtRatio()));
+            if (ratio.getDebtRatio().compareTo(new BigDecimal(200)) > 0)
+                sb.append("(재무 리스크 유의)");
+            else if (ratio.getDebtRatio().compareTo(new BigDecimal(50)) < 0)
+                sb.append("(매우 우량)");
+        }
+
+        return sb.toString();
+    }
+
+    private String calculateSectorAveragePer(String stockCode) {
+        try {
+            // 1. Get Stock & Industry
+            Stock stock = stockRepository.findByStockCode(stockCode).orElse(null);
+            if (stock == null || stock.getStockIndustries().isEmpty())
+                return "N/A";
+
+            // Use Primary SubIndustry
+            com.AISA.AISA.kisStock.Entity.stock.StockIndustry mainInd = stock.getStockIndustries().stream()
+                    .filter(com.AISA.AISA.kisStock.Entity.stock.StockIndustry::isPrimary)
+                    .findFirst()
+                    .orElse(stock.getStockIndustries().get(0));
+
+            String subCode = mainInd.getSubIndustry().getCode();
+
+            // 2. Find Peers in same SubIndustry (excluding self)
+            // Note: stockRepository.findBySubIndustryCodeAndStockCodeNot needs to be
+            // implemented or accessible
+            // If not directly available in Interface, we might need to rely on existing
+            // findBySubIndustry... and filter
+
+            // Checking Repository capabilities:
+            // We previously used:
+            // stockRepository.findBySubIndustryCodeAndStockCodeNot(subCode, stockCode)
+            // in CompetitorAnalysisService. So it should be valid if I saw it there.
+
+            List<Stock> peers = stockRepository.findBySubIndustryCodeAndStockCodeNot(subCode, stockCode);
+            if (peers.isEmpty())
+                return "N/A";
+
+            // 3. Calculate Average PER
+            double sumPer = 0;
+            int count = 0;
+
+            for (Stock peer : peers) {
+                StockFinancialRatio ratio = stockFinancialRatioRepository
+                        .findTop1ByStockCodeAndDivCodeOrderByStacYymmDesc(peer.getStockCode(), "0");
+
+                if (ratio != null && ratio.getPer() != null) {
+                    double p = ratio.getPer().doubleValue();
+                    if (p > 0 && p < 200) { // Filter outliers (negative or extremely high)
+                        sumPer += p;
+                        count++;
+                    }
+                }
+            }
+
+            if (count == 0)
+                return "N/A (유효 데이터 부족)";
+
+            return String.format("%.2f (동일 소분류 %d개사 평균)", sumPer / count, count);
+
+        } catch (Exception e) {
+            log.warn("Failed to calculate sector PER for {}: {}", stockCode, e.getMessage());
+            return "N/A (계산 오류)";
+        }
     }
 }

@@ -6,6 +6,7 @@ import com.AISA.AISA.kisStock.dto.FinancialRank.FinancialStatementDto;
 import com.AISA.AISA.kisStock.dto.FinancialRank.FinancialStatementDto;
 import com.AISA.AISA.kisStock.dto.FinancialRank.FinancialRatioRankDto;
 import com.AISA.AISA.kisStock.dto.FinancialRank.InvestmentMetricDto;
+import com.AISA.AISA.kisStock.dto.StockPrice.StockPriceDto;
 import com.AISA.AISA.kisStock.dto.StockSearchResponseDto;
 import com.AISA.AISA.kisStock.Entity.stock.Stock; // Import
 import com.AISA.AISA.kisStock.kisService.CompetitorAnalysisService;
@@ -202,11 +203,21 @@ public class KisInformationController {
                         @PathVariable String stockCode) {
                 List<Stock> competitors = competitorAnalysisService.findCompetitors(stockCode);
                 List<StockSearchResponseDto> response = competitors.stream()
-                                .map(s -> StockSearchResponseDto.builder()
-                                                .stockCode(s.getStockCode())
-                                                .stockName(s.getStockName())
-                                                .marketName(s.getMarketName())
-                                                .build())
+                                .map(s -> {
+                                        StockPriceDto priceDto = kisStockService
+                                                        .getStockPrice(s.getStockCode());
+                                        return StockSearchResponseDto.builder()
+                                                        .stockCode(s.getStockCode())
+                                                        .stockName(s.getStockName())
+                                                        .marketName(s.getMarketName())
+                                                        .marketCap(priceDto != null ? priceDto.getMarketCap() : null)
+                                                        .currentPrice(priceDto != null ? priceDto.getStockPrice()
+                                                                        : null)
+                                                        .priceChange(priceDto != null ? priceDto.getPriceChange()
+                                                                        : null)
+                                                        .changeRate(priceDto != null ? priceDto.getChangeRate() : null)
+                                                        .build();
+                                })
                                 .collect(Collectors.toList());
                 return ResponseEntity.ok(new SuccessResponse<>(true, "경쟁사 조회 성공 (산업/시가총액 기반)", response));
         }

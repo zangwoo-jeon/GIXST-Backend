@@ -7,6 +7,7 @@ import com.AISA.AISA.kisStock.dto.Index.IndexChartInfoDto;
 import com.AISA.AISA.kisStock.dto.Index.IndexChartPriceDto;
 import com.AISA.AISA.kisStock.dto.Index.IndexChartResponseDto;
 import com.AISA.AISA.kisStock.dto.Index.KisIndexChartApiResponse;
+import com.AISA.AISA.kisStock.enums.ExchangeRateCode;
 import com.AISA.AISA.kisStock.exception.KisApiErrorCode;
 import com.AISA.AISA.kisStock.kisService.Auth.KisAuthService;
 import com.AISA.AISA.kisStock.repository.IndexDailyDataRepository;
@@ -379,7 +380,38 @@ public class KisIndexService {
     // 기존 DTO 재활용: IndexChartPriceDto
     @Cacheable(value = "overseasIndex", key = "#index.name() + '-' + #startDate + '-' + #endDate")
     public List<IndexChartPriceDto> fetchOverseasIndex(OverseasIndex index, String startDate, String endDate) {
-        return fetchOverseasIndexData(index.getSymbol(), "N", index.getSymbol(), startDate, endDate);
+        // 1. Fetch Index Data
+        List<IndexChartPriceDto> indexList = fetchOverseasIndexData(index.getSymbol(), "N", index.getSymbol(),
+                startDate, endDate);
+
+        // 2. Determine Currency Code
+        String currencyCode = switch (index) {
+            case NASDAQ, SP500 -> ExchangeRateCode.USD.getSymbol();
+            case NIKKEI -> ExchangeRateCode.JPY.getSymbol();
+            case HANGSENG -> ExchangeRateCode.HKD_KRW.getSymbol();
+            case EUROSTOXX50 -> ExchangeRateCode.EUR_KRW.getSymbol();
+            default -> ExchangeRateCode.USD.getSymbol();
+        };
+
+        try {
+            // 3. Fetch Exchange Rate Data
+            List<MacroIndicatorDto> exchangeRateList = kisMacroService.fetchExchangeRate(currencyCode, startDate,
+                    endDate);
+            Map<String, String> exchangeRateMap = exchangeRateList.stream()
+                    .collect(Collectors.toMap(MacroIndicatorDto::getDate, MacroIndicatorDto::getValue, (v1, v2) -> v1));
+
+            // 4. Map Exchange Rate to Index Data
+            for (IndexChartPriceDto dto : indexList) {
+                if (exchangeRateMap.containsKey(dto.getDate())) {
+                    dto.setExchangeRate(exchangeRateMap.get(dto.getDate()));
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Failed to fetch exchange rate for overseas index {}: {}", index, e.getMessage());
+            // Fail silently for exchange rate, main data is still returned
+        }
+
+        return indexList;
     }
 
     public OverseasIndexStatusDto getOverseasIndexStatus(OverseasIndex index) {

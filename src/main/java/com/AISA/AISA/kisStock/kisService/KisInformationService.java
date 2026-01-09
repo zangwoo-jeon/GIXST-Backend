@@ -109,6 +109,10 @@ public class KisInformationService {
                             .build())
                     .collect(Collectors.toList());
 
+            if (entitiesToSave.isEmpty()) {
+                throw new Exception("Empty KIS response");
+            }
+
             try {
                 // Ignore duplicates using simple save logic.
                 stockBalanceSheetRepository.saveAll(entitiesToSave);
@@ -126,7 +130,7 @@ public class KisInformationService {
                     .collect(Collectors.toList());
 
         } catch (Exception e) {
-            log.error("Failed to fetch balance sheet for {}: {}", stockCode, e.getMessage(), e);
+            log.error("Failed to fetch balance sheet from KIS for {}: {}", stockCode, e.getMessage());
             throw new BusinessException(KisApiErrorCode.STOCK_PRICE_FETCH_FAILED);
         }
     }
@@ -416,8 +420,9 @@ public class KisInformationService {
                     .bodyToMono(KisIncomeStatementApiResponse.class)
                     .block();
 
-            if (response == null || !"0".equals(response.getRtCd()) || response.getOutput() == null) {
-                return new ArrayList<>();
+            if (response == null || !"0".equals(response.getRtCd()) || response.getOutput() == null
+                    || response.getOutput().isEmpty()) {
+                throw new Exception("Invalid KIS response or empty data");
             }
 
             // Fetch Current Price & Status
@@ -467,7 +472,7 @@ public class KisInformationService {
             return convertToFinancialStatementDto(entitiesToSave, divCode);
 
         } catch (Exception e) {
-            log.error("Failed to fetch income statement for {}: {}", stockCode, e.getMessage());
+            log.warn("Failed to fetch income statement from KIS for {}: {}", stockCode, e.getMessage());
             return new ArrayList<>();
         }
     }

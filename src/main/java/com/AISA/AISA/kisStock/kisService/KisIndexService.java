@@ -9,7 +9,6 @@ import com.AISA.AISA.kisStock.dto.Index.IndexChartResponseDto;
 import com.AISA.AISA.kisStock.dto.Index.KisIndexChartApiResponse;
 import com.AISA.AISA.kisStock.enums.ExchangeRateCode;
 import com.AISA.AISA.kisStock.exception.KisApiErrorCode;
-import com.AISA.AISA.kisStock.kisService.Auth.KisAuthService;
 import com.AISA.AISA.kisStock.repository.IndexDailyDataRepository;
 import com.AISA.AISA.kisStock.enums.OverseasIndex;
 import com.AISA.AISA.kisStock.repository.OverseasIndexDailyDataRepository;
@@ -43,11 +42,11 @@ import java.util.stream.Collectors;
 public class KisIndexService {
 
     private final WebClient webClient;
-    private final KisAuthService kisAuthService;
     private final KisApiProperties kisApiProperties;
     private final IndexDailyDataRepository indexDailyDataRepository;
     private final OverseasIndexDailyDataRepository overseasIndexDailyDataRepository;
     private final KisMacroService kisMacroService;
+    private final KisApiClient kisApiClient;
 
     @Transactional
     public void fetchAndSaveHistoricalData(String marketCode, String startDateStr) {
@@ -309,38 +308,28 @@ public class KisIndexService {
 
     // 실제 API 호출 메서드 (Private or Internal use)
     private IndexChartResponseDto fetchIndexChartFromApi(String marketCode, String date, String dateType) {
-        // 1. 토큰 처리 (Bearer가 이미 붙어있는지 확인 필요)
-        String accessToken = kisAuthService.getAccessToken();
-        String authorizationHeader = accessToken.startsWith("Bearer ") ? accessToken : "Bearer " + accessToken;
-
         String fidInputIscd = switch (marketCode.toUpperCase()) {
             case "KOSPI" -> "0001";
             case "KOSDAQ" -> "1001";
             default -> throw new BusinessException(KisApiErrorCode.INVALID_MARKET_CODE);
         };
 
-        KisIndexChartApiResponse apiResponse = webClient.get()
-                .uri(uriBuilder -> uriBuilder
-                        .path(kisApiProperties.getIndexChartUrl()) // url 확인:
-                        // /uapi/domestic-stock/v1/quotations/inquire-index-daily-price
-                        .queryParam("FID_PERIOD_DIV_CODE", dateType) // D : 일별, W : 주별, M : 월별
-                        .queryParam("FID_COND_MRKT_DIV_CODE", "U")
-                        .queryParam("FID_INPUT_ISCD", fidInputIscd) // KOSPI
-                        .queryParam("FID_INPUT_DATE_1", date)
-                        .build())
-                .header("authorization", authorizationHeader) // [수정] 명확한 변수명 사용 및 Bearer 접두사 한번만 붙도록 보장
-                .header("appkey", kisApiProperties.getAppkey())
-                .header("appsecret", kisApiProperties.getAppsecret())
-                .header("tr_id", "FHPUP02120000")
-                .header("custtype", "P") // [중요] 고객 타입 추가 (P: 개인)
-                .retrieve()
-                .bodyToMono(KisIndexChartApiResponse.class)
-                .onErrorMap(error -> {
-                    // 로깅을 통해 실제 API가 뱉는 에러 메시지를 확인하는 것이 좋습니다.
-                    log.error("KIS API Error for {}: {}", marketCode, error.getMessage());
-                    return new BusinessException(KisApiErrorCode.INDEX_FETCH_FAILED);
-                })
-                .block();
+        KisIndexChartApiResponse apiResponse = kisApiClient.fetch(token -> {
+            String authorizationHeader = token.startsWith("Bearer ") ? token : "Bearer " + token;
+            return webClient.get()
+                    .uri(uriBuilder -> uriBuilder
+                            .path(kisApiProperties.getIndexChartUrl())
+                            .queryParam("FID_PERIOD_DIV_CODE", dateType)
+                            .queryParam("FID_COND_MRKT_DIV_CODE", "U")
+                            .queryParam("FID_INPUT_ISCD", fidInputIscd)
+                            .queryParam("FID_INPUT_DATE_1", date)
+                            .build())
+                    .header("authorization", authorizationHeader)
+                    .header("appkey", kisApiProperties.getAppkey())
+                    .header("appsecret", kisApiProperties.getAppsecret())
+                    .header("tr_id", "FHPUP02120000")
+                    .header("custtype", "P");
+        }, KisIndexChartApiResponse.class);
 
         // 응답 검증 강화 (output1이 null이거나 비어있으면 실패로 간주)
         if (apiResponse == null || !"0".equals(apiResponse.getRtCd())) { // Check rtCd for success
@@ -370,7 +359,6 @@ public class KisIndexService {
                 .info(chartInfoDto)
                 .priceList(chartPriceList)
                 .build();
-
     }
 
     // 변경: 반환 타입을 List<DTO>로 변경하지 않고, 아래에서 IndexChartPriceDto 등을 반환하도록 수정 예정이나
@@ -534,9 +522,7 @@ public class KisIndexService {
 
     private List<KisOverseasDailyPriceDto> fetchOverseasFromApi(String marketDivCode, String symbol, String startDate,
             String endDate) {
-        String accessToken = kisAuthService.getAccessToken();
-
-        KisOverseasDailyPriceResponseDto response = webClient.get()
+        KisOverseasDailyPriceResponseDto response = kisApiClient.fetch(token -> webClient.get()
                 .uri(uriBuilder -> uriBuilder
                         .path(kisApiProperties.getOverseaUrl())
                         .queryParam("FID_COND_MRKT_DIV_CODE", marketDivCode)
@@ -545,14 +531,11 @@ public class KisIndexService {
                         .queryParam("FID_INPUT_DATE_2", endDate)
                         .queryParam("FID_PERIOD_DIV_CODE", "D")
                         .build())
-                .header("authorization", accessToken)
+                .header("authorization", token)
                 .header("appkey", kisApiProperties.getAppkey())
                 .header("appsecret", kisApiProperties.getAppsecret())
                 .header("tr_id", "FHKST03030100")
-                .header("custtype", "P")
-                .retrieve()
-                .bodyToMono(KisOverseasDailyPriceResponseDto.class)
-                .block();
+                .header("custtype", "P"), KisOverseasDailyPriceResponseDto.class);
 
         if (response == null || !"0".equals(response.getReturnCode())) {
             log.error("KIS API Error: RtCd={}, Msg={}",
@@ -565,15 +548,10 @@ public class KisIndexService {
     }
 
     private KisOverseasIndexBasicInfoDto fetchOverseasIndexBasicInfo(String symbol) {
-        String accessToken = kisAuthService.getAccessToken();
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
-        String today = LocalDate.now().format(formatter); // For basic info, date range doesn't matter much as long as
-                                                          // it's valid?
-                                                          // Doc says FID_INPUT_DATE_1 and 2 are required.
-                                                          // Let's use today for both. Output1 should give 'current'
-                                                          // info.
+        String today = LocalDate.now().format(formatter);
 
-        KisOverseasDailyPriceResponseDto response = webClient.get()
+        KisOverseasDailyPriceResponseDto response = kisApiClient.fetch(token -> webClient.get()
                 .uri(uriBuilder -> uriBuilder
                         .path(kisApiProperties.getOverseaUrl()) // Use the same URL as history fetch (FHKST03030100)
                         .queryParam("FID_COND_MRKT_DIV_CODE", "N")
@@ -582,14 +560,11 @@ public class KisIndexService {
                         .queryParam("FID_INPUT_DATE_2", today)
                         .queryParam("FID_PERIOD_DIV_CODE", "D")
                         .build())
-                .header("authorization", accessToken)
+                .header("authorization", token)
                 .header("appkey", kisApiProperties.getAppkey())
                 .header("appsecret", kisApiProperties.getAppsecret())
                 .header("tr_id", "FHKST03030100") // Use the correct TR ID
-                .header("custtype", "P")
-                .retrieve()
-                .bodyToMono(KisOverseasDailyPriceResponseDto.class)
-                .block();
+                .header("custtype", "P"), KisOverseasDailyPriceResponseDto.class);
 
         if (response == null || !"0".equals(response.getReturnCode())) {
             log.error("KIS API Error: RtCd={}, Msg={}",

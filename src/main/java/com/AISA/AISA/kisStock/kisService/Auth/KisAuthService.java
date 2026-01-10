@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.http.MediaType;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
+import jakarta.annotation.PostConstruct;
 
 import java.time.LocalDateTime;
 
@@ -55,6 +56,24 @@ public class KisAuthService {
 
             log.info("토큰이 없거나 만료되었습니다. 토큰을 발급합니다.");
             return refreshAccessToken();
+        }
+    }
+
+    public void invalidateToken() {
+        synchronized (this) {
+            log.info("KIS API 액세스 토큰을 무효화합니다.");
+            this.accessToken = null;
+            this.tokenExpiresAt = null;
+        }
+    }
+
+    @PostConstruct
+    public void init() {
+        try {
+            log.info("서버 시작 시 KIS API 액세스 토큰 초기화를 시도합니다...");
+            getAccessToken();
+        } catch (Exception e) {
+            log.error("초기 KIS API 토큰 발급 실패: {}", e.getMessage());
         }
     }
 

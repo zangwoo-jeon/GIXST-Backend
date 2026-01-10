@@ -15,7 +15,7 @@ import com.AISA.AISA.kisStock.dto.StockPrice.StockChartResponseDto;
 import com.AISA.AISA.kisStock.dto.StockPrice.StockPriceDto;
 import com.AISA.AISA.kisStock.dto.StockPrice.StockPriceResponse;
 import com.AISA.AISA.kisStock.exception.KisApiErrorCode;
-import com.AISA.AISA.kisStock.kisService.Auth.KisAuthService;
+
 import com.AISA.AISA.kisStock.dto.InvestorTrend.InvestorTrendDto;
 import com.AISA.AISA.kisStock.dto.InvestorTrend.StockInvestorDailyDto; // New DTO
 import com.AISA.AISA.kisStock.dto.InvestorTrend.KisInvestorDailyResponse; // New DTO
@@ -54,39 +54,36 @@ public class KisStockService {
 
         private final WebClient webClient;
         private final KisApiProperties kisApiProperties;
-        private final KisAuthService kisAuthService;
         private final StockRepository stockRepository;
         private final StockDailyDataRepository stockDailyDataRepository;
         private final StockMarketCapRepository stockMarketCapRepository; // Added repo
         private final StockInvestorDailyRepository stockInvestorDailyRepository; // New Repo field
         private final KisMacroService kisMacroService;
         private final ObjectMapper objectMapper;
+        private final KisApiClient kisApiClient;
 
         @Cacheable(value = "stockPrice", key = "#stockCode", sync = true)
         public StockPriceDto getStockPrice(String stockCode) {
-                String accessToken = kisAuthService.getAccessToken();
-
                 Stock stock = stockRepository.findByStockCode(stockCode)
                                 .orElseThrow(() -> new BusinessException(
                                                 KisApiErrorCode.STOCK_NOT_FOUND));
 
-                KisPriceApiResponse apiResponse = webClient.get()
-                                .uri(uriBuilder -> uriBuilder
-                                                .path(kisApiProperties.getPriceUrl())
-                                                .queryParam("fid_cond_mrkt_div_code", "J")
-                                                .queryParam("fid_input_iscd", stockCode)
-                                                .build())
-                                .header("Authorization", accessToken)
-                                .header("appKey", kisApiProperties.getAppkey())
-                                .header("appSecret", kisApiProperties.getAppsecret())
-                                .header("tr_id", "FHKST01010100")
-                                .retrieve()
-                                .bodyToMono(KisPriceApiResponse.class)
-                                .onErrorMap(error -> {
-                                        log.error("{}의 주식 가격을 불러오는 데 실패했습니다. 에러: {}", stockCode, error.getMessage());
-                                        return new BusinessException(KisApiErrorCode.STOCK_PRICE_FETCH_FAILED);
-                                })
-                                .block();
+                KisPriceApiResponse apiResponse;
+                try {
+                        apiResponse = kisApiClient.fetch(token -> webClient.get()
+                                        .uri(uriBuilder -> uriBuilder
+                                                        .path(kisApiProperties.getPriceUrl())
+                                                        .queryParam("fid_cond_mrkt_div_code", "J")
+                                                        .queryParam("fid_input_iscd", stockCode)
+                                                        .build())
+                                        .header("Authorization", token)
+                                        .header("appKey", kisApiProperties.getAppkey())
+                                        .header("appSecret", kisApiProperties.getAppsecret())
+                                        .header("tr_id", "FHKST01010100"), KisPriceApiResponse.class);
+                } catch (Exception e) {
+                        log.error("{}의 주식 가격을 불러오는 데 실패했습니다. 에러: {}", stockCode, e.getMessage());
+                        throw new BusinessException(KisApiErrorCode.STOCK_PRICE_FETCH_FAILED);
+                }
 
                 StockPriceResponse raw = apiResponse.getOutput();
 
@@ -337,11 +334,9 @@ public class KisStockService {
 
         private StockChartResponseDto fetchStockChartFromApi(String stockCode, String startDate, String endDate,
                         String dateType) {
-                String accessToken = kisAuthService.getAccessToken();
-
                 StockChartResponseDto apiResponse;
                 try {
-                        apiResponse = webClient.get()
+                        apiResponse = kisApiClient.fetch(token -> webClient.get()
                                         .uri(uriBuilder -> uriBuilder
                                                         .path(kisApiProperties.getStockChartUrl())
                                                         .queryParam("FID_COND_MRKT_DIV_CODE", "J")
@@ -351,14 +346,11 @@ public class KisStockService {
                                                         .queryParam("FID_PERIOD_DIV_CODE", dateType)
                                                         .queryParam("FID_ORG_ADJ_PRC", "0")
                                                         .build())
-                                        .header("authorization", accessToken)
+                                        .header("authorization", token)
                                         .header("appkey", kisApiProperties.getAppkey())
                                         .header("appsecret", kisApiProperties.getAppsecret())
                                         .header("tr_id", "FHKST03010100")
-                                        .header("custtype", "P")
-                                        .retrieve()
-                                        .bodyToMono(StockChartResponseDto.class)
-                                        .block();
+                                        .header("custtype", "P"), StockChartResponseDto.class);
                 } catch (Exception e) {
                         log.error("KIS API WebClient Error for {}: {}", stockCode, e.getMessage(), e);
                         throw new BusinessException(KisApiErrorCode.INDEX_FETCH_FAILED);
@@ -539,10 +531,8 @@ public class KisStockService {
         }
 
         public VolumeRankDto getVolumeRank() {
-                String accessToken = kisAuthService.getAccessToken();
-
                 try {
-                        KisVolumeRankApiResponse response = webClient.get()
+                        KisVolumeRankApiResponse response = kisApiClient.fetch(token -> webClient.get()
                                         .uri(uriBuilder -> uriBuilder
                                                         .path(kisApiProperties.getVolumeRankUrl())
                                                         .queryParam("FID_COND_MRKT_DIV_CODE", "J")
@@ -557,14 +547,11 @@ public class KisStockService {
                                                         .queryParam("FID_VOL_CNT", "")
                                                         .queryParam("FID_INPUT_DATE_1", "")
                                                         .build())
-                                        .header("authorization", accessToken)
+                                        .header("authorization", token)
                                         .header("appkey", kisApiProperties.getAppkey())
                                         .header("appsecret", kisApiProperties.getAppsecret())
                                         .header("tr_id", "FHPST01710000")
-                                        .header("custtype", "P")
-                                        .retrieve()
-                                        .bodyToMono(KisVolumeRankApiResponse.class)
-                                        .block();
+                                        .header("custtype", "P"), KisVolumeRankApiResponse.class);
 
                         if (response == null || response.getOutput() == null) {
                                 return VolumeRankDto.builder().ranks(new ArrayList<>()).build();
@@ -664,7 +651,7 @@ public class KisStockService {
                         try {
                                 // Call getStockPrice to refresh cache
                                 getStockPrice(smc.getStock().getStockCode());
-                                Thread.sleep(50); // Small delay to prevent API rate limit issues
+                                Thread.sleep(100); // Increase delay for API rate limit safety
                         } catch (Exception e) {
                                 log.warn("Failed to warm up price for {}: {}", smc.getStock().getStockCode(),
                                                 e.getMessage());
@@ -838,7 +825,6 @@ public class KisStockService {
 
         @Transactional
         public void fetchAndSaveInvestorTrend(String stockCode) {
-                String accessToken = kisAuthService.getAccessToken();
                 String url = kisApiProperties.getInvestorTrendDailyUrl();
 
                 if (url == null || url.isEmpty()) {
@@ -851,7 +837,7 @@ public class KisStockService {
 
                 try {
                         // API Call
-                        KisInvestorDailyResponse response = webClient.get()
+                        KisInvestorDailyResponse response = kisApiClient.fetch(token -> webClient.get()
                                         .uri(uriBuilder -> uriBuilder
                                                         .path(url)
                                                         .queryParam("FID_COND_MRKT_DIV_CODE", "J")
@@ -862,14 +848,11 @@ public class KisStockService {
                                                         .queryParam("FID_ETC_CLS_CODE", "0")
                                                         .build())
                                         .header("content-type", "application/json; charset=utf-8")
-                                        .header("authorization", accessToken)
+                                        .header("authorization", token)
                                         .header("appkey", kisApiProperties.getAppkey())
                                         .header("appsecret", kisApiProperties.getAppsecret())
                                         .header("tr_id", "FHPTJ04160001")
-                                        .header("custtype", "P")
-                                        .retrieve()
-                                        .bodyToMono(KisInvestorDailyResponse.class)
-                                        .block();
+                                        .header("custtype", "P"), KisInvestorDailyResponse.class);
 
                         if (response == null || response.getOutput() == null) {
                                 log.warn("No daily investor data received for {}", stockCode);
@@ -952,7 +935,7 @@ public class KisStockService {
                 for (Stock stock : stocks) {
                         try {
                                 fetchAndSaveInvestorTrend(stock.getStockCode());
-                                Thread.sleep(50); // Rate limit (20 req/sec safe limit is ~50ms)
+                                Thread.sleep(100); // Rate limit (10 req/sec safe limit is ~100ms)
                         } catch (Exception e) {
                                 log.error("Failed to update investor trend for {}: {}", stock.getStockCode(),
                                                 e.getMessage());

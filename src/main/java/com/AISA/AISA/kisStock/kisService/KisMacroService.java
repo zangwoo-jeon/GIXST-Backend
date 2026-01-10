@@ -10,7 +10,6 @@ import com.AISA.AISA.kisStock.enums.BondYield;
 import com.AISA.AISA.kisStock.enums.ExchangeRateCode;
 
 import com.AISA.AISA.kisStock.exception.KisApiErrorCode;
-import com.AISA.AISA.kisStock.kisService.Auth.KisAuthService;
 import com.AISA.AISA.portfolio.macro.Entity.MacroDailyData;
 import com.AISA.AISA.portfolio.macro.repository.MacroDailyDataRepository;
 import com.AISA.AISA.portfolio.macro.dto.MacroIndicatorDto;
@@ -38,9 +37,9 @@ import java.util.stream.Collectors;
 public class KisMacroService {
 
     private final WebClient webClient;
-    private final KisAuthService kisAuthService;
     private final KisApiProperties kisApiProperties;
     private final EcosApiProperties ecosApiProperties; // Added
+    private final KisApiClient kisApiClient;
 
     private final MacroDailyDataRepository macroDailyDataRepository;
 
@@ -374,9 +373,7 @@ public class KisMacroService {
 
     private List<KisOverseasDailyPriceDto> fetchFromApi(String marketDivCode, String symbol, String startDate,
             String endDate) {
-        String accessToken = kisAuthService.getAccessToken();
-
-        KisOverseasDailyPriceResponseDto response = webClient.get()
+        KisOverseasDailyPriceResponseDto response = kisApiClient.fetch(token -> webClient.get()
                 .uri(uriBuilder -> uriBuilder
                         .path(kisApiProperties.getOverseaUrl())
                         .queryParam("FID_COND_MRKT_DIV_CODE", marketDivCode)
@@ -385,14 +382,11 @@ public class KisMacroService {
                         .queryParam("FID_INPUT_DATE_2", endDate)
                         .queryParam("FID_PERIOD_DIV_CODE", "D")
                         .build())
-                .header("authorization", accessToken)
+                .header("authorization", token)
                 .header("appkey", kisApiProperties.getAppkey())
                 .header("appsecret", kisApiProperties.getAppsecret())
                 .header("tr_id", "FHKST03030100")
-                .header("custtype", "P")
-                .retrieve()
-                .bodyToMono(KisOverseasDailyPriceResponseDto.class)
-                .block();
+                .header("custtype", "P"), KisOverseasDailyPriceResponseDto.class);
 
         if (response == null || !"0".equals(response.getReturnCode())) {
             log.error("KIS API Error: RtCd={}, Msg={}",
@@ -405,11 +399,10 @@ public class KisMacroService {
     }
 
     private KisOverseasIndexBasicInfoDto fetchExchangeRateBasicInfo(String symbol) {
-        String accessToken = kisAuthService.getAccessToken();
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
         String today = LocalDate.now().format(formatter);
 
-        KisOverseasDailyPriceResponseDto response = webClient.get()
+        KisOverseasDailyPriceResponseDto response = kisApiClient.fetch(token -> webClient.get()
                 .uri(uriBuilder -> uriBuilder
                         .path(kisApiProperties.getOverseaUrl())
                         .queryParam("FID_COND_MRKT_DIV_CODE", "X")
@@ -418,14 +411,11 @@ public class KisMacroService {
                         .queryParam("FID_INPUT_DATE_2", today)
                         .queryParam("FID_PERIOD_DIV_CODE", "D")
                         .build())
-                .header("authorization", accessToken)
+                .header("authorization", token)
                 .header("appkey", kisApiProperties.getAppkey())
                 .header("appsecret", kisApiProperties.getAppsecret())
                 .header("tr_id", "FHKST03030100")
-                .header("custtype", "P")
-                .retrieve()
-                .bodyToMono(KisOverseasDailyPriceResponseDto.class)
-                .block();
+                .header("custtype", "P"), KisOverseasDailyPriceResponseDto.class);
 
         if (response == null || !"0".equals(response.getReturnCode())) {
             log.error("KIS API Error: RtCd={}, Msg={}",

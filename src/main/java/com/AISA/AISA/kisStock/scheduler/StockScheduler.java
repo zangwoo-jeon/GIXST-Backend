@@ -244,8 +244,8 @@ public class StockScheduler {
         log.info("Completed scheduled weekly ECOS data update.");
     }
 
-    // Run at 00:00 every day (Daily Token Refresh)
-    @Scheduled(cron = "0 0 0 * * *")
+    // Run at 08:40 every day (Refresh token before market open)
+    @Scheduled(cron = "0 40 8 * * *")
     public void refreshKisAccessToken() {
         log.info("Starting scheduled KIS Access Token refresh...");
         try {

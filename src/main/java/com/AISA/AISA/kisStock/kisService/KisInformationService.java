@@ -238,8 +238,13 @@ public class KisInformationService {
     public List<StockFinancialRatio> fetchAndSaveFinancialRatio(String stockCode, String divCode) {
         String accessToken = kisAuthService.getAccessToken();
 
+        // 1. Fetch Current Price & Status FIRST (Needed for both API calculation and
+        // fallback)
+        StockPriceInfo priceInfo = fetchCurrentPrice(stockCode, accessToken);
+        BigDecimal currentPrice = priceInfo.price;
+
         try {
-            // 1. Fetch Financial Ratio (EPS, BPS, SPS, etc.)
+            // 2. Fetch Financial Ratio (EPS, BPS, SPS, etc.)
             KisFinancialRatioApiResponse response = webClient.get()
                     .uri(uriBuilder -> uriBuilder
                             .path(kisApiProperties.getFinancialRatioUrl())
@@ -257,16 +262,21 @@ public class KisInformationService {
                     .block();
 
             if (response == null || !"0".equals(response.getRtCd()) || response.getOutput() == null) {
-                log.error("Financial Ratio API Error for {}. RtCd: {}, Msg: {}",
+                log.warn("Financial Ratio API Error for {}. RtCd: {}, Msg: {}. Attempting local calculation.",
                         stockCode,
                         response != null ? response.getRtCd() : "null",
                         response != null ? response.getMsg1() : "null response");
-                return new ArrayList<>();
+                return calculateRatiosLocally(stockCode, divCode, priceInfo);
             }
 
-            // 2. Fetch Current Price & Status
-            StockPriceInfo priceInfo = fetchCurrentPrice(stockCode, accessToken);
-            BigDecimal currentPrice = priceInfo.price;
+            // 3. Check if API returned mostly zeros (common for REITs)
+            boolean isAllZeros = response.getOutput().stream().allMatch(
+                    item -> "0".equals(parseRateSafe(item.getEps())) && "0".equals(parseRateSafe(item.getRoeVal())));
+
+            if (isAllZeros) {
+                log.info("Financial Ratio API returned zeros for {}. Attempting local calculation.", stockCode);
+                return calculateRatiosLocally(stockCode, divCode, priceInfo);
+            }
 
             List<StockFinancialRatio> entitiesToSave = new ArrayList<>();
 
@@ -325,8 +335,118 @@ public class KisInformationService {
 
         } catch (Exception e) {
             log.error("Failed to fetch financial ratio for {}: {}", stockCode, e.getMessage());
+            // Attempt fallback on exception
+            return calculateRatiosLocally(stockCode, divCode, priceInfo);
+        }
+    }
+
+    private List<StockFinancialRatio> calculateRatiosLocally(String stockCode, String divCode,
+            StockPriceInfo priceInfo) {
+        if (priceInfo.listedShares <= 0) {
+            log.warn("Cannot calculate ratios locally for {}: No listed shares entries found.", stockCode);
             return new ArrayList<>();
         }
+
+        // Fetch Local Financial Data
+        List<StockFinancialStatement> statements = stockFinancialStatementRepository
+                .findByStockCodeAndDivCodeOrderByStacYymmAsc(stockCode, divCode);
+        if (statements.isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        // Fetch Balance Sheets (for BPS, Debt Ratio, ROE)
+        List<StockBalanceSheet> balanceSheets = stockBalanceSheetRepository
+                .findByStockCodeAndDivCodeOrderByStacYymmDesc(stockCode, divCode);
+
+        List<StockFinancialRatio> results = new ArrayList<>();
+        BigDecimal shares = new BigDecimal(priceInfo.listedShares);
+
+        for (StockFinancialStatement stmt : statements) {
+            String yymm = stmt.getStacYymm();
+            StockBalanceSheet sheet = balanceSheets.stream()
+                    .filter(bs -> bs.getStacYymm().equals(yymm))
+                    .findFirst().orElse(null);
+
+            BigDecimal unitMultiplier = new BigDecimal("100000000"); // 1억 단위 보정
+
+            // Basic Metrics from Income Statement
+            BigDecimal netIncome = stmt.getNetIncome();
+            BigDecimal sales = stmt.getSaleAccount();
+
+            // KIS 재무데이터는 보통 '억 원' 단위이므로 보정 필요
+            BigDecimal eps = netIncome.multiply(unitMultiplier).divide(shares, 0, RoundingMode.HALF_UP);
+            BigDecimal sps = sales.multiply(unitMultiplier).divide(shares, 0, RoundingMode.HALF_UP);
+
+            BigDecimal totalCapital = BigDecimal.ZERO;
+            BigDecimal totalLiabilities = BigDecimal.ZERO;
+            if (sheet != null) {
+                totalCapital = sheet.getTotalCapital() != null ? sheet.getTotalCapital() : BigDecimal.ZERO;
+                totalLiabilities = sheet.getTotalLiabilities() != null ? sheet.getTotalLiabilities() : BigDecimal.ZERO;
+            }
+
+            BigDecimal bps = (totalCapital.compareTo(BigDecimal.ZERO) != 0)
+                    ? totalCapital.multiply(unitMultiplier).divide(shares, 0, RoundingMode.HALF_UP)
+                    : BigDecimal.ZERO;
+
+            BigDecimal roe = BigDecimal.ZERO;
+            if (totalCapital.compareTo(BigDecimal.ZERO) != 0) {
+                // ROE는 비율이므로 단위 보정 불필요 (분자/분모 동일 단위)
+                roe = netIncome.divide(totalCapital, 4, RoundingMode.HALF_UP)
+                        .multiply(new BigDecimal(100)).setScale(2, RoundingMode.HALF_UP);
+            }
+
+            BigDecimal debtRatio = BigDecimal.ZERO;
+            if (totalCapital.compareTo(BigDecimal.ZERO) != 0 && totalLiabilities.compareTo(BigDecimal.ZERO) != 0) {
+                debtRatio = totalLiabilities.divide(totalCapital, 4, RoundingMode.HALF_UP)
+                        .multiply(new BigDecimal(100)).setScale(2, RoundingMode.HALF_UP);
+            }
+
+            // Valuations
+            BigDecimal per = BigDecimal.ZERO;
+            BigDecimal pbr = BigDecimal.ZERO;
+            BigDecimal psr = BigDecimal.ZERO;
+            BigDecimal price = priceInfo.price;
+
+            if (price.compareTo(BigDecimal.ZERO) > 0) {
+                if (eps.compareTo(BigDecimal.ZERO) != 0) {
+                    per = price.divide(eps, 2, RoundingMode.HALF_UP);
+                }
+                if (bps.compareTo(BigDecimal.ZERO) != 0) {
+                    pbr = price.divide(bps, 2, RoundingMode.HALF_UP);
+                }
+                if (sps.compareTo(BigDecimal.ZERO) != 0) {
+                    psr = price.divide(sps, 2, RoundingMode.HALF_UP);
+                }
+            }
+
+            // Build Entity
+            StockFinancialRatio existing = stockFinancialRatioRepository
+                    .findByStockCodeAndStacYymmAndDivCode(stockCode, yymm, divCode)
+                    .orElse(null);
+
+            StockFinancialRatio ratio = (existing != null ? existing.toBuilder() : StockFinancialRatio.builder())
+                    .stockCode(stockCode)
+                    .stacYymm(yymm)
+                    .divCode(divCode)
+                    .isSuspended(priceInfo.isSuspended)
+                    .eps(eps)
+                    .bps(bps)
+                    .roe(roe)
+                    .per(per)
+                    .pbr(pbr)
+                    .psr(psr)
+                    .debtRatio(debtRatio)
+                    .build();
+
+            results.add(ratio);
+        }
+
+        if (!results.isEmpty()) {
+            stockFinancialRatioRepository.saveAll(results);
+            log.info("Calculated and saved {} financial ratios locally for {}", results.size(), stockCode);
+        }
+
+        return results;
     }
 
     private StockPriceInfo fetchCurrentPrice(String stockCode, String accessToken) {
@@ -361,21 +481,29 @@ public class KisInformationService {
                 // Check for Suspension (58: 거래정지)
                 boolean isSuspended = "58".equals(statusCode);
 
-                return new StockPriceInfo(price, isSuspended);
+                String sharesStr = output.path("lstn_stcn").asText(); // Listed Shares
+                long listedShares = 0;
+                if (sharesStr != null && !sharesStr.isEmpty()) {
+                    listedShares = parseLongSafe(sharesStr);
+                }
+
+                return new StockPriceInfo(price, isSuspended, listedShares);
             }
         } catch (Exception e) {
             log.warn("Failed to fetch price for {}: {}", stockCode, e.getMessage());
         }
-        return new StockPriceInfo(BigDecimal.ZERO, false);
+        return new StockPriceInfo(BigDecimal.ZERO, false, 0);
     }
 
     private static class StockPriceInfo {
         BigDecimal price;
         boolean isSuspended;
+        long listedShares;
 
-        StockPriceInfo(BigDecimal price, boolean isSuspended) {
+        StockPriceInfo(BigDecimal price, boolean isSuspended, long listedShares) {
             this.price = price;
             this.isSuspended = isSuspended;
+            this.listedShares = listedShares;
         }
     }
 

@@ -36,6 +36,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.stream.Collectors;
+import java.util.Comparator;
 
 @Slf4j
 @Service
@@ -168,51 +169,87 @@ public class KisInformationService {
 
     @Cacheable(value = "financialRank", key = "#sort + '-' + #divCode", sync = true)
     public FinancialRatioRankDto getFinancialRatioRank(String sort, String divCode) {
-        // 1. Find latest available date
-        StockFinancialRatio latest = stockFinancialRatioRepository.findTop1ByDivCodeOrderByStacYymmDesc(divCode);
-        if (latest == null) {
-            return FinancialRatioRankDto.builder().ranks(new ArrayList<>()).build();
-        }
-        String stacYymm = latest.getStacYymm();
+        String finalDivCode = (divCode == null || divCode.isEmpty()) ? "0" : divCode;
 
-        // 2. Fetch Ranking
-        List<StockFinancialRatio> ratios;
-        if ("roe".equalsIgnoreCase(sort)) {
-            ratios = stockFinancialRatioRepository.findAllByDivCodeAndStacYymmAndIsSuspendedFalseOrderByRoeDesc(divCode,
-                    stacYymm);
-        } else if ("eps".equalsIgnoreCase(sort)) {
-            ratios = stockFinancialRatioRepository.findAllByDivCodeAndStacYymmAndIsSuspendedFalseOrderByEpsDesc(divCode,
-                    stacYymm);
+        // 1. Fetch ALL Ratios for divCode
+        List<StockFinancialRatio> allRatios = stockFinancialRatioRepository.findAllByDivCode(finalDivCode);
+
+        // 2. Group by StockCode & Find Latest for Each
+        Map<String, List<StockFinancialRatio>> groupedByStock = allRatios.stream()
+                .collect(Collectors.groupingBy(StockFinancialRatio::getStockCode));
+
+        List<StockFinancialRatio> latestRatios = new ArrayList<>();
+        for (List<StockFinancialRatio> ratios : groupedByStock.values()) {
+            // Sort by Date Descending
+            ratios.sort((o1, o2) -> o2.getStacYymm().compareTo(o1.getStacYymm()));
+
+            // Find first record with valid PBR (or PER/ROE) > 0 to avoid empty future data
+            // If all are empty, fall back to the absolute latest
+            StockFinancialRatio validRatio = ratios.stream()
+                    .filter(r -> r.getPbr() != null && r.getPbr().compareTo(BigDecimal.ZERO) > 0)
+                    .findFirst()
+                    .orElse(ratios.get(0)); // Fallback to latest
+
+            latestRatios.add(validRatio);
+        }
+
+        // 3. Sort Logic
+        Comparator<StockFinancialRatio> comparator;
+        boolean isAsc = false;
+
+        if ("eps".equalsIgnoreCase(sort)) {
+            comparator = Comparator.comparing(StockFinancialRatio::getEps);
+        } else if ("roe".equalsIgnoreCase(sort)) {
+            comparator = Comparator.comparing(StockFinancialRatio::getRoe);
         } else if ("debt".equalsIgnoreCase(sort) || "debtratio".equalsIgnoreCase(sort)) {
-            ratios = stockFinancialRatioRepository
-                    .findAllByDivCodeAndStacYymmAndIsSuspendedFalseOrderByDebtRatioAsc(divCode, stacYymm);
+            comparator = Comparator.comparing(StockFinancialRatio::getDebtRatio);
+            isAsc = true;
         } else if ("per".equalsIgnoreCase(sort)) {
-            ratios = stockFinancialRatioRepository
-                    .findAllByDivCodeAndStacYymmAndIsSuspendedFalseAndPerGreaterThanOrderByPerAsc(divCode,
-                            stacYymm, java.math.BigDecimal.ZERO);
+            comparator = Comparator.comparing(StockFinancialRatio::getPer);
+            isAsc = true;
         } else if ("pbr".equalsIgnoreCase(sort)) {
-            ratios = stockFinancialRatioRepository
-                    .findAllByDivCodeAndStacYymmAndIsSuspendedFalseAndPbrGreaterThanOrderByPbrAsc(divCode,
-                            stacYymm, java.math.BigDecimal.ZERO);
+            comparator = Comparator.comparing(StockFinancialRatio::getPbr);
+            isAsc = true;
         } else if ("psr".equalsIgnoreCase(sort)) {
-            ratios = stockFinancialRatioRepository
-                    .findAllByDivCodeAndStacYymmAndIsSuspendedFalseAndPsrGreaterThanOrderByPsrAsc(divCode,
-                            stacYymm, java.math.BigDecimal.ZERO);
+            comparator = Comparator.comparing(StockFinancialRatio::getPsr);
+            isAsc = true;
         } else {
-            // Default ROE
-            ratios = stockFinancialRatioRepository.findAllByDivCodeAndStacYymmAndIsSuspendedFalseOrderByRoeDesc(divCode,
-                    stacYymm);
+            comparator = Comparator.comparing(StockFinancialRatio::getRoe);
         }
 
-        // 3. Map Stock Names (Optimize N+1)
+        // 4. Filter & Apply Sort
+        List<StockFinancialRatio> filteredRanks = latestRatios.stream()
+                .filter(r -> {
+                    // Filter Out Suspended Stocks
+                    if (Boolean.TRUE.equals(r.getIsSuspended())) {
+                        return false;
+                    }
+
+                    // Filter out zeros/nulls for valuation ratios if sorting ASC (low PBR != 0 PBR)
+                    if ("per".equalsIgnoreCase(sort) || "pbr".equalsIgnoreCase(sort) || "psr".equalsIgnoreCase(sort)) {
+                        BigDecimal val = "per".equalsIgnoreCase(sort) ? r.getPer()
+                                : "pbr".equalsIgnoreCase(sort) ? r.getPbr() : r.getPsr();
+                        return val != null && val.compareTo(BigDecimal.ZERO) > 0;
+                    }
+                    return true;
+                })
+                .collect(Collectors.toList());
+
+        if (isAsc) {
+            filteredRanks.sort(comparator);
+        } else {
+            filteredRanks.sort(comparator.reversed());
+        }
+
+        // 5. Map to DTO (Top 20)
         Map<String, String> stockMap = stockRepository.findAll().stream()
                 .collect(Collectors.toMap(Stock::getStockCode, Stock::getStockName));
 
-        // 4. Map to DTO (Top 20)
-        List<FinancialRatioRankDto.FinancialRatioEntry> entries = ratios.stream()
+        List<FinancialRatioRankDto.FinancialRatioEntry> entries = filteredRanks.stream()
                 .limit(20)
                 .map(ratio -> FinancialRatioRankDto.FinancialRatioEntry.builder()
-                        .rank(String.valueOf(ratios.indexOf(ratio) + 1))
+                        // Use updated list index for rank
+                        .rank(String.valueOf(filteredRanks.indexOf(ratio) + 1))
                         .stockCode(ratio.getStockCode())
                         .stockName(stockMap.getOrDefault(ratio.getStockCode(), "Unknown"))
                         .stacYymm(ratio.getStacYymm())
@@ -231,6 +268,12 @@ public class KisInformationService {
                         .psr(ratio.getPsr() != null ? ratio.getPsr().toString() : "0")
                         .build())
                 .collect(Collectors.toList());
+
+        // Re-assign strict ordinal ranks in case of gaps (though limits above handles
+        // it effectively)
+        for (int i = 0; i < entries.size(); i++) {
+            entries.get(i).setRank(String.valueOf(i + 1));
+        }
 
         return FinancialRatioRankDto.builder().ranks(entries).build();
     }
@@ -659,55 +702,138 @@ public class KisInformationService {
     }
 
     public FinancialRankDto getFinancialRank(String sort) {
-        // Default DivCode for Ranking is "0" (Yearly) unless specified otherwise.
+        // 1. Fetch ALL Annual Data (divCode="0") to process in-memory
         String divCode = "0";
+        List<StockFinancialStatement> allStatements = stockFinancialStatementRepository.findAllByDivCode(divCode);
 
-        // 1. Find latest available date
-        StockFinancialStatement latest = stockFinancialStatementRepository.findTop1ByDivCodeOrderByStacYymmDesc(divCode)
-                .orElse(null);
-
-        if (latest == null) {
-            return FinancialRankDto.builder().ranks(new ArrayList<>()).build();
-        }
-        String stacYymm = latest.getStacYymm();
-
-        List<StockFinancialStatement> ranks;
-        if ("operating".equalsIgnoreCase(sort)) {
-            ranks = stockFinancialStatementRepository
-                    .findTop20ByStacYymmAndDivCodeAndIsSuspendedFalseOrderByOperatingProfitDesc(stacYymm,
-                            divCode, Pageable.ofSize(20));
-        } else if ("netincome".equalsIgnoreCase(sort)) {
-            ranks = stockFinancialStatementRepository
-                    .findTop20ByStacYymmAndDivCodeAndIsSuspendedFalseOrderByNetIncomeDesc(stacYymm,
-                            divCode, Pageable.ofSize(20));
-        } else if ("margin".equalsIgnoreCase(sort) || "operatingmargin".equalsIgnoreCase(sort)) {
-            ranks = stockFinancialStatementRepository.findTop20ByOperatingMarginDesc(stacYymm, divCode,
-                    Pageable.ofSize(20));
-        } else {
-            ranks = stockFinancialStatementRepository
-                    .findTop20ByStacYymmAndDivCodeAndIsSuspendedFalseOrderBySaleAccountDesc(stacYymm,
-                            divCode, Pageable.ofSize(20));
-        }
+        // 2. Group by StockCode
+        Map<String, List<StockFinancialStatement>> groupedByStock = allStatements.stream()
+                .collect(Collectors.groupingBy(StockFinancialStatement::getStockCode));
 
         Map<String, String> stockMap = stockRepository.findAll().stream()
                 .collect(Collectors.toMap(Stock::getStockCode, Stock::getStockName));
 
-        List<FinancialRankDto.FinancialRankEntry> entries = ranks.stream()
-                .map(rank -> FinancialRankDto.FinancialRankEntry.builder()
-                        .rank(String.valueOf(ranks.indexOf(rank) + 1))
-                        .stockCode(rank.getStockCode())
-                        .stockName(stockMap.getOrDefault(rank.getStockCode(), "Unknown"))
-                        .saleTotalProfit(rank.getSaleAccount() != null ? rank.getSaleAccount().toString() : "0")
-                        .operatingProfit(rank.getOperatingProfit() != null ? rank.getOperatingProfit().toString() : "0")
-                        .netIncome(rank.getNetIncome() != null ? rank.getNetIncome().toString() : "0")
-                        .totalAssets("0")
-                        .totalLiabilities("0")
-                        .totalCapital("0")
-                        .operatingRate(calculateOperatingRate(rank.getOperatingProfit(), rank.getSaleAccount()))
-                        .build())
+        List<FinancialRankDto.FinancialRankEntry> calculatedRanks = new ArrayList<>();
+
+        for (Map.Entry<String, List<StockFinancialStatement>> entry : groupedByStock.entrySet()) {
+            String stockCode = entry.getKey();
+            List<StockFinancialStatement> stmts = entry.getValue();
+
+            // Sort DESC by Date
+            stmts.sort((o1, o2) -> o2.getStacYymm().compareTo(o1.getStacYymm()));
+
+            if (stmts.isEmpty())
+                continue;
+
+            StockFinancialStatement latest = stmts.get(0);
+            BigDecimal totalSales = latest.getSaleAccount();
+            BigDecimal totalOperatingProfit = latest.getOperatingProfit();
+            BigDecimal totalNetIncome = latest.getNetIncome();
+            String stacYymm = latest.getStacYymm(); // Representative Date
+
+            // 3. Dynamic TTM Logic
+            // If we have previous data, check interval to decide aggregation
+            if (stmts.size() >= 2) {
+                StockFinancialStatement prev = stmts.get(1);
+                long monthsDiff = getMonthsDifference(prev.getStacYymm(), latest.getStacYymm());
+
+                if (monthsDiff <= 3) {
+                    // Quarterly (3 months): Sum Top 4 (Latest + 3 Prev)
+                    // Ensure we don't go out of bounds
+                    int count = Math.min(stmts.size(), 4);
+                    // Re-calculate sum from scratch
+                    totalSales = BigDecimal.ZERO;
+                    totalOperatingProfit = BigDecimal.ZERO;
+                    totalNetIncome = BigDecimal.ZERO;
+
+                    for (int i = 0; i < count; i++) {
+                        totalSales = totalSales
+                                .add(stmts.get(i).getSaleAccount() != null ? stmts.get(i).getSaleAccount()
+                                        : BigDecimal.ZERO);
+                        totalOperatingProfit = totalOperatingProfit
+                                .add(stmts.get(i).getOperatingProfit() != null ? stmts.get(i).getOperatingProfit()
+                                        : BigDecimal.ZERO);
+                        totalNetIncome = totalNetIncome.add(
+                                stmts.get(i).getNetIncome() != null ? stmts.get(i).getNetIncome() : BigDecimal.ZERO);
+                    }
+                    if (count < 4) {
+                        // Simple extrapolation if less than 4 (e.g. * 4/count) - Optional, here just
+                        // sum available
+                        // For conservatism, we keep sum.
+                    }
+
+                } else if (monthsDiff <= 6) {
+                    // Semi-Annual (6 months): Sum Top 2 (Latest + Prev)
+                    totalSales = totalSales
+                            .add(prev.getSaleAccount() != null ? prev.getSaleAccount() : BigDecimal.ZERO);
+                    totalOperatingProfit = totalOperatingProfit
+                            .add(prev.getOperatingProfit() != null ? prev.getOperatingProfit() : BigDecimal.ZERO);
+                    totalNetIncome = totalNetIncome
+                            .add(prev.getNetIncome() != null ? prev.getNetIncome() : BigDecimal.ZERO);
+                }
+                // Else (Approx 12 months): Use Latest only (Already set)
+            }
+
+            // Allow initial values to be null-safe too just in case
+            if (totalSales == null)
+                totalSales = BigDecimal.ZERO;
+            if (totalOperatingProfit == null)
+                totalOperatingProfit = BigDecimal.ZERO;
+            if (totalNetIncome == null)
+                totalNetIncome = BigDecimal.ZERO;
+
+            // Create Entry
+            calculatedRanks.add(FinancialRankDto.FinancialRankEntry.builder()
+                    .stockCode(stockCode)
+                    .stockName(stockMap.getOrDefault(stockCode, "Unknown"))
+                    .saleTotalProfit(totalSales.toString())
+                    .operatingProfit(totalOperatingProfit.toString())
+                    .netIncome(totalNetIncome.toString())
+                    .stacYymm(stacYymm) // Display latest date
+                    .totalAssets("0")
+                    .totalLiabilities("0")
+                    .totalCapital("0")
+                    .operatingRate(calculateOperatingRate(totalOperatingProfit, totalSales))
+                    .build());
+        }
+
+        // 4. Sort and Limit
+        Comparator<FinancialRankDto.FinancialRankEntry> comparator;
+        if ("operating".equalsIgnoreCase(sort)) {
+            comparator = Comparator.comparing(e -> new BigDecimal(e.getOperatingProfit()));
+        } else if ("netincome".equalsIgnoreCase(sort)) {
+            comparator = Comparator.comparing(e -> new BigDecimal(e.getNetIncome()));
+        } else if ("margin".equalsIgnoreCase(sort) || "operatingmargin".equalsIgnoreCase(sort)) {
+            comparator = Comparator.comparing(e -> new BigDecimal(e.getOperatingRate()));
+        } else {
+            // Default: Sales
+            comparator = Comparator.comparing(e -> new BigDecimal(e.getSaleTotalProfit()));
+        }
+
+        List<FinancialRankDto.FinancialRankEntry> top20 = calculatedRanks.stream()
+                .sorted(comparator.reversed())
+                .limit(20)
+                .peek(entry -> entry.setRank(String.valueOf(calculatedRanks.indexOf(entry) + 1))) // Just ordinal
                 .collect(Collectors.toList());
 
-        return FinancialRankDto.builder().ranks(entries).build();
+        // Re-assign rank numbers strictly 1..20
+        for (int i = 0; i < top20.size(); i++) {
+            top20.get(i).setRank(String.valueOf(i + 1));
+        }
+
+        return FinancialRankDto.builder().ranks(top20).build();
+    }
+
+    private long getMonthsDifference(String yyyyMM_prev, String yyyyMM_curr) {
+        try {
+            int y1 = Integer.parseInt(yyyyMM_prev.substring(0, 4));
+            int m1 = Integer.parseInt(yyyyMM_prev.substring(4, 6));
+            int y2 = Integer.parseInt(yyyyMM_curr.substring(0, 4));
+            int m2 = Integer.parseInt(yyyyMM_curr.substring(4, 6));
+            return (y2 - y1) * 12 + (m2 - m1);
+        } catch (Exception e) {
+            return 12; // Default to annual if parse fails
+        }
     }
 
     // Removed @Transactional to prevent rollback loop
@@ -775,7 +901,7 @@ public class KisInformationService {
         }
     }
 
-    @Cacheable(value = "stockMetrics", key = "#stockCode", sync = true)
+    @Cacheable(value = "stockMetrics", key = "#stockCode + '-v2'", sync = true)
     public InvestmentMetricDto getInvestmentMetrics(String stockCode) {
         // 1. Fetch latest financial ratio from API and save to DB
         // Use "0" (Yearly) as default, can be parameterized if needed.
@@ -803,13 +929,14 @@ public class KisInformationService {
             }
         }
 
-        // 2. Get the latest one (fetchAndSaveFinancialRatio returns all items from API,
-        // usually sorted or we sort)
+        // 2. Get the latest VALID one (PBR > 0 or other indicators)
         // API response order is not guaranteed, so sort by stacYymm desc
+        ratios.sort((o1, o2) -> o2.getStacYymm().compareTo(o1.getStacYymm()));
+
         StockFinancialRatio latest = ratios.stream()
-                .sorted((o1, o2) -> o2.getStacYymm().compareTo(o1.getStacYymm()))
+                .filter(r -> r.getPbr() != null && r.getPbr().compareTo(BigDecimal.ZERO) > 0)
                 .findFirst()
-                .orElse(null);
+                .orElse(ratios.get(0)); // Fallback to absolute latest if no valid data found
 
         if (latest == null) {
             return InvestmentMetricDto.builder().stockCode(stockCode).build();

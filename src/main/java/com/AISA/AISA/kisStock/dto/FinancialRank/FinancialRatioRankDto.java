@@ -3,6 +3,7 @@ package com.AISA.AISA.kisStock.dto.FinancialRank;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
+import lombok.Setter; // Added Setter
 import lombok.NoArgsConstructor;
 import lombok.ToString;
 
@@ -17,6 +18,7 @@ public class FinancialRatioRankDto {
     private List<FinancialRatioEntry> ranks;
 
     @Getter
+    @Setter // Added Setter
     @NoArgsConstructor
     @AllArgsConstructor
     @Builder

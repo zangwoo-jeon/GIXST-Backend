@@ -180,10 +180,17 @@ public class KisInformationService {
 
         List<StockFinancialRatio> latestRatios = new ArrayList<>();
         for (List<StockFinancialRatio> ratios : groupedByStock.values()) {
-            ratios.stream()
-                    .sorted((o1, o2) -> o2.getStacYymm().compareTo(o1.getStacYymm()))
+            // Sort by Date Descending
+            ratios.sort((o1, o2) -> o2.getStacYymm().compareTo(o1.getStacYymm()));
+
+            // Find first record with valid PBR (or PER/ROE) > 0 to avoid empty future data
+            // If all are empty, fall back to the absolute latest
+            StockFinancialRatio validRatio = ratios.stream()
+                    .filter(r -> r.getPbr() != null && r.getPbr().compareTo(BigDecimal.ZERO) > 0)
                     .findFirst()
-                    .ifPresent(latestRatios::add);
+                    .orElse(ratios.get(0)); // Fallback to latest
+
+            latestRatios.add(validRatio);
         }
 
         // 3. Sort Logic
@@ -213,6 +220,11 @@ public class KisInformationService {
         // 4. Filter & Apply Sort
         List<StockFinancialRatio> filteredRanks = latestRatios.stream()
                 .filter(r -> {
+                    // Filter Out Suspended Stocks
+                    if (Boolean.TRUE.equals(r.getIsSuspended())) {
+                        return false;
+                    }
+
                     // Filter out zeros/nulls for valuation ratios if sorting ASC (low PBR != 0 PBR)
                     if ("per".equalsIgnoreCase(sort) || "pbr".equalsIgnoreCase(sort) || "psr".equalsIgnoreCase(sort)) {
                         BigDecimal val = "per".equalsIgnoreCase(sort) ? r.getPer()
@@ -889,7 +901,7 @@ public class KisInformationService {
         }
     }
 
-    @Cacheable(value = "stockMetrics", key = "#stockCode", sync = true)
+    @Cacheable(value = "stockMetrics", key = "#stockCode + '-v2'", sync = true)
     public InvestmentMetricDto getInvestmentMetrics(String stockCode) {
         // 1. Fetch latest financial ratio from API and save to DB
         // Use "0" (Yearly) as default, can be parameterized if needed.
@@ -917,13 +929,14 @@ public class KisInformationService {
             }
         }
 
-        // 2. Get the latest one (fetchAndSaveFinancialRatio returns all items from API,
-        // usually sorted or we sort)
+        // 2. Get the latest VALID one (PBR > 0 or other indicators)
         // API response order is not guaranteed, so sort by stacYymm desc
+        ratios.sort((o1, o2) -> o2.getStacYymm().compareTo(o1.getStacYymm()));
+
         StockFinancialRatio latest = ratios.stream()
-                .sorted((o1, o2) -> o2.getStacYymm().compareTo(o1.getStacYymm()))
+                .filter(r -> r.getPbr() != null && r.getPbr().compareTo(BigDecimal.ZERO) > 0)
                 .findFirst()
-                .orElse(null);
+                .orElse(ratios.get(0)); // Fallback to absolute latest if no valid data found
 
         if (latest == null) {
             return InvestmentMetricDto.builder().stockCode(stockCode).build();

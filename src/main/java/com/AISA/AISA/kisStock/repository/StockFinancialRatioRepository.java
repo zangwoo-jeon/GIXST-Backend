@@ -60,4 +60,8 @@ public interface StockFinancialRatioRepository extends JpaRepository<StockFinanc
 
         // 과거 5개년 데이터 조회 (Average ROE 계산용)
         List<StockFinancialRatio> findTop5ByStockCodeAndDivCodeOrderByStacYymmDesc(String stockCode, String divCode);
+
+        // Fetch ALL ratios for a given divCode to perform in-memory grouping and
+        // Ranking
+        List<StockFinancialRatio> findAllByDivCode(String divCode);
 }

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
+import lombok.Setter; // Added Setter Import
 import lombok.NoArgsConstructor;
 import lombok.ToString;
 
@@ -16,6 +17,7 @@ public class FinancialRankDto {
     private List<FinancialRankEntry> ranks;
 
     @Getter
+    @Setter // Added Setter
     @NoArgsConstructor
     @AllArgsConstructor
     @Builder(toBuilder = true)
@@ -24,6 +26,7 @@ public class FinancialRankDto {
         private String rank; // data_rank
         private String stockCode; // mksc_shrn_iscd
         private String stockName; // hts_kor_isnm
+        private String stacYymm; // Added: 결산 연월 (TTM 기준)
         private String currentPrice; // stck_prpr
         private String saleTotalProfit; // sale_totl_prfi (매출총이익) - Note: User wants Sales Rank, check if this is Sales
                                         // or Gross Profit.

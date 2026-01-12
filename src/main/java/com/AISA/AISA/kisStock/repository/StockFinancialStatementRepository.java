@@ -72,4 +72,8 @@ public interface StockFinancialStatementRepository extends JpaRepository<StockFi
                         "ORDER BY (s.operatingProfit / s.saleAccount) DESC")
         List<StockFinancialStatement> findTop20ByOperatingMarginDesc(@Param("stacYymm") String stacYymm,
                         @Param("divCode") String divCode, Pageable pageable);
+
+        // Fetch ALL statements for a given divCode to perform in-memory grouping and
+        // TTM calculation
+        List<StockFinancialStatement> findAllByDivCode(String divCode);
 }

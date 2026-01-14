@@ -64,4 +64,6 @@ public interface StockFinancialRatioRepository extends JpaRepository<StockFinanc
         // Fetch ALL ratios for a given divCode to perform in-memory grouping and
         // Ranking
         List<StockFinancialRatio> findAllByDivCode(String divCode);
+
+        List<StockFinancialRatio> findByDivCodeAndStacYymmGreaterThanEqual(String divCode, String stacYymm);
 }

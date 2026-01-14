@@ -76,4 +76,6 @@ public interface StockFinancialStatementRepository extends JpaRepository<StockFi
         // Fetch ALL statements for a given divCode to perform in-memory grouping and
         // TTM calculation
         List<StockFinancialStatement> findAllByDivCode(String divCode);
+
+        List<StockFinancialStatement> findByDivCodeAndStacYymmGreaterThanEqual(String divCode, String stacYymm);
 }

@@ -10,7 +10,6 @@ import com.AISA.AISA.kisStock.dto.FinancialRank.InvestmentMetricDto;
 import com.AISA.AISA.kisStock.dto.FinancialRank.KisBalanceSheetApiResponse;
 import com.AISA.AISA.kisStock.dto.FinancialRank.KisIncomeStatementApiResponse;
 import com.AISA.AISA.kisStock.exception.KisApiErrorCode;
-import com.AISA.AISA.kisStock.kisService.Auth.KisAuthService;
 import com.AISA.AISA.kisStock.Entity.stock.StockFinancialRank;
 import com.AISA.AISA.kisStock.repository.StockFinancialRankRepository;
 import com.AISA.AISA.kisStock.Entity.stock.StockFinancialStatement;
@@ -23,6 +22,8 @@ import com.AISA.AISA.kisStock.dto.FinancialRank.KisFinancialRatioApiResponse;
 import com.AISA.AISA.kisStock.dto.FinancialRank.FinancialRatioRankDto;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.Map;
 import com.AISA.AISA.kisStock.repository.StockRepository;
 import lombok.RequiredArgsConstructor;
@@ -45,11 +46,11 @@ public class KisInformationService {
 
     private final WebClient webClient;
     private final KisApiProperties kisApiProperties;
-    private final KisAuthService kisAuthService;
     private final StockRepository stockRepository;
     private final StockBalanceSheetRepository stockBalanceSheetRepository;
     private final StockFinancialRankRepository stockFinancialRankRepository;
     private final StockFinancialRatioRepository stockFinancialRatioRepository;
+    private final KisApiClient kisApiClient;
     private final StockFinancialStatementRepository stockFinancialStatementRepository;
 
     public List<BalanceSheetDto> getBalanceSheet(String stockCode, String divCode) {
@@ -70,25 +71,19 @@ public class KisInformationService {
     }
 
     public List<BalanceSheetDto> refreshBalanceSheet(String stockCode, String divCode) {
-        // 1. Fetch from API
-        String accessToken = kisAuthService.getAccessToken();
-
         try {
-            KisBalanceSheetApiResponse response = webClient.get()
+            KisBalanceSheetApiResponse response = kisApiClient.fetch(token -> webClient.get()
                     .uri(uriBuilder -> uriBuilder
                             .path(kisApiProperties.getBalanceSheetUrl())
                             .queryParam("FID_DIV_CLS_CODE", divCode)
                             .queryParam("fid_cond_mrkt_div_code", "J")
                             .queryParam("fid_input_iscd", stockCode)
                             .build())
-                    .header("authorization", accessToken)
+                    .header("authorization", token)
                     .header("appkey", kisApiProperties.getAppkey())
                     .header("appsecret", kisApiProperties.getAppsecret())
                     .header("tr_id", "FHKST66430100")
-                    .header("custtype", "P")
-                    .retrieve()
-                    .bodyToMono(KisBalanceSheetApiResponse.class)
-                    .block();
+                    .header("custtype", "P"), KisBalanceSheetApiResponse.class);
 
             if (response == null || !"0".equals(response.getRtCd()) || response.getOutput() == null) {
                 log.error("Balance Sheet API Error for {}. RtCd: {}, Msg: {}",
@@ -167,12 +162,15 @@ public class KisInformationService {
         log.info("Completed Batch Financial Ratio Refresh");
     }
 
-    @Cacheable(value = "financialRank", key = "#sort + '-' + #divCode", sync = true)
-    public FinancialRatioRankDto getFinancialRatioRank(String sort, String divCode) {
+    @Cacheable(value = "financialRank", key = "#sort + '-' + #divCode + '-' + #direction", sync = true)
+    public FinancialRatioRankDto getFinancialRatioRank(String sort, String divCode, String direction) {
         String finalDivCode = (divCode == null || divCode.isEmpty()) ? "0" : divCode;
 
-        // 1. Fetch ALL Ratios for divCode
-        List<StockFinancialRatio> allRatios = stockFinancialRatioRepository.findAllByDivCode(finalDivCode);
+        // 1. Fetch Windowed Ratios (Last 3 Years)
+        String minDate = LocalDate.now().minusYears(3).format(DateTimeFormatter.ofPattern("yyyy"))
+                + "01";
+        List<StockFinancialRatio> allRatios = stockFinancialRatioRepository
+                .findByDivCodeAndStacYymmGreaterThanEqual(finalDivCode, minDate);
 
         // 2. Group by StockCode & Find Latest for Each
         Map<String, List<StockFinancialRatio>> groupedByStock = allRatios.stream()
@@ -195,7 +193,7 @@ public class KisInformationService {
 
         // 3. Sort Logic
         Comparator<StockFinancialRatio> comparator;
-        boolean isAsc = false;
+        boolean defaultAsc = false;
 
         if ("eps".equalsIgnoreCase(sort)) {
             comparator = Comparator.comparing(StockFinancialRatio::getEps);
@@ -203,18 +201,26 @@ public class KisInformationService {
             comparator = Comparator.comparing(StockFinancialRatio::getRoe);
         } else if ("debt".equalsIgnoreCase(sort) || "debtratio".equalsIgnoreCase(sort)) {
             comparator = Comparator.comparing(StockFinancialRatio::getDebtRatio);
-            isAsc = true;
+            defaultAsc = true;
         } else if ("per".equalsIgnoreCase(sort)) {
             comparator = Comparator.comparing(StockFinancialRatio::getPer);
-            isAsc = true;
+            defaultAsc = true;
         } else if ("pbr".equalsIgnoreCase(sort)) {
             comparator = Comparator.comparing(StockFinancialRatio::getPbr);
-            isAsc = true;
+            defaultAsc = true;
         } else if ("psr".equalsIgnoreCase(sort)) {
             comparator = Comparator.comparing(StockFinancialRatio::getPsr);
-            isAsc = true;
+            defaultAsc = true;
         } else {
             comparator = Comparator.comparing(StockFinancialRatio::getRoe);
+        }
+
+        // Determine final sorting order
+        boolean isAsc;
+        if (direction != null && !direction.isEmpty()) {
+            isAsc = "asc".equalsIgnoreCase(direction);
+        } else {
+            isAsc = defaultAsc;
         }
 
         // 4. Filter & Apply Sort
@@ -279,30 +285,25 @@ public class KisInformationService {
     }
 
     public List<StockFinancialRatio> fetchAndSaveFinancialRatio(String stockCode, String divCode) {
-        String accessToken = kisAuthService.getAccessToken();
-
         // 1. Fetch Current Price & Status FIRST (Needed for both API calculation and
         // fallback)
-        StockPriceInfo priceInfo = fetchCurrentPrice(stockCode, accessToken);
+        StockPriceInfo priceInfo = fetchCurrentPrice(stockCode);
         BigDecimal currentPrice = priceInfo.price;
 
         try {
             // 2. Fetch Financial Ratio (EPS, BPS, SPS, etc.)
-            KisFinancialRatioApiResponse response = webClient.get()
+            KisFinancialRatioApiResponse response = kisApiClient.fetch(token -> webClient.get()
                     .uri(uriBuilder -> uriBuilder
                             .path(kisApiProperties.getFinancialRatioUrl())
                             .queryParam("FID_DIV_CLS_CODE", divCode)
                             .queryParam("fid_cond_mrkt_div_code", "J")
                             .queryParam("fid_input_iscd", stockCode)
                             .build())
-                    .header("authorization", accessToken)
+                    .header("authorization", token)
                     .header("appkey", kisApiProperties.getAppkey())
                     .header("appsecret", kisApiProperties.getAppsecret())
                     .header("tr_id", "FHKST66430300")
-                    .header("custtype", "P")
-                    .retrieve()
-                    .bodyToMono(KisFinancialRatioApiResponse.class)
-                    .block();
+                    .header("custtype", "P"), KisFinancialRatioApiResponse.class);
 
             if (response == null || !"0".equals(response.getRtCd()) || response.getOutput() == null) {
                 log.warn("Financial Ratio API Error for {}. RtCd: {}, Msg: {}. Attempting local calculation.",
@@ -492,21 +493,18 @@ public class KisInformationService {
         return results;
     }
 
-    private StockPriceInfo fetchCurrentPrice(String stockCode, String accessToken) {
+    private StockPriceInfo fetchCurrentPrice(String stockCode) {
         try {
-            String responseBody = webClient.get()
+            String responseBody = kisApiClient.fetch(token -> webClient.get()
                     .uri(uriBuilder -> uriBuilder
                             .path("/uapi/domestic-stock/v1/quotations/inquire-price") // Standard Price URL
                             .queryParam("FID_COND_MRKT_DIV_CODE", "J")
                             .queryParam("FID_INPUT_ISCD", stockCode)
                             .build())
-                    .header("authorization", accessToken)
+                    .header("authorization", token)
                     .header("appkey", kisApiProperties.getAppkey())
                     .header("appsecret", kisApiProperties.getAppsecret())
-                    .header("tr_id", "FHKST01010100")
-                    .retrieve()
-                    .bodyToMono(String.class)
-                    .block();
+                    .header("tr_id", "FHKST01010100"), String.class);
 
             if (responseBody != null) {
                 com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
@@ -572,24 +570,19 @@ public class KisInformationService {
     }
 
     public List<FinancialStatementDto> refreshIncomeStatement(String stockCode, String divCode) {
-        String accessToken = kisAuthService.getAccessToken();
-
         try {
-            KisIncomeStatementApiResponse response = webClient.get()
+            KisIncomeStatementApiResponse response = kisApiClient.fetch(token -> webClient.get()
                     .uri(uriBuilder -> uriBuilder
                             .path(kisApiProperties.getIncomeStatementUrl())
                             .queryParam("FID_DIV_CLS_CODE", divCode)
                             .queryParam("fid_cond_mrkt_div_code", "J")
                             .queryParam("fid_input_iscd", stockCode)
                             .build())
-                    .header("authorization", accessToken)
+                    .header("authorization", token)
                     .header("appkey", kisApiProperties.getAppkey())
                     .header("appsecret", kisApiProperties.getAppsecret())
                     .header("tr_id", "FHKST66430200")
-                    .header("custtype", "P")
-                    .retrieve()
-                    .bodyToMono(KisIncomeStatementApiResponse.class)
-                    .block();
+                    .header("custtype", "P"), KisIncomeStatementApiResponse.class);
 
             if (response == null || !"0".equals(response.getRtCd()) || response.getOutput() == null
                     || response.getOutput().isEmpty()) {
@@ -597,7 +590,7 @@ public class KisInformationService {
             }
 
             // Fetch Current Price & Status
-            StockPriceInfo priceInfo = fetchCurrentPrice(stockCode, accessToken);
+            StockPriceInfo priceInfo = fetchCurrentPrice(stockCode);
 
             // Save to DB with Upsert Logic
             List<StockFinancialStatement> entitiesToSave = new ArrayList<>();
@@ -701,103 +694,29 @@ public class KisInformationService {
         return result;
     }
 
+    @Cacheable(value = "financialRank", key = "#sort", sync = true)
     public FinancialRankDto getFinancialRank(String sort) {
-        // 1. Fetch ALL Annual Data (divCode="0") to process in-memory
-        String divCode = "0";
-        List<StockFinancialStatement> allStatements = stockFinancialStatementRepository.findAllByDivCode(divCode);
+        // 1. Fetch from Consolidated Rank Table
+        List<StockFinancialRank> allRanks = stockFinancialRankRepository.findAll();
 
-        // 2. Group by StockCode
-        Map<String, List<StockFinancialStatement>> groupedByStock = allStatements.stream()
-                .collect(Collectors.groupingBy(StockFinancialStatement::getStockCode));
+        // 2. Map to DTO
+        List<FinancialRankDto.FinancialRankEntry> calculatedRanks = allRanks.stream()
+                .map(rank -> FinancialRankDto.FinancialRankEntry.builder()
+                        .stockCode(rank.getStockCode())
+                        .stockName(rank.getStockName())
+                        .stacYymm(rank.getStacYymm())
+                        .saleTotalProfit(rank.getSaleAccount() != null ? rank.getSaleAccount().toString() : "0")
+                        .operatingProfit(rank.getOperatingProfit() != null ? rank.getOperatingProfit().toString() : "0")
+                        .netIncome(rank.getNetIncome() != null ? rank.getNetIncome().toString() : "0")
+                        .totalAssets(rank.getTotalAssets() != null ? rank.getTotalAssets().toString() : "0")
+                        .totalLiabilities(
+                                rank.getTotalLiabilities() != null ? rank.getTotalLiabilities().toString() : "0")
+                        .totalCapital(rank.getTotalCapital() != null ? rank.getTotalCapital().toString() : "0")
+                        .operatingRate(calculateOperatingRate(rank.getOperatingProfit(), rank.getSaleAccount()))
+                        .build())
+                .collect(Collectors.toList());
 
-        Map<String, String> stockMap = stockRepository.findAll().stream()
-                .collect(Collectors.toMap(Stock::getStockCode, Stock::getStockName));
-
-        List<FinancialRankDto.FinancialRankEntry> calculatedRanks = new ArrayList<>();
-
-        for (Map.Entry<String, List<StockFinancialStatement>> entry : groupedByStock.entrySet()) {
-            String stockCode = entry.getKey();
-            List<StockFinancialStatement> stmts = entry.getValue();
-
-            // Sort DESC by Date
-            stmts.sort((o1, o2) -> o2.getStacYymm().compareTo(o1.getStacYymm()));
-
-            if (stmts.isEmpty())
-                continue;
-
-            StockFinancialStatement latest = stmts.get(0);
-            BigDecimal totalSales = latest.getSaleAccount();
-            BigDecimal totalOperatingProfit = latest.getOperatingProfit();
-            BigDecimal totalNetIncome = latest.getNetIncome();
-            String stacYymm = latest.getStacYymm(); // Representative Date
-
-            // 3. Dynamic TTM Logic
-            // If we have previous data, check interval to decide aggregation
-            if (stmts.size() >= 2) {
-                StockFinancialStatement prev = stmts.get(1);
-                long monthsDiff = getMonthsDifference(prev.getStacYymm(), latest.getStacYymm());
-
-                if (monthsDiff <= 3) {
-                    // Quarterly (3 months): Sum Top 4 (Latest + 3 Prev)
-                    // Ensure we don't go out of bounds
-                    int count = Math.min(stmts.size(), 4);
-                    // Re-calculate sum from scratch
-                    totalSales = BigDecimal.ZERO;
-                    totalOperatingProfit = BigDecimal.ZERO;
-                    totalNetIncome = BigDecimal.ZERO;
-
-                    for (int i = 0; i < count; i++) {
-                        totalSales = totalSales
-                                .add(stmts.get(i).getSaleAccount() != null ? stmts.get(i).getSaleAccount()
-                                        : BigDecimal.ZERO);
-                        totalOperatingProfit = totalOperatingProfit
-                                .add(stmts.get(i).getOperatingProfit() != null ? stmts.get(i).getOperatingProfit()
-                                        : BigDecimal.ZERO);
-                        totalNetIncome = totalNetIncome.add(
-                                stmts.get(i).getNetIncome() != null ? stmts.get(i).getNetIncome() : BigDecimal.ZERO);
-                    }
-                    if (count < 4) {
-                        // Simple extrapolation if less than 4 (e.g. * 4/count) - Optional, here just
-                        // sum available
-                        // For conservatism, we keep sum.
-                    }
-
-                } else if (monthsDiff <= 6) {
-                    // Semi-Annual (6 months): Sum Top 2 (Latest + Prev)
-                    totalSales = totalSales
-                            .add(prev.getSaleAccount() != null ? prev.getSaleAccount() : BigDecimal.ZERO);
-                    totalOperatingProfit = totalOperatingProfit
-                            .add(prev.getOperatingProfit() != null ? prev.getOperatingProfit() : BigDecimal.ZERO);
-                    totalNetIncome = totalNetIncome
-                            .add(prev.getNetIncome() != null ? prev.getNetIncome() : BigDecimal.ZERO);
-                }
-                // Else (Approx 12 months): Use Latest only (Already set)
-            }
-
-            // Allow initial values to be null-safe too just in case
-            if (totalSales == null)
-                totalSales = BigDecimal.ZERO;
-            if (totalOperatingProfit == null)
-                totalOperatingProfit = BigDecimal.ZERO;
-            if (totalNetIncome == null)
-                totalNetIncome = BigDecimal.ZERO;
-
-            // Create Entry
-            calculatedRanks.add(FinancialRankDto.FinancialRankEntry.builder()
-                    .stockCode(stockCode)
-                    .stockName(stockMap.getOrDefault(stockCode, "Unknown"))
-                    .saleTotalProfit(totalSales.toString())
-                    .operatingProfit(totalOperatingProfit.toString())
-                    .netIncome(totalNetIncome.toString())
-                    .stacYymm(stacYymm) // Display latest date
-                    .totalAssets("0")
-                    .totalLiabilities("0")
-                    .totalCapital("0")
-                    .operatingRate(calculateOperatingRate(totalOperatingProfit, totalSales))
-                    .build());
-        }
-
-        // 4. Sort and Limit
+        // 3. Sort
         Comparator<FinancialRankDto.FinancialRankEntry> comparator;
         if ("operating".equalsIgnoreCase(sort)) {
             comparator = Comparator.comparing(e -> new BigDecimal(e.getOperatingProfit()));
@@ -805,20 +724,38 @@ public class KisInformationService {
             comparator = Comparator.comparing(e -> new BigDecimal(e.getNetIncome()));
         } else if ("margin".equalsIgnoreCase(sort) || "operatingmargin".equalsIgnoreCase(sort)) {
             comparator = Comparator.comparing(e -> new BigDecimal(e.getOperatingRate()));
+        } else if ("assets".equalsIgnoreCase(sort)) {
+            comparator = Comparator.comparing(e -> new BigDecimal(e.getTotalAssets()));
+        } else if ("liabilities".equalsIgnoreCase(sort)) {
+            comparator = Comparator.comparing(e -> new BigDecimal(e.getTotalLiabilities()));
+        } else if ("capital".equalsIgnoreCase(sort)) {
+            comparator = Comparator.comparing(e -> new BigDecimal(e.getTotalCapital()));
         } else {
-            // Default: Sales
             comparator = Comparator.comparing(e -> new BigDecimal(e.getSaleTotalProfit()));
         }
 
         List<FinancialRankDto.FinancialRankEntry> top20 = calculatedRanks.stream()
                 .sorted(comparator.reversed())
                 .limit(20)
-                .peek(entry -> entry.setRank(String.valueOf(calculatedRanks.indexOf(entry) + 1))) // Just ordinal
                 .collect(Collectors.toList());
 
-        // Re-assign rank numbers strictly 1..20
+        // 4. Assign strict rank and Fetch Current Price
         for (int i = 0; i < top20.size(); i++) {
-            top20.get(i).setRank(String.valueOf(i + 1));
+            FinancialRankDto.FinancialRankEntry entry = top20.get(i);
+            entry.setRank(String.valueOf(i + 1));
+
+            // Fetch current price for TOP 20
+            try {
+                StockPriceInfo priceInfo = fetchCurrentPrice(entry.getStockCode());
+                if (priceInfo != null && priceInfo.price != null) {
+                    entry.setCurrentPrice(priceInfo.price.toString());
+                } else {
+                    entry.setCurrentPrice("0");
+                }
+            } catch (Exception e) {
+                log.warn("Failed to fetch current price for rank entry {}: {}", entry.getStockCode(), e.getMessage());
+                entry.setCurrentPrice("0");
+            }
         }
 
         return FinancialRankDto.builder().ranks(top20).build();
@@ -845,38 +782,88 @@ public class KisInformationService {
     }
 
     @Transactional
+    @CacheEvict(value = "financialRank", allEntries = true)
     public void refreshFinancialRank() {
-        stockFinancialRankRepository.deleteAll();
+        // 1. Fetch Windowed Data for all stocks to avoid OOM
+        String minDate = LocalDate.now().minusYears(3).format(DateTimeFormatter.ofPattern("yyyy"))
+                + "01";
 
-        List<Stock> stocks = stockRepository.findAll();
+        List<StockFinancialStatement> allStatements = stockFinancialStatementRepository
+                .findByDivCodeAndStacYymmGreaterThanEqual("0", minDate);
+        List<StockBalanceSheet> allBalanceSheets = stockBalanceSheetRepository
+                .findByDivCodeAndStacYymmGreaterThanEqual("0", minDate);
+        List<Stock> allStocks = stockRepository.findAll();
+
+        Map<String, List<StockFinancialStatement>> groupedStatements = allStatements.stream()
+                .collect(Collectors.groupingBy(StockFinancialStatement::getStockCode));
+        Map<String, List<StockBalanceSheet>> groupedBalanceSheets = allBalanceSheets.stream()
+                .collect(Collectors.groupingBy(StockBalanceSheet::getStockCode));
+
         List<StockFinancialRank> newRanks = new ArrayList<>();
 
-        for (Stock stock : stocks) {
-            try {
-                // Use DB-first getIncomeStatement
-                List<FinancialStatementDto> statements = getIncomeStatement(stock.getStockCode(), "0");
-                if (!statements.isEmpty()) {
-                    FinancialStatementDto latest = statements.get(0); // Already sorted DESC
+        for (Stock stock : allStocks) {
+            String code = stock.getStockCode();
+            List<StockFinancialStatement> stmts = groupedStatements.getOrDefault(code, new ArrayList<>());
+            List<StockBalanceSheet> sheets = groupedBalanceSheets.getOrDefault(code, new ArrayList<>());
 
-                    if (latest != null) {
-                        newRanks.add(StockFinancialRank.builder()
-                                .stockCode(stock.getStockCode())
-                                .stockName(stock.getStockName())
-                                .stacYymm(latest.getStacYymm())
-                                .saleAccount(new BigDecimal(parseLongSafe(latest.getSaleAccount())))
-                                .operatingProfit(new BigDecimal(parseLongSafe(latest.getOperatingProfit())))
-                                .netIncome(new BigDecimal(parseLongSafe(latest.getNetIncome())))
-                                .saleTotlPrfi(new BigDecimal(0))
-                                .build());
+            if (stmts.isEmpty())
+                continue;
+
+            // Sort Descending
+            stmts.sort((o1, o2) -> o2.getStacYymm().compareTo(o1.getStacYymm()));
+            sheets.sort((o1, o2) -> o2.getStacYymm().compareTo(o1.getStacYymm()));
+
+            StockFinancialStatement latest = stmts.get(0);
+            BigDecimal sale = latest.getSaleAccount();
+            BigDecimal op = latest.getOperatingProfit();
+            BigDecimal ni = latest.getNetIncome();
+
+            // TTM Logic
+            if (stmts.size() >= 2) {
+                long monthsDiff = getMonthsDifference(stmts.get(1).getStacYymm(), latest.getStacYymm());
+                if (monthsDiff <= 3) { // Quarterly
+                    int count = Math.min(stmts.size(), 4);
+                    sale = BigDecimal.ZERO;
+                    op = BigDecimal.ZERO;
+                    ni = BigDecimal.ZERO;
+                    for (int i = 0; i < count; i++) {
+                        sale = sale.add(stmts.get(i).getSaleAccount());
+                        op = op.add(stmts.get(i).getOperatingProfit());
+                        ni = ni.add(stmts.get(i).getNetIncome());
                     }
+                } else if (monthsDiff <= 6) { // Semi-Annual
+                    sale = sale.add(stmts.get(1).getSaleAccount());
+                    op = op.add(stmts.get(1).getOperatingProfit());
+                    ni = ni.add(stmts.get(1).getNetIncome());
                 }
-                Thread.sleep(100);
-            } catch (Exception e) {
-                log.warn("Failed to refresh financial rank for {}", stock.getStockName());
             }
+
+            // Latest Balance Sheet
+            BigDecimal totalAssets = BigDecimal.ZERO;
+            BigDecimal totalLiabilities = BigDecimal.ZERO;
+            BigDecimal totalCapital = BigDecimal.ZERO;
+            if (!sheets.isEmpty()) {
+                totalAssets = sheets.get(0).getTotalAssets();
+                totalLiabilities = sheets.get(0).getTotalLiabilities();
+                totalCapital = sheets.get(0).getTotalCapital();
+            }
+
+            newRanks.add(StockFinancialRank.builder()
+                    .stockCode(code)
+                    .stockName(stock.getStockName())
+                    .stacYymm(latest.getStacYymm())
+                    .saleAccount(sale)
+                    .operatingProfit(op)
+                    .netIncome(ni)
+                    .totalAssets(totalAssets)
+                    .totalLiabilities(totalLiabilities)
+                    .totalCapital(totalCapital)
+                    .build());
         }
+
+        stockFinancialRankRepository.deleteAll();
         stockFinancialRankRepository.saveAll(newRanks);
-        log.info("Refreshed Financial Ranks for {} stocks", newRanks.size());
+        log.info("Refreshed consolidated Financial Ranks for {} stocks", newRanks.size());
     }
 
     private String calculateOperatingRate(BigDecimal operatingProfit, BigDecimal saleAccount) {

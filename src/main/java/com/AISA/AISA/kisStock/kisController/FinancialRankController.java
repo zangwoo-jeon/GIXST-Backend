@@ -20,7 +20,7 @@ public class FinancialRankController {
     private final KisInformationService kisInformationService;
 
     @GetMapping
-    @Operation(summary = "재무 순위 조회", description = "매출액(sale), 영업이익(operating), 순이익(netincome) 순위를 조회합니다. (기본값: sale)")
+    @Operation(summary = "재무 순위 조회", description = "매출액(sale), 영업이익(operating), 순이익(netincome), 총자산(assets), 총부채(liabilities), 총자본(capital) 순위를 조회합니다. (기본값: sale)")
     public ResponseEntity<SuccessResponse<FinancialRankDto>> getFinancialRank(
             @RequestParam(required = false, defaultValue = "sale") String sort) {
         return ResponseEntity

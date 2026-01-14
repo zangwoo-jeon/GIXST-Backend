@@ -35,4 +35,13 @@ public class StockFinancialRank {
 
     @Column(precision = 20, scale = 2)
     private BigDecimal netIncome; // 순이익
+
+    @Column(precision = 20, scale = 2)
+    private BigDecimal totalAssets; // 총자산
+
+    @Column(precision = 20, scale = 2)
+    private BigDecimal totalLiabilities; // 총부채
+
+    @Column(precision = 20, scale = 2)
+    private BigDecimal totalCapital; // 총자본
 }

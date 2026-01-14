@@ -104,13 +104,14 @@ public class KisInformationController {
         }
 
         @GetMapping("/rank/ratio")
-        @Operation(summary = "재무비율 기반 랭킹 조회", description = "DB에 저장된 재무비율을 기준으로 랭킹을 조회합니다. (eps, debt, roe, per, pbr, psr)")
+        @Operation(summary = "재무비율 기반 랭킹 조회", description = "DB에 저장된 재무비율을 기준으로 랭킹을 조회합니다. (eps, debt, roe, per, pbr, psr). direction 파라미터로 정렬 방향(asc, desc)을 지정할 수 있습니다.")
         public ResponseEntity<SuccessResponse<FinancialRatioRankDto>> getFinancialRatioRank(
                         @RequestParam(defaultValue = "roe") String sort,
-                        @RequestParam(required = false, defaultValue = "0") String divCode) {
+                        @RequestParam(required = false, defaultValue = "0") String divCode,
+                        @RequestParam(required = false) String direction) {
                 return ResponseEntity
                                 .ok(new SuccessResponse<>(true, "재무비율 랭킹 조회 성공 (" + sort + ")",
-                                                kisInformationService.getFinancialRatioRank(sort, divCode)));
+                                                kisInformationService.getFinancialRatioRank(sort, divCode, direction)));
         }
 
         @GetMapping("/metrics/{stockCode}")

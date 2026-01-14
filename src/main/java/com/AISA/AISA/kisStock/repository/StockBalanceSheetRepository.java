@@ -11,4 +11,6 @@ public interface StockBalanceSheetRepository extends JpaRepository<StockBalanceS
     List<StockBalanceSheet> findByStockCodeAndDivCodeOrderByStacYymmDesc(String stockCode, String divCode);
 
     StockBalanceSheet findTop1ByStockCodeAndDivCodeOrderByStacYymmDesc(String stockCode, String divCode);
+
+    List<StockBalanceSheet> findByDivCodeAndStacYymmGreaterThanEqual(String divCode, String stacYymm);
 }

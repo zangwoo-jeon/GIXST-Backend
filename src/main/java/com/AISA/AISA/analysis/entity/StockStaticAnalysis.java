@@ -40,7 +40,7 @@ public class StockStaticAnalysis {
     @Column(nullable = false)
     private LocalDateTime lastModifiedDate;
 
-    // 만료 체크 (기본 7일 = 168시간)
+    // 만료 체크 (기본 1년 = 8760시간)
     public boolean isExpired(int hours) {
         return lastModifiedDate.plusHours(hours).isBefore(LocalDateTime.now());
     }

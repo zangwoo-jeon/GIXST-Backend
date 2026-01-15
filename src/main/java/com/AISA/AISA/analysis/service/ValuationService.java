@@ -32,6 +32,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -1132,13 +1133,14 @@ public class ValuationService {
     }
 
     @Transactional
+    @Cacheable(value = "staticAnalysis", key = "#stockCode")
     public String getStaticAnalysis(String stockCode) {
         // 1. Check Cache (New Repository)
         Optional<StockStaticAnalysis> cachedAnalysis = stockStaticAnalysisRepository.findByStockCode(stockCode);
         if (cachedAnalysis.isPresent()) {
             StockStaticAnalysis staticData = cachedAnalysis.get();
-            // Cache for 7 days (168 hours)
-            if (staticData.getContent() != null && !staticData.isExpired(168)) {
+            // DB Cache for 1 Year (8760 hours)
+            if (staticData.getContent() != null && !staticData.isExpired(8760)) {
                 return staticData.getContent();
             }
         }

@@ -75,6 +75,14 @@ public class RedisConfig {
                                 .disableCachingNullValues()
                                 .entryTtl(Duration.ofMinutes(30));
 
+                RedisCacheConfiguration sevenDayConfig = RedisCacheConfiguration.defaultCacheConfig()
+                                .serializeKeysWith(RedisSerializationContext.SerializationPair
+                                                .fromSerializer(new StringRedisSerializer()))
+                                .serializeValuesWith(RedisSerializationContext.SerializationPair
+                                                .fromSerializer(new GenericJackson2JsonRedisSerializer()))
+                                .disableCachingNullValues()
+                                .entryTtl(Duration.ofDays(7));
+
                 Map<String, RedisCacheConfiguration> configMap = new HashMap<>();
                 configMap.put("indexChart", longTermConfig);
                 configMap.put("overseasIndex", longTermConfig);
@@ -99,6 +107,7 @@ public class RedisConfig {
                 configMap.put("dividendRank", longTermConfig);
                 configMap.put("ecosBondYield", longTermConfig);
                 configMap.put("portfolioDiagnosis", mediumTermConfig);
+                configMap.put("staticAnalysis", sevenDayConfig);
 
                 return RedisCacheManager.builder(connectionFactory)
                                 .cacheDefaults(defaultConfig)

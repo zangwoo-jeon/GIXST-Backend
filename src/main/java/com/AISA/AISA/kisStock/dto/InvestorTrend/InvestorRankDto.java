@@ -20,5 +20,4 @@ public class InvestorRankDto {
     private String personalNetBuyAmount;
     private String foreignerNetBuyAmount;
     private String institutionNetBuyAmount;
-    private String etcCorporateNetBuyAmount;
 }

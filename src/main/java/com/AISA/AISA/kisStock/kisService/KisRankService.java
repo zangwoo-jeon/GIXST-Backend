@@ -89,9 +89,6 @@ public class KisRankService {
                         .institutionNetBuyAmount(d.getInstitutionNetBuyAmount() != null
                                 ? d.getInstitutionNetBuyAmount().toString()
                                 : "0")
-                        .etcCorporateNetBuyAmount(d.getEtcCorporateNetBuyAmount() != null
-                                ? d.getEtcCorporateNetBuyAmount().toString()
-                                : "0")
                         .build())
                 .collect(Collectors.toList());
 

@@ -13,5 +13,4 @@ public interface InvestorTrendAggregationProjection {
 
     BigDecimal getInstitutionNetBuyAmount();
 
-    BigDecimal getEtcCorporateNetBuyAmount();
 }

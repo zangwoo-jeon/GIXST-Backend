@@ -93,6 +93,7 @@ public class SecurityConfig {
                                                                 "/api/dividend/*/detail",
                                                                 "/api/dividend/rank", "/api/macro/exchange-rate/**",
                                                                 "/api/macro/m2",
+                                                                "/api/rank/investor",
                                                                 "/api/macro/base-rate",
                                                                 "/api/macro/cpi", "/api/macro/bond/**",
                                                                 "/api/indices/{marketCode}/status",

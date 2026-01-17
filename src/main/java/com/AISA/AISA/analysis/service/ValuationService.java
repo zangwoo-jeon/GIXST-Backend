@@ -100,8 +100,16 @@ public class ValuationService {
         // Static analysis is now served via separate API (/static-report)
         String aiAnalysis = getValuationAnalysis(stockCode, response);
 
-        // 3. Build Final Response
-        return buildResponseWithAi(response, aiAnalysis);
+        // 3. Fetch InvestorTrend for merging
+        InvestorTrendDto trend = null;
+        try {
+            trend = kisStockService.getInvestorTrend(stockCode);
+        } catch (Exception e) {
+            log.warn("Failed to fetch investor trend for standardized report: {}", e.getMessage());
+        }
+
+        // 4. Build Final Response
+        return buildResponseWithAi(response, aiAnalysis, trend);
     }
 
     public Response calculateValuation(String stockCode, Request request) {
@@ -191,15 +199,19 @@ public class ValuationService {
     }
 
     private String formatLargeNumber(BigDecimal value) {
+        if (value == null)
+            return "N/A";
+
+        BigDecimal absValue = value.abs();
         BigDecimal trillion = new BigDecimal("1000000000000");
         BigDecimal billion = new BigDecimal("100000000");
 
-        if (value.compareTo(trillion) >= 0) {
-            return value.divide(trillion, 1, RoundingMode.HALF_UP) + "조원";
-        } else if (value.compareTo(billion) >= 0) {
-            return value.divide(billion, 0, RoundingMode.HALF_UP) + "억원";
+        if (absValue.compareTo(trillion) >= 0) {
+            return value.divide(trillion, 1, RoundingMode.HALF_UP).toPlainString() + "조원";
+        } else if (absValue.compareTo(billion) >= 0) {
+            return value.divide(billion, 0, RoundingMode.HALF_UP).toPlainString() + "억원";
         }
-        return value.toString() + "원";
+        return value.toPlainString() + "원";
     }
 
     private ValuationDto.DiscountRateInfo determineCOE(Request request) {
@@ -982,16 +994,42 @@ public class ValuationService {
         String aiAnalysis = generateAiDiagnosis(response, latestRatio, latestBalanceSheet, recentAnnuals,
                 recentQuarters);
 
+        // Fetch InvestorTrend for merging
+        InvestorTrendDto trend = null;
+        try {
+            trend = kisStockService.getInvestorTrend(stockCode);
+        } catch (Exception e) {
+            log.warn("Failed to fetch investor trend for calculation: {}", e.getMessage());
+        }
+
         // 3. Update Summary with AI Analysis
-        return buildResponseWithAi(response, aiAnalysis);
+        return buildResponseWithAi(response, aiAnalysis, trend);
     }
 
-    private Response buildResponseWithAi(Response response, String aiAnalysis) {
+    private Response buildResponseWithAi(Response response, String aiAnalysis, InvestorTrendDto originalTrend) {
         if (response.getSummary() != null) {
             Summary oldSummary = response.getSummary();
 
             // Parse AI Response (Container containing both AiVerdict and BeginnerVerdict)
             AiResponseJson aiResponse = parseAiResponse(aiAnalysis);
+
+            // Merge Logic: Enhance AI's partial investorTrend with original rich data
+            if (originalTrend != null && aiResponse.getAnalysisDetails() != null
+                    && aiResponse.getAnalysisDetails().getInvestorTrend() != null) {
+                InvestorTrendDto aiTrend = aiResponse.getAnalysisDetails().getInvestorTrend();
+                // Overwrite ONLY AI's interpretive fields onto the rich original data
+                originalTrend.setSupplyScore(aiTrend.getSupplyScore());
+                originalTrend.setTrendStatus(aiTrend.getTrendStatus());
+                originalTrend.setAdvice(aiTrend.getAdvice()); // Map the new AI advice field
+                // Do NOT overwrite quantitative fields like Overheat/AvgPrice with AI results
+
+                // Use the enriched originalTrend for the final response
+                aiResponse.getAnalysisDetails().setInvestorTrend(originalTrend);
+            } else if (originalTrend != null && aiResponse.getAnalysisDetails() != null) {
+                // Fallback: If AI failed to provide investorTrend object, still show original
+                // data
+                aiResponse.getAnalysisDetails().setInvestorTrend(originalTrend);
+            }
 
             // Create Model Verdict
             ModelVerdict modelVerdictObj = createModelVerdict(oldSummary);
@@ -1005,9 +1043,12 @@ public class ValuationService {
             // Create Display Layer
             ValuationDto.Summary.Display display = ValuationDto.Summary.Display.builder()
                     .verdict(modelVerdictObj.getRating())
-                    .verdictLabel(mapVerdictToLabel(modelVerdictObj.getRating(), aiResponse.getAiVerdict().getStance()))
-                    .summary(aiResponse.getBeginnerVerdict().getSummarySentence())
-                    .risk(aiResponse.getAiVerdict().getRiskLevel() != null
+                    .verdictLabel(mapVerdictToLabel(modelVerdictObj.getRating(),
+                            aiResponse.getAiVerdict() != null ? aiResponse.getAiVerdict().getStance() : null))
+                    .summary(aiResponse.getBeginnerVerdict() != null
+                            ? aiResponse.getBeginnerVerdict().getSummarySentence()
+                            : "분석 데이터를 불러올 수 없습니다.")
+                    .risk(aiResponse.getAiVerdict() != null && aiResponse.getAiVerdict().getRiskLevel() != null
                             ? aiResponse.getAiVerdict().getRiskLevel().name()
                             : "UNKNOWN")
                     .build();
@@ -1099,28 +1140,39 @@ public class ValuationService {
     }
 
     private AiResponseJson parseAiResponse(String jsonText) {
+        AiResponseJson res = null;
         try {
             String json = extractJson(jsonText);
             ObjectMapper mapper = new ObjectMapper();
             mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
-            return mapper.readValue(json, AiResponseJson.class);
+            res = mapper.readValue(json, AiResponseJson.class);
         } catch (Exception e) {
             log.error("Failed to parse AI Response JSON: {}", e.getMessage());
-            // Fallback
-            AiResponseJson fallback = new AiResponseJson();
-            fallback.setAiVerdict(AiVerdict.builder()
-                    .stance(ValuationDto.Stance.HOLD)
-                    .timing(ValuationDto.Timing.UNCERTAIN)
-                    .riskLevel(ValuationDto.RiskLevel.MEDIUM)
-                    .guidance("AI 분석 데이터를 불러오는 데 실패했습니다.")
-                    .alignmentNote("데이터 파싱 오류")
-                    .build());
+        }
 
-            fallback.setBeginnerVerdict(ValuationDto.Summary.BeginnerVerdict.builder()
-                    .summarySentence("분석 데이터를 불러오는 중 오류가 발생했어요. 잠시 후 다시 시도해주세요.")
-                    .build());
+        // Validate and apply Fallback if any critical field is missing
+        if (res == null || res.getAiVerdict() == null || res.getBeginnerVerdict() == null) {
+            AiResponseJson fallback = (res == null) ? new AiResponseJson() : res;
+
+            if (fallback.getAiVerdict() == null) {
+                fallback.setAiVerdict(AiVerdict.builder()
+                        .stance(ValuationDto.Stance.HOLD)
+                        .timing(ValuationDto.Timing.UNCERTAIN)
+                        .riskLevel(ValuationDto.RiskLevel.MEDIUM)
+                        .guidance("AI 분석 데이터를 불러오는 데 실패했습니다.")
+                        .alignmentNote("데이터 파싱 오류 또는 서비스 응답 지연")
+                        .build());
+            }
+
+            if (fallback.getBeginnerVerdict() == null) {
+                fallback.setBeginnerVerdict(ValuationDto.Summary.BeginnerVerdict.builder()
+                        .summarySentence("분석 데이터를 불러오는 중 오류가 발생했어요. 잠시 후 다시 시도해주세요.")
+                        .build());
+            }
             return fallback;
         }
+
+        return res;
     }
 
     private String extractJson(String text) {
@@ -1188,10 +1240,15 @@ public class ValuationService {
         BigDecimal currentPrice = new BigDecimal(val.getCurrentPrice().replace(",", ""));
 
         // 2. Check Cache
+        InvestorTrendDto investorTrend = null;
         Optional<StockAiSummary> cachedSummary = stockAiSummaryRepository.findByStockCode(stockCode);
         if (cachedSummary.isPresent()) {
             StockAiSummary summary = cachedSummary.get();
-            boolean isExpired = summary.isExpired(24);
+            // Cache Policy:
+            // 1. Time-based: 1 Month (720 hours) - effectively permanent for stable stocks
+            // 2. Price Trigger: ±5% Deviation
+            // 3. Supply Trigger: Significant Divergence (Calculated during generation)
+            boolean isExpired = summary.isExpired(720);
             boolean isPriceDeviated = false;
 
             if (summary.getReferencePrice() != null && summary.getReferencePrice().compareTo(BigDecimal.ZERO) != 0) {
@@ -1203,7 +1260,21 @@ public class ValuationService {
                 }
             }
 
-            if (summary.getValuationAnalysis() != null && !isExpired && !isPriceDeviated) {
+            // Supply Divergence Check (Optimized - Skip full generation if trigger not hit)
+            boolean isSupplyDiverged = false;
+            try {
+                investorTrend = kisStockService.getInvestorTrend(stockCode);
+                // Trigger if Z-Score deviates by more than 1.0 or Score deviates by more than
+                // 20
+                if (Math.abs(investorTrend.getForeignerZScore() - summary.getLastForeignerZScore()) > 1.0 ||
+                        Math.abs(investorTrend.getSupplyScore() - summary.getLastSupplyScore()) > 20.0) {
+                    isSupplyDiverged = true;
+                }
+            } catch (Exception e) {
+                log.warn("Failed to check supply divergence for cache: {}", e.getMessage());
+            }
+
+            if (summary.getValuationAnalysis() != null && !isExpired && !isPriceDeviated && !isSupplyDiverged) {
                 return summary.getValuationAnalysis();
             }
         }
@@ -1216,12 +1287,13 @@ public class ValuationService {
         List<StockFinancialStatement> recentQuarters = stockFinancialStatementRepository
                 .findTop5ByStockCodeAndDivCodeOrderByStacYymmDesc(stockCode, "1");
 
-        // Fetch Investor Trend (Real-time)
-        InvestorTrendDto investorTrend = null;
-        try {
-            investorTrend = kisStockService.getInvestorTrend(stockCode);
-        } catch (Exception e) {
-            log.warn("Failed to fetch investor trend: {}", e.getMessage());
+        // Fetch Investor Trend (if not already fetched during divergence check)
+        if (investorTrend == null) {
+            try {
+                investorTrend = kisStockService.getInvestorTrend(stockCode);
+            } catch (Exception e) {
+                log.warn("Failed to fetch investor trend: {}", e.getMessage());
+            }
         }
 
         String analysis = generateValuationAnalysisText(val, latestRatio, latestBalanceSheet, recentQuarters,
@@ -1232,17 +1304,21 @@ public class ValuationService {
         ModelVerdict modelVerdict = createModelVerdict(val.getSummary());
 
         String displayVerdict = modelVerdict.getRating();
-        String displayLabel = mapVerdictToLabel(displayVerdict, aiJson.getAiVerdict().getStance());
+        String displayLabel = mapVerdictToLabel(displayVerdict,
+                aiJson.getAiVerdict() != null ? aiJson.getAiVerdict().getStance() : null);
         String displaySummary = aiJson.getBeginnerVerdict() != null ? aiJson.getBeginnerVerdict().getSummarySentence()
-                : "";
-        String displayRisk = aiJson.getAiVerdict().getRiskLevel() != null ? aiJson.getAiVerdict().getRiskLevel().name()
+                : "분석 데이터를 불러올 수 없습니다.";
+        String displayRisk = aiJson.getAiVerdict() != null && aiJson.getAiVerdict().getRiskLevel() != null
+                ? aiJson.getAiVerdict().getRiskLevel().name()
                 : "UNKNOWN";
+        log.info("Display summary logic check: {}", displaySummary);
 
         // 4. Save
         if (cachedSummary.isPresent()) {
             StockAiSummary existing = cachedSummary.get();
             existing.updateValuationAnalysis(analysis, currentPrice, displayVerdict, displayLabel, displaySummary,
-                    displayRisk);
+                    displayRisk, investorTrend != null ? investorTrend.getSupplyScore() : 0,
+                    investorTrend != null ? investorTrend.getForeignerZScore() : 0);
             stockAiSummaryRepository.save(existing);
         } else {
             StockAiSummary newSummary = StockAiSummary.builder()
@@ -1253,6 +1329,8 @@ public class ValuationService {
                     .displayLabel(displayLabel)
                     .displaySummary(displaySummary)
                     .displayRisk(displayRisk)
+                    .lastSupplyScore(investorTrend != null ? investorTrend.getSupplyScore() : 0)
+                    .lastForeignerZScore(investorTrend != null ? investorTrend.getForeignerZScore() : 0)
                     .lastModifiedDate(LocalDateTime.now())
                     .createdDate(LocalDateTime.now())
                     .build();
@@ -1299,7 +1377,6 @@ public class ValuationService {
 
         // 1. Context Gathering
         String industryContext = getIndustryContext(stockCode);
-        String investorDetailAnalysis = analyzeInvestorTrendDetails(stockCode);
         String fundamentalAnalysis = analyzeFundamentals(latestRatio, recentQuarters);
         String competitorData = analyzeCompetitorData(stockCode);
         String sectorPer = calculateSectorAveragePer(stockCode); // Added
@@ -1337,13 +1414,34 @@ public class ValuationService {
                     dividendInfo.getDividendFrequency()));
         }
 
-        prompt.append("\n[수급 데이터 상세 (Investor Trend)]\n");
-        prompt.append(String.format("- 분석: %s\n", investorDetailAnalysis));
+        prompt.append("\n[수급 데이터 상세 (Professional Supply Analysis)]\n");
+        prompt.append(String.format("- 종합 분석: %s (점수: %.1f)\n",
+                investorTrend != null ? investorTrend.getTrendStatus() : "N/A",
+                investorTrend != null ? investorTrend.getSupplyScore() : 0));
+
         if (investorTrend != null) {
-            prompt.append(String.format("- 3개월 누적 API 데이터: 외국인 %s원, 기관 %s원 (%s)\n",
-                    formatLargeNumber(new BigDecimal(investorTrend.getRecent3MonthForeignerNetBuy())),
-                    formatLargeNumber(new BigDecimal(investorTrend.getRecent3MonthInstitutionNetBuy())),
-                    investorTrend.getTrendStatus()));
+            prompt.append(String.format("- [1개월] 외인 %s, 기관 %s (Z-Score: F=%.2f, I=%.2f)\n",
+                    formatLargeNumber(parseBigDecimalSafe(investorTrend.getRecent1MonthForeignerNetBuy())),
+                    formatLargeNumber(parseBigDecimalSafe(investorTrend.getRecent1MonthInstitutionNetBuy())),
+                    investorTrend.getForeignerZScore(), investorTrend.getInstitutionZScore()));
+            prompt.append(String.format("- [3개월] 외인 %s, 기관 %s\n",
+                    formatLargeNumber(parseBigDecimalSafe(investorTrend.getRecent3MonthForeignerNetBuy())),
+                    formatLargeNumber(parseBigDecimalSafe(investorTrend.getRecent3MonthInstitutionNetBuy()))));
+            prompt.append(String.format("- [1년] 외인 %s, 기관 %s\n",
+                    formatLargeNumber(parseBigDecimalSafe(investorTrend.getRecent1YearForeignerNetBuy())),
+                    formatLargeNumber(parseBigDecimalSafe(investorTrend.getRecent1YearInstitutionNetBuy()))));
+
+            prompt.append(String.format("- [매집원가/과열도] 외인 평단: %s원 (과열: %s), 기관 평단: %s원 (과열: %s)\n",
+                    formatLargeNumber(investorTrend.getForeignerAvgPrice()),
+                    formatOverheat(investorTrend.getForeignerOverheat()),
+                    formatLargeNumber(investorTrend.getInstitutionAvgPrice()),
+                    formatOverheat(investorTrend.getInstitutionOverheat())));
+
+            // 신규 상장주 또는 데이터 부족에 대한 힌트 (Z-Score가 모두 0이면 보통 데이터 부족)
+            if (investorTrend.getForeignerZScore() == 0 && investorTrend.getInstitutionZScore() == 0) {
+                prompt.append(
+                        "! 주의: 상장한 지 얼마 되지 않았거나 충분한 데이터(20일 미만)가 확보되지 않은 종목입니다. 장기 트렌드보다는 최근 수급과 공모가 대비 위치를 중시하십시오.\n");
+            }
         }
 
         prompt.append("\n[Valuation Model 요약]\n");
@@ -1360,11 +1458,11 @@ public class ValuationService {
 
         prompt.append("\n[전략가로서의 미션]\n");
         prompt.append(
-                String.format("1. **Google Search**와 위 **경쟁사 데이터**를 함께 활용하여 동종 업계 경쟁사(Peers)의 PER/PBR 수준을 비교 평가하라.\n"));
-        prompt.append(String.format("   (업종 평균 PER: %s, 제공된 경쟁사 데이터 우선 반영)\n", sectorPer));
-        prompt.append("2. 위 펀더멘털, 수급, 밸류에이션 데이터를 종합하여, 실전 매매 가이드를 수립하라 (매수/매도/보유 등).\n");
-        prompt.append("3. **Risk Scenarios (민감도 분석)**: 주요 변수(금리, 환율, 업황 등) 변화 시 적정 주가 영향이나 대응 시나리오를 제시하라.\n");
-        prompt.append("4. **초보자 코멘트**는 정말 쉽고 친근하게(존댓말) 작성하라. '안전마진'과 배당 매력을 포함해 설명하라.\n");
+                "1. **통계적 수급 분석**: Z-Score가 +1.5 이상이면 '이례적 매집'으로, 과열 지수가 25% 이상이면 '가격 부담'으로 해석하라.\n");
+        prompt.append("2. **수급 다이버전스**: 주가는 횡보/하락하지만 수급 점수가 상승하거나 Z-Score가 튄다면 이를 '잠재적 반등 신호'로 구체적으로 설명하라.\n");
+        prompt.append("3. **매집 단가 활용**: 주가가 기관/외인 평단가(VWAP) 근처에 있다면 '안전마진 확보' 관점에서 분석하라.\n");
+        prompt.append("4. **Google Search**와 **경쟁사 데이터**를 사용하여 동종 업계 Peers와 밸류에이션을 대조하라.\n");
+        prompt.append("5. **초보자 코멘트**: 존댓말로 아주 쉽게 작성하되, '기관 평단가'라는 개념을 사용하여 가격 유리함을 설명해주어라.\n");
 
         prompt.append("\n[출력 포맷 (JSON 엄수)]\n");
         prompt.append("```json\n");
@@ -1373,38 +1471,40 @@ public class ValuationService {
         prompt.append("    \"stance\": \"[BUY, ACCUMULATE, HOLD, REDUCE, SELL]\",\n");
         prompt.append("    \"timing\": \"[EARLY, MID, LATE, UNCERTAIN]\",\n");
         prompt.append("    \"riskLevel\": \"[LOW, MEDIUM, HIGH]\",\n");
-        prompt.append("    \"guidance\": \"종합적인 투자의견 및 구체적인 진입/청산 전략 (300자 내외)\",\n");
-        prompt.append("    \"alignmentNote\": \"수급과 가치평가 간의 괴리 또는 특정 지표(배당 등)가 미치는 영향\"\n");
+        prompt.append("    \"guidance\": \"종합 투자의견 (매집 원가 및 수급 점수 언급 포함, 300자 내외)\",\n");
+        prompt.append("    \"alignmentNote\": \"수급 다이버전스 유무 및 평단가 대비 가격적 매력도 설명\"\n");
         prompt.append("  },\n");
         prompt.append("  \"analysisDetails\": {\n");
         prompt.append("    \"upsidePotential\": \"+OO% (목표가 OO원)\",\n");
         prompt.append("    \"downsideRisk\": \"-OO% (손절가 OO원)\",\n");
         prompt.append("    \"investmentTerm\": \"추천 투자 기간 (예: 6개월)\",\n");
-        prompt.append("    \"catalysts\": [\"주가 상승 촉매제 1\", \"주가 상승 촉매제 2\"],\n");
-        prompt.append("    \"risks\": [\"리스크 1\", \"리스크 2\"],\n");
+        prompt.append("    \"catalysts\": [\"수급 주체별 매집 가속화\", \"저평가 해소\"],\n");
+        prompt.append("    \"risks\": [\"과열 지수 상승에 따른 차익실현\", \"업황 부진\"],\n");
         prompt.append("    \"peerComparison\": {\n");
         prompt.append("      \"sectorAvgPer\": \"" + sectorPer + "\",\n");
         prompt.append("      \"status\": \"[BELOW_SECTOR_AVG, SIMILAR, ABOVE_SECTOR_AVG]\",\n");
         prompt.append("      \"peers\": [\n");
-        prompt.append("        {\"name\": \"경쟁사A\", \"per\": \"12.5\", \"pbr\": \"1.1\"},\n");
-        prompt.append("        {\"name\": \"경쟁사B\", \"per\": \"18.0\", \"pbr\": \"2.5\"}\n");
+        prompt.append("        {\"name\": \"경쟁사A\", \"per\": \"12.5\", \"pbr\": \"1.1\"}\n");
         prompt.append("      ]\n");
         prompt.append("    },\n");
         prompt.append("    \"investorTrend\": {\n");
-        prompt.append("       \"recent3MonthForeignerNetBuy\": \""
-                + (investorTrend != null ? investorTrend.getRecent3MonthForeignerNetBuy() : "0") + "\",\n");
-        prompt.append("       \"recent3MonthInstitutionNetBuy\": \""
-                + (investorTrend != null ? investorTrend.getRecent3MonthInstitutionNetBuy() : "0") + "\",\n");
-        prompt.append(
-                "       \"trendStatus\": \"" + (investorTrend != null ? investorTrend.getTrendStatus() : "N/A")
-                        + "\"\n");
+        prompt.append("       \"supplyScore\": " + (investorTrend != null ? (int) investorTrend.getSupplyScore() : 0)
+                + ",\n");
+        prompt.append("       \"foreignerOverheat\": "
+                + (investorTrend != null ? investorTrend.getForeignerOverheat() : 0) + ",\n");
+        prompt.append("       \"institutionOverheat\": "
+                + (investorTrend != null ? investorTrend.getInstitutionOverheat() : 0) + ",\n");
+        prompt.append("       \"trendStatus\": \"" + (investorTrend != null ? investorTrend.getTrendStatus() : "N/A")
+                + "\",\n");
+        prompt.append("       \"advice\": \"수급 데이터(평단가, 과열도, Z-Score)를 바탕으로 한 전문가적 조언 (200자 내외)\"\n");
         prompt.append("    }\n");
         prompt.append("  },\n");
         prompt.append("  \"beginnerVerdict\": {\n");
-        prompt.append("    \"summarySentence\": \"초보자용 쉬운 한 문장 (예: 배당 매력이 높고 기관이 사고 있어요, 분할 매수 추천해요!)\"\n");
+        prompt.append("    \"summarySentence\": \"기관이나 외국인이 산 평균 가격보다 저렴해요! 같이 사볼까요?\"\n");
         prompt.append("  }\n");
         prompt.append("}\n");
         prompt.append("```\n");
+        prompt.append("\n! 주의: 출력은 반드시 위 JSON 형식만 허용되며, 다른 텍스트를 포함하지 마시오.\n");
 
         return geminiService.generateAdvice(prompt.toString());
     }
@@ -1451,6 +1551,22 @@ public class ValuationService {
         return sb.toString();
     }
 
+    private BigDecimal parseBigDecimalSafe(String value) {
+        try {
+            if (value == null || value.trim().isEmpty())
+                return BigDecimal.ZERO;
+            return new BigDecimal(value.trim());
+        } catch (Exception e) {
+            return BigDecimal.ZERO;
+        }
+    }
+
+    private String formatOverheat(BigDecimal overheat) {
+        if (overheat == null)
+            return "N/A";
+        return String.format("%.1f%%", overheat);
+    }
+
     // --- New Helper Methods for Advanced Analysis ---
 
     private String getIndustryContext(String stockCode) {
@@ -1476,7 +1592,7 @@ public class ValuationService {
         StringBuilder analysis = new StringBuilder();
         try {
             List<com.AISA.AISA.kisStock.dto.InvestorTrend.StockInvestorDailyDto> trends = kisStockService
-                    .getDailyInvestorTrend(stockCode); // This returns DTO list
+                    .getDailyInvestorTrend(stockCode, "3m"); // This returns DTO list
 
             if (trends == null || trends.isEmpty())
                 return "수급 데이터 부족";

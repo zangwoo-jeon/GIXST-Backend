@@ -57,14 +57,20 @@ public class StockAiSummary {
 
     private String displayRisk; // "MEDIUM"
 
+    private double lastSupplyScore; // 수급 다이버전스 감지용 (갱신 트리거)
+    private double lastForeignerZScore; // 수급 다이버전스 감지용 (갱신 트리거)
+
     public void updateValuationAnalysis(String valuationAnalysis, BigDecimal referencePrice,
-            String displayVerdict, String displayLabel, String displaySummary, String displayRisk) {
+            String displayVerdict, String displayLabel, String displaySummary, String displayRisk,
+            double lastSupplyScore, double lastForeignerZScore) {
         this.valuationAnalysis = valuationAnalysis;
         this.referencePrice = referencePrice;
         this.displayVerdict = displayVerdict;
         this.displayLabel = displayLabel;
         this.displaySummary = displaySummary;
         this.displayRisk = displayRisk;
+        this.lastSupplyScore = lastSupplyScore;
+        this.lastForeignerZScore = lastForeignerZScore;
         this.lastModifiedDate = LocalDateTime.now();
     }
 

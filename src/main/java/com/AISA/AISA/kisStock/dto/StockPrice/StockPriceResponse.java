@@ -30,4 +30,7 @@ public class StockPriceResponse {
 
     @JsonProperty("hts_avls") // HTS 시가총액
     private String marketCapRaw;
+
+    @JsonProperty("iscd_stat_cls_code") // 종목상태구분코드 (58:거래정지)
+    private String statusCode;
 }

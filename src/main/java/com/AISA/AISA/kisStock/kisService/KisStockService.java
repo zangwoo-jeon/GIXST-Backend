@@ -24,28 +24,33 @@ import com.AISA.AISA.kisStock.repository.StockDailyDataRepository;
 import com.AISA.AISA.kisStock.repository.StockMarketCapRepository;
 import com.AISA.AISA.kisStock.repository.StockRepository;
 import com.AISA.AISA.kisStock.repository.StockInvestorDailyRepository; // New Repo
+import com.AISA.AISA.analysis.repository.StockAiSummaryRepository; // New for Cache Clear
+import com.AISA.AISA.analysis.repository.StockStaticAnalysisRepository; // New for Cache Clear
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.CacheManager;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.reactive.function.client.WebClient;
-import org.springframework.data.domain.Pageable;
-import com.AISA.AISA.global.util.OffsetBasedPageRequest;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import java.time.temporal.WeekFields;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
-import java.time.temporal.WeekFields;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+
+import com.AISA.AISA.global.util.OffsetBasedPageRequest;
 
 @Slf4j
 @Service
@@ -57,7 +62,10 @@ public class KisStockService {
         private final StockRepository stockRepository;
         private final StockDailyDataRepository stockDailyDataRepository;
         private final StockMarketCapRepository stockMarketCapRepository; // Added repo
+        private final CacheManager cacheManager;
         private final StockInvestorDailyRepository stockInvestorDailyRepository; // New Repo field
+        private final StockAiSummaryRepository stockAiSummaryRepository;
+        private final StockStaticAnalysisRepository stockStaticAnalysisRepository;
         private final KisMacroService kisMacroService;
         private final ObjectMapper objectMapper;
         private final KisApiClient kisApiClient;
@@ -103,6 +111,11 @@ public class KisStockService {
                 }
 
                 try {
+                        // Update Suspension Status
+                        boolean isSuspended = "58".equals(raw.getStatusCode());
+                        stock.updateSuspensionStatus(isSuspended);
+                        stockRepository.save(stock);
+
                         if (raw.getMarketCapRaw() != null && !raw.getMarketCapRaw().isEmpty()) {
                                 BigDecimal marketCap = new BigDecimal(raw.getMarketCapRaw().replace(",", ""));
                                 // Update StockMarketCap Entity
@@ -729,16 +742,23 @@ public class KisStockService {
         }
 
         @Transactional(readOnly = true)
-        public List<StockInvestorDailyDto> getDailyInvestorTrend(String stockCode) {
+        public List<StockInvestorDailyDto> getDailyInvestorTrend(String stockCode, String period) {
                 Stock stock = stockRepository.findByStockCode(stockCode)
                                 .orElseThrow(() -> new IllegalArgumentException("Stock not found"));
 
-                // Fetch last 3 months
+                // Fetch based on period
                 LocalDate today = LocalDate.now();
-                LocalDate threeMonthsAgo = today.minusMonths(3);
+                LocalDate startDate;
+                if ("1y".equalsIgnoreCase(period)) {
+                        startDate = today.minusYears(1);
+                } else if ("1m".equalsIgnoreCase(period)) {
+                        startDate = today.minusMonths(1);
+                } else {
+                        startDate = today.minusMonths(3); // Default
+                }
 
                 List<StockInvestorDaily> dailyData = stockInvestorDailyRepository
-                                .findByStockAndDateBetweenOrderByDateAsc(stock, threeMonthsAgo, today);
+                                .findByStockAndDateBetweenOrderByDateAsc(stock, startDate, today);
 
                 return dailyData.stream().map(d -> StockInvestorDailyDto.builder()
                                 .date(d.getDate().toString())
@@ -761,72 +781,231 @@ public class KisStockService {
                                 .collect(Collectors.toList());
         }
 
-        @Transactional
+        @Transactional(readOnly = true)
+        @Cacheable(value = "investorTrend", key = "#stockCode")
         public InvestorTrendDto getInvestorTrend(String stockCode) {
-                // 1. Check if we have recent data in DB (e.g. within last 3 days or today's
-                // data depending on batch)
-                // For simplicity, we check if ANY data exists for recent 3 months.
-                // Or simplified: Just Query DB. If empty, try fetch.
-
                 Stock stock = stockRepository.findByStockCode(stockCode)
                                 .orElseThrow(() -> new IllegalArgumentException("Stock not found"));
 
                 LocalDate today = LocalDate.now();
+                LocalDate oneYearAgo = today.minusYears(1);
                 LocalDate threeMonthsAgo = today.minusMonths(3);
+                LocalDate oneMonthAgo = today.minusMonths(1);
 
-                // Lazy Load Check
+                // 1. Ensure data exists (Lazy load)
                 boolean hasData = stockInvestorDailyRepository.findLatestDateByStock(stock).isPresent();
                 if (!hasData) {
                         log.info("No investor trend data for {}. Fetching from API...", stockCode);
                         fetchAndSaveInvestorTrend(stockCode);
                 }
 
-                // 2. Query DB
-                List<StockInvestorDaily> dailyData = stockInvestorDailyRepository
-                                .findByStockAndDateBetweenOrderByDateAsc(stock, threeMonthsAgo, today);
+                // 2. Query Full 1 Year Data for Statistics
+                List<StockInvestorDaily> allData = stockInvestorDailyRepository
+                                .findByStockAndDateBetweenOrderByDateAsc(stock, oneYearAgo, today);
 
-                // 3. Sum up
-                BigDecimal foreignerSum = BigDecimal.ZERO;
-                BigDecimal institutionSum = BigDecimal.ZERO;
-
-                for (StockInvestorDaily daily : dailyData) {
-                        foreignerSum = foreignerSum.add(daily.getForeignerNetBuyAmount());
-                        institutionSum = institutionSum.add(daily.getInstitutionNetBuyAmount());
+                if (allData.isEmpty()) {
+                        log.warn("allData is empty for {}", stockCode);
+                        return InvestorTrendDto.builder()
+                                        .recent1MonthForeignerNetBuy("0")
+                                        .recent1MonthInstitutionNetBuy("0")
+                                        .recent3MonthForeignerNetBuy("0")
+                                        .recent3MonthInstitutionNetBuy("0")
+                                        .recent1YearForeignerNetBuy("0")
+                                        .recent1YearInstitutionNetBuy("0")
+                                        .supplyScore(0)
+                                        .trendStatus("데이터 부족")
+                                        .build();
                 }
 
-                // 4. Determine Trend
-                String trend = "중립";
-                BigDecimal tenBillion = new BigDecimal("10000000000");
+                // 3. Prepare Price Map for Quantity Estimation (Legacy Data Support)
+                List<StockDailyData> prices = stockDailyDataRepository
+                                .findByStock_StockCodeAndDateBetweenOrderByDateAsc(stockCode, oneYearAgo, today);
+                log.info("StockDailyData size for {}: {}", stockCode, prices.size());
 
-                boolean isFrgnBuy = foreignerSum.compareTo(tenBillion) > 0;
-                boolean isInstBuy = institutionSum.compareTo(tenBillion) > 0;
-                boolean isFrgnSell = foreignerSum.compareTo(tenBillion.negate()) < 0;
-                boolean isInstSell = institutionSum.compareTo(tenBillion.negate()) < 0;
+                Map<LocalDate, BigDecimal> priceMap = prices.stream()
+                                .collect(Collectors.toMap(StockDailyData::getDate, StockDailyData::getClosingPrice,
+                                                (existing, replacement) -> existing));
+                log.info("priceMap size for {}: {}", stockCode, priceMap.size());
 
-                if (isFrgnBuy && isInstBuy)
-                        trend = "양매수 (강력 매수 우위)";
-                else if (isFrgnBuy)
-                        trend = "외국인 주도 매수";
-                else if (isInstBuy)
-                        trend = "기관 주도 매수";
-                else if (isFrgnSell && isInstSell)
-                        trend = "양매도 (매도 우위)";
-                else if (isFrgnSell)
-                        trend = "외국인 매도세";
-                else if (isInstSell)
-                        trend = "기관 매도세";
+                // 4. Get Current Price for Overheat Calculation
+                BigDecimal currentPrice = BigDecimal.ZERO;
+                try {
+                        StockPriceDto priceDto = getStockPrice(stockCode);
+                        if (priceDto != null && priceDto.getStockPrice() != null) {
+                                currentPrice = new BigDecimal(priceDto.getStockPrice().replace(",", "").trim());
+                        }
+                } catch (Exception e) {
+                        log.warn("Price fetch failed for VWAP comparison: {}", e.getMessage());
+                }
 
+                // 5. Multi-Period Aggregation
+                BigDecimal f1m = BigDecimal.ZERO, i1m = BigDecimal.ZERO;
+                BigDecimal f3m = BigDecimal.ZERO, i3m = BigDecimal.ZERO;
+                BigDecimal f1y = BigDecimal.ZERO, i1y = BigDecimal.ZERO;
+
+                BigDecimal f1yQty = BigDecimal.ZERO, i1yQty = BigDecimal.ZERO;
+                BigDecimal f1yAmtTotal = BigDecimal.ZERO, i1yAmtTotal = BigDecimal.ZERO;
+
+                for (StockInvestorDaily d : allData) {
+                        BigDecimal fAmt = d.getForeignerNetBuyAmount();
+                        BigDecimal iAmt = d.getInstitutionNetBuyAmount();
+
+                        // Get Effective Quantity (Actual or Estimated using priceMap or fallback
+                        // currentPrice)
+                        BigDecimal effFQty = getEffectiveQuantity(fAmt, d.getForeignerNetBuyQuantity(), d.getDate(),
+                                        priceMap, currentPrice);
+                        BigDecimal effIQty = getEffectiveQuantity(iAmt, d.getInstitutionNetBuyQuantity(), d.getDate(),
+                                        priceMap, currentPrice);
+
+                        // 1 Year (All)
+                        f1y = f1y.add(fAmt);
+                        i1y = i1y.add(iAmt);
+
+                        // VWAP preparation (Only positive net buy days for accumulation cost)
+                        if (fAmt.compareTo(BigDecimal.ZERO) > 0 && effFQty.compareTo(BigDecimal.ZERO) > 0) {
+                                f1yQty = f1yQty.add(effFQty);
+                                f1yAmtTotal = f1yAmtTotal.add(fAmt);
+                        }
+                        if (iAmt.compareTo(BigDecimal.ZERO) > 0 && effIQty.compareTo(BigDecimal.ZERO) > 0) {
+                                i1yQty = i1yQty.add(effIQty);
+                                i1yAmtTotal = i1yAmtTotal.add(iAmt);
+                        }
+
+                        // 3 Months
+                        if (!d.getDate().isBefore(threeMonthsAgo)) {
+                                f3m = f3m.add(fAmt);
+                                i3m = i3m.add(iAmt);
+                        }
+
+                        // 1 Month
+                        if (!d.getDate().isBefore(oneMonthAgo)) {
+                                f1m = f1m.add(fAmt);
+                                i1m = i1m.add(iAmt);
+                        }
+                }
+
+                // 6. VWAP & Overheat Calculation
+
+                // Calculate VWAP (Avg Price)
+                BigDecimal fAvg = BigDecimal.ZERO;
+                if (f1yQty.compareTo(BigDecimal.ZERO) > 0) {
+                        // Compensation: Amount (Million KRW) -> actual KRW (* 1,000,000)
+                        fAvg = f1yAmtTotal.multiply(new BigDecimal("1000000")).divide(f1yQty, 0, RoundingMode.HALF_UP);
+                } else if (f1y.compareTo(BigDecimal.ZERO) > 0) {
+                        // Amount exists but Qty is 0: This happens with legacy data missing quantity
+                        // column
+                        log.warn("Foreigner Avg Price calculation failed for {}: Amount exists but Qty is zero (legacy data?)",
+                                        stockCode);
+                }
+
+                BigDecimal iAvg = BigDecimal.ZERO;
+                if (i1yQty.compareTo(BigDecimal.ZERO) > 0) {
+                        iAvg = i1yAmtTotal.multiply(new BigDecimal("1000000")).divide(i1yQty, 0, RoundingMode.HALF_UP);
+                } else if (i1y.compareTo(BigDecimal.ZERO) > 0) {
+                        log.warn("Institution Avg Price calculation failed for {}: Amount exists but Qty is zero (legacy data?)",
+                                        stockCode);
+                }
+
+                BigDecimal fOverheat = calculateOverheat(currentPrice, fAvg);
+                BigDecimal iOverheat = calculateOverheat(currentPrice, iAvg);
+
+                // 5. Z-Score Calculation (1 Month intensity vs 1 Year baseline)
+                double fZ = calculateZScore(allData, f1m, true);
+                double iZ = calculateZScore(allData, i1m, false);
+
+                // 6. Final Supply Score (0-100)
+                double supplyScore = calculateOverallScore(f1m, i1m, f3m, i3m, f1y, i1y, fZ, iZ);
+
+                // 7. Determine Trend Status
+                String trend = determineAdvancedTrend(fZ, iZ, fOverheat, iOverheat, supplyScore);
+
+                BigDecimal million = new BigDecimal("1000000");
                 return InvestorTrendDto.builder()
-                                .recent3MonthForeignerNetBuy(String.valueOf(foreignerSum.longValue()))
-                                .recent3MonthInstitutionNetBuy(String.valueOf(institutionSum.longValue()))
+                                .recent1MonthForeignerNetBuy(f1m.multiply(million).toPlainString())
+                                .recent1MonthInstitutionNetBuy(i1m.multiply(million).toPlainString())
+                                .recent3MonthForeignerNetBuy(f3m.multiply(million).toPlainString())
+                                .recent3MonthInstitutionNetBuy(i3m.multiply(million).toPlainString())
+                                .recent1YearForeignerNetBuy(f1y.multiply(million).toPlainString())
+                                .recent1YearInstitutionNetBuy(i1y.multiply(million).toPlainString())
+                                .foreignerAvgPrice(fAvg.compareTo(BigDecimal.ZERO) == 0 ? null : fAvg)
+                                .institutionAvgPrice(iAvg.compareTo(BigDecimal.ZERO) == 0 ? null : iAvg)
+                                .foreignerOverheat(fOverheat)
+                                .institutionOverheat(iOverheat)
+                                .foreignerZScore(fZ)
+                                .institutionZScore(iZ)
+                                .supplyScore(supplyScore)
                                 .trendStatus(trend)
                                 .build();
+        }
+
+        private BigDecimal calculateOverheat(BigDecimal current, BigDecimal avg) {
+                if (avg == null || avg.compareTo(BigDecimal.ZERO) <= 0 || current == null
+                                || current.compareTo(BigDecimal.ZERO) <= 0)
+                        return null;
+                return current.subtract(avg).divide(avg, 4, RoundingMode.HALF_UP).multiply(new BigDecimal("100"));
+        }
+
+        private double calculateZScore(List<StockInvestorDaily> allData, BigDecimal recent1m, boolean isForeigner) {
+                if (allData.size() < 20)
+                        return 0;
+
+                List<Double> monthlySamples = new ArrayList<>();
+                for (int i = 0; i < allData.size() - 20; i += 5) {
+                        double sum = 0;
+                        for (int j = 0; j < 20; j++) {
+                                StockInvestorDaily d = allData.get(i + j);
+                                sum += (isForeigner ? d.getForeignerNetBuyAmount() : d.getInstitutionNetBuyAmount())
+                                                .doubleValue();
+                        }
+                        monthlySamples.add(sum);
+                }
+
+                if (monthlySamples.isEmpty())
+                        return 0;
+
+                double avg = monthlySamples.stream().mapToDouble(Double::doubleValue).average().orElse(0);
+                double variance = monthlySamples.stream().mapToDouble(s -> Math.pow(s - avg, 2)).average().orElse(0);
+                double stdDev = Math.sqrt(variance);
+
+                if (stdDev == 0)
+                        return 0;
+                return (recent1m.doubleValue() - avg) / stdDev;
+        }
+
+        private double calculateOverallScore(BigDecimal f1m, BigDecimal i1m, BigDecimal f3m, BigDecimal i3m,
+                        BigDecimal f1y, BigDecimal i1y, double fZ, double iZ) {
+                double score = 50.0;
+                score += (fZ * 5) + (iZ * 10);
+                if (f1m.compareTo(BigDecimal.ZERO) > 0)
+                        score += 5;
+                if (i1m.compareTo(BigDecimal.ZERO) > 0)
+                        score += 10;
+                if (f3m.compareTo(BigDecimal.ZERO) > 0)
+                        score += 5;
+                if (i3m.compareTo(BigDecimal.ZERO) > 0)
+                        score += 5;
+                return Math.max(0, Math.min(100, score));
+        }
+
+        private String determineAdvancedTrend(double fZ, double iZ, BigDecimal fOverheat, BigDecimal iOverheat,
+                        double score) {
+                if (fZ > 3.0 || iZ > 3.0)
+                        return "수급 다이버전스/폭발 발생";
+                if (score > 80) {
+                        if (iOverheat.compareTo(new BigDecimal("25")) > 0)
+                                return "강력 매집형 과열 (주의)";
+                        return "강력한 매집 추세";
+                }
+                if (score > 60)
+                        return "매집 진행 중";
+                if (score < 30)
+                        return "지속적인 매도세";
+                return "관망/수급 정체";
         }
 
         @Transactional
         public void fetchAndSaveInvestorTrend(String stockCode) {
                 String url = kisApiProperties.getInvestorTrendDailyUrl();
-
                 if (url == null || url.isEmpty()) {
                         log.error("KisApiProperties.investorTrendDailyUrl is NULL. Check application.yml");
                         return;
@@ -835,73 +1014,142 @@ public class KisStockService {
                 Stock stock = stockRepository.findByStockCode(stockCode)
                                 .orElseThrow(() -> new IllegalArgumentException("Stock not found"));
 
-                try {
-                        // API Call
-                        KisInvestorDailyResponse response = kisApiClient.fetch(token -> webClient.get()
-                                        .uri(uriBuilder -> uriBuilder
-                                                        .path(url)
-                                                        .queryParam("FID_COND_MRKT_DIV_CODE", "J")
-                                                        .queryParam("FID_INPUT_ISCD", stockCode)
-                                                        .queryParam("FID_INPUT_DATE_1", LocalDate.now().format(
-                                                                        DateTimeFormatter.BASIC_ISO_DATE))
-                                                        .queryParam("FID_ORG_ADJ_PRC", "0")
-                                                        .queryParam("FID_ETC_CLS_CODE", "0")
-                                                        .build())
-                                        .header("content-type", "application/json; charset=utf-8")
-                                        .header("authorization", token)
-                                        .header("appkey", kisApiProperties.getAppkey())
-                                        .header("appsecret", kisApiProperties.getAppsecret())
-                                        .header("tr_id", "FHPTJ04160001")
-                                        .header("custtype", "P"), KisInvestorDailyResponse.class);
+                LocalDate targetDate = LocalDate.now().minusYears(1);
+                LocalDate currentDate = LocalDate.now();
 
-                        if (response == null || response.getOutput() == null) {
-                                log.warn("No daily investor data received for {}", stockCode);
-                                return;
-                        }
+                while (currentDate.isAfter(targetDate)) {
+                        try {
+                                final String queryDate = currentDate.format(DateTimeFormatter.BASIC_ISO_DATE);
+                                KisInvestorDailyResponse response = kisApiClient.fetch(token -> webClient.get()
+                                                .uri(uriBuilder -> uriBuilder
+                                                                .path(url)
+                                                                .queryParam("FID_COND_MRKT_DIV_CODE", "J")
+                                                                .queryParam("FID_INPUT_ISCD", stockCode)
+                                                                .queryParam("FID_INPUT_DATE_1", queryDate)
+                                                                .queryParam("FID_ORG_ADJ_PRC", "0")
+                                                                .queryParam("FID_ETC_CLS_CODE", "0")
+                                                                .build())
+                                                .header("content-type", "application/json; charset=utf-8")
+                                                .header("authorization", token)
+                                                .header("appkey", kisApiProperties.getAppkey())
+                                                .header("appsecret", kisApiProperties.getAppsecret())
+                                                .header("tr_id", "FHPTJ04160001")
+                                                .header("custtype", "P"), KisInvestorDailyResponse.class);
 
-                        // Parse and Save (Direct Mapping: Value[i] -> Date[i])
-                        List<KisInvestorDailyResponse.InvestorDailyOutput> list = response.getOutput();
-                        // API returns data in descending order (latest first)
-                        // Iterate all items
-                        for (int i = 0; i < list.size(); i++) {
-                                KisInvestorDailyResponse.InvestorDailyOutput item = list.get(i);
-
-                                LocalDate date = LocalDate.parse(item.getStckBsopDate(),
-                                                DateTimeFormatter.BASIC_ISO_DATE);
-
-                                // Check duplicate
-                                if (stockInvestorDailyRepository.existsByStockAndDate(stock, date)) {
-                                        continue; // Skip if exists
+                                if (response == null || response.getOutput() == null
+                                                || response.getOutput().isEmpty()) {
+                                        break;
                                 }
 
-                                BigDecimal frgn = parseBigDec(item.getFrgnNtbyTrPbmn());
-                                BigDecimal prsn = parseBigDec(item.getPrsnNtbyTrPbmn());
-                                BigDecimal orgn = parseBigDec(item.getOrgnNtbyTrPbmn());
-                                BigDecimal etc = parseBigDec(item.getEtcCorpNtbyTrPbmn());
+                                List<KisInvestorDailyResponse.InvestorDailyOutput> list = response.getOutput();
+                                for (KisInvestorDailyResponse.InvestorDailyOutput item : list) {
+                                        LocalDate date = LocalDate.parse(item.getStckBsopDate(),
+                                                        DateTimeFormatter.BASIC_ISO_DATE);
 
-                                Long frgnQty = parseLong(item.getFrgnNtbyQty());
-                                Long prsnQty = parseLong(item.getPrsnNtbyQty());
-                                Long orgnQty = parseLong(item.getOrgnNtbyQty());
+                                        if (date.isBefore(targetDate)) {
+                                                currentDate = date; // Force exit outer loop
+                                                break;
+                                        }
 
-                                StockInvestorDaily entity = StockInvestorDaily.builder()
-                                                .stock(stock)
-                                                .date(date)
-                                                .foreignerNetBuyAmount(frgn)
-                                                .personalNetBuyAmount(prsn)
-                                                .institutionNetBuyAmount(orgn)
-                                                .etcCorporateNetBuyAmount(etc)
-                                                .foreignerNetBuyQuantity(frgnQty)
-                                                .personalNetBuyQuantity(prsnQty)
-                                                .institutionNetBuyQuantity(orgnQty)
-                                                .build();
+                                        if (stockInvestorDailyRepository.existsByStockAndDate(stock, date)) {
+                                                continue;
+                                        }
 
-                                stockInvestorDailyRepository.save(entity);
+                                        BigDecimal frgn = parseBigDec(item.getFrgnNtbyTrPbmn());
+                                        BigDecimal prsn = parseBigDec(item.getPrsnNtbyTrPbmn());
+                                        BigDecimal orgn = parseBigDec(item.getOrgnNtbyTrPbmn());
+                                        BigDecimal etc = parseBigDec(item.getEtcCorpNtbyTrPbmn());
+
+                                        Long frgnQty = parseLong(item.getFrgnNtbyQty());
+                                        Long prsnQty = parseLong(item.getPrsnNtbyQty());
+                                        Long orgnQty = parseLong(item.getOrgnNtbyQty());
+
+                                        StockInvestorDaily entity = StockInvestorDaily.builder()
+                                                        .stock(stock)
+                                                        .date(date)
+                                                        .foreignerNetBuyAmount(frgn)
+                                                        .personalNetBuyAmount(prsn)
+                                                        .institutionNetBuyAmount(orgn)
+                                                        .etcCorporateNetBuyAmount(etc)
+                                                        .foreignerNetBuyQuantity(frgnQty)
+                                                        .personalNetBuyQuantity(prsnQty)
+                                                        .institutionNetBuyQuantity(orgnQty)
+                                                        .build();
+
+                                        stockInvestorDailyRepository.save(entity);
+                                }
+
+                                // Update currentDate to the oldest date in the current response to fetch the
+                                // next page
+                                String oldestDateStr = list.get(list.size() - 1).getStckBsopDate();
+                                LocalDate oldestDate = LocalDate.parse(oldestDateStr, DateTimeFormatter.BASIC_ISO_DATE);
+
+                                if (!oldestDate.isBefore(currentDate)) {
+                                        // If the oldest date is not before current date, we are stuck or reached end
+                                        break;
+                                }
+                                currentDate = oldestDate;
+
+                                // Respect rate limits
+                                Thread.sleep(200);
+
+                        } catch (Exception e) {
+                                log.error("Error fetching investor trend for {}: {}", stockCode, e.getMessage());
+                                break;
                         }
-                        log.info("Saved investor trend data for {}", stockCode);
-
-                } catch (Exception e) {
-                        log.error("Failed to fetch/save investor trend daily for {}: {}", stockCode, e.getMessage());
                 }
+                log.info("Finished fetching investor trend data for {}", stockCode);
+
+                // Clear caches to reflect new data
+                evictInvestorCaches(stockCode);
+        }
+
+        private void evictInvestorCaches(String stockCode) {
+                try {
+                        if (cacheManager.getCache("investorTrend") != null) {
+                                cacheManager.getCache("investorTrend").evict(stockCode);
+                        }
+                        if (cacheManager.getCache("staticAnalysis") != null) {
+                                cacheManager.getCache("staticAnalysis").evict(stockCode);
+                        }
+                        // Also clear AI valuation report cache if any
+                        if (cacheManager.getCache("valuationReport") != null) {
+                                cacheManager.getCache("valuationReport").evict(stockCode);
+                        }
+
+                        // DB-level Cache Clear (Force AI Re-generation)
+                        stockAiSummaryRepository.deleteByStockCode(stockCode);
+                        stockStaticAnalysisRepository.deleteByStockCode(stockCode);
+
+                        log.info("Evicted Redis and DB caches for {}", stockCode);
+                } catch (Exception e) {
+                        log.warn("Failed to evict caches for {}: {}", stockCode, e.getMessage());
+                }
+        }
+
+        private BigDecimal getEffectiveQuantity(BigDecimal amt, Long qty, LocalDate date,
+                        Map<LocalDate, BigDecimal> priceMap, BigDecimal fallbackPrice) {
+                // 1. If actual quantity exists, use it
+                if (qty != null && qty > 0) {
+                        return new BigDecimal(qty);
+                }
+
+                // 2. If quantity is 0 but amount exists, estimate using historical price
+                if (amt != null && amt.compareTo(BigDecimal.ZERO) != 0) {
+                        BigDecimal price = priceMap.get(date);
+                        // Fallback to currentPrice if historical price is missing
+                        if (price == null || price.compareTo(BigDecimal.ZERO) <= 0) {
+                                price = fallbackPrice;
+                        }
+
+                        if (price != null && price.compareTo(BigDecimal.ZERO) > 0) {
+                                // Estimated Qty = Amount (Million KRW) * 1,000,000 / Price (KRW)
+                                return amt.abs().multiply(new BigDecimal("1000000"))
+                                                .divide(price, 0, RoundingMode.HALF_UP);
+                        }
+                }
+
+                return BigDecimal.ZERO;
         }
 
         private BigDecimal parseBigDec(String val) {
@@ -934,6 +1182,11 @@ public class KisStockService {
                 List<Stock> stocks = stockRepository.findAll();
                 for (Stock stock : stocks) {
                         try {
+                                if (stock.isSuspended()) {
+                                        log.info("Skipping investor trend update for suspended stock: {} ({})",
+                                                        stock.getStockName(), stock.getStockCode());
+                                        continue;
+                                }
                                 fetchAndSaveInvestorTrend(stock.getStockCode());
                                 Thread.sleep(100); // Rate limit (10 req/sec safe limit is ~100ms)
                         } catch (Exception e) {

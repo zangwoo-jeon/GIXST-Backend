@@ -34,6 +34,9 @@ public class Stock {
     @Column(nullable = false)
     private StockType stockType = StockType.DOMESTIC;
 
+    @Column(nullable = false)
+    private boolean isSuspended = false;
+
     public enum StockType {
         DOMESTIC, // 국내 주식
         FOREIGN_ETF // 국내 상장 해외 ETF
@@ -64,5 +67,9 @@ public class Stock {
 
     public void clearIndustries() {
         this.stockIndustries.clear();
+    }
+
+    public void updateSuspensionStatus(boolean isSuspended) {
+        this.isSuspended = isSuspended;
     }
 }

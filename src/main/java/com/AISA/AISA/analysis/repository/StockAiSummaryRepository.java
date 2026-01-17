@@ -9,4 +9,6 @@ import java.util.Optional;
 @Repository
 public interface StockAiSummaryRepository extends JpaRepository<StockAiSummary, Long> {
     Optional<StockAiSummary> findByStockCode(String stockCode);
+
+    void deleteByStockCode(String stockCode);
 }

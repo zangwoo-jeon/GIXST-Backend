@@ -23,10 +23,18 @@ public class KisRankService {
     private final StockInvestorDailyRepository stockInvestorDailyRepository;
 
     @Transactional(readOnly = true)
-    public InvestorRankResponseDto getInvestorRanking(String type, int limit) {
-        LocalDate threeMonthsAgo = LocalDate.now().minusMonths(3);
+    public InvestorRankResponseDto getInvestorRanking(String period, String type, int limit) {
+        LocalDate startDate;
+        if ("1m".equalsIgnoreCase(period)) {
+            startDate = LocalDate.now().minusMonths(1);
+        } else if ("1y".equalsIgnoreCase(period)) {
+            startDate = LocalDate.now().minusYears(1);
+        } else {
+            startDate = LocalDate.now().minusMonths(3);
+        }
+
         List<InvestorTrendAggregationProjection> aggregatedData = stockInvestorDailyRepository
-                .findAggregatedInvestorTrend(threeMonthsAgo);
+                .findAggregatedInvestorTrend(startDate);
 
         Comparator<InvestorTrendAggregationProjection> comparator;
         if ("foreigner_buy".equalsIgnoreCase(type)) {

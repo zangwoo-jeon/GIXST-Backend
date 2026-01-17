@@ -21,7 +21,6 @@ import com.AISA.AISA.global.response.SuccessResponse; // Corrected Import
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import java.util.stream.Collectors; // Import
@@ -148,21 +147,36 @@ public class KisInformationController {
         }
 
         @GetMapping("/investor-trend/daily/{stockCode}")
-        @Operation(summary = "종목별 일자별 수급 데이터 조회 (최근 3개월)", description = "DB에 저장된 특정 종목의 일자별 외국인/기관/개인 순매수 정보를 조회합니다.")
+        @Operation(summary = "종목별 일자별 수급 데이터 조회 (기간 선택)", description = "DB에 저장된 특정 종목의 일자별 외국인/기관/개인 순매수 정보를 조회합니다. (period: 1m, 3m, 1y)")
         public ResponseEntity<SuccessResponse<List<StockInvestorDailyDto>>> getDailyInvestorTrend(
-                        @PathVariable String stockCode) {
+                        @PathVariable String stockCode,
+                        @RequestParam(defaultValue = "3m") String period) {
                 return ResponseEntity.ok(new SuccessResponse<>(true, "일자별 투자자 수급 조회 성공",
-                                kisStockService.getDailyInvestorTrend(stockCode)));
+                                kisStockService.getDailyInvestorTrend(stockCode, period)));
         }
 
         @PostMapping("/investor-trend/init-all")
-        @Operation(summary = "전체 종목 투자자 수급 데이터 초기화 (DB)", description = "모든 종목에 대해 최근 3개월치 일자별 수급 데이터를 가져와 DB에 저장합니다. (비동기)")
+        @Operation(summary = "전체 종목 투자자 수급 데이터 초기화 (DB)", description = "모든 종목에 대해 최근 1년치 일자별 수급 데이터를 가져와 DB에 저장합니다. (비동기)")
         public ResponseEntity<SuccessResponse<String>> initAllInvestorTrends() {
                 new Thread(() -> {
                         kisStockService.updateAllInvestorTrends();
                 }).start();
                 return ResponseEntity.ok(new SuccessResponse<>(true, "전체 종목 수급 데이터 초기화 시작 (백그라운드)",
                                 "Started background task."));
+        }
+
+        @PostMapping("/investor-trend/refresh/{stockCode}")
+        @Operation(summary = "특정 종목 투자자 수급 데이터 갱신", description = "특정 종목에 대해 최근 1년치 일자별 수급 데이터를 가져와 DB를 갱신합니다.")
+        public ResponseEntity<SuccessResponse<String>> refreshInvestorTrend(@PathVariable String stockCode) {
+                kisStockService.fetchAndSaveInvestorTrend(stockCode);
+                return ResponseEntity.ok(new SuccessResponse<>(true, "종목 수급 데이터 갱신 성공 (" + stockCode + ")", null));
+        }
+
+        @DeleteMapping("/investor-trend/all")
+        @Operation(summary = "전체 종목 수급 데이터 초기화 (DB 데이터 전체 삭제)", description = "DB에 저장된 모든 종목의 일자별 수급 데이터를 삭제합니다. 초기화(init-all) 전 깨끗한 상태를 만들 때 사용합니다.")
+        public ResponseEntity<SuccessResponse<String>> deleteAllInvestorTrendData() {
+                kisStockService.deleteAllInvestorData();
+                return ResponseEntity.ok(new SuccessResponse<>(true, "전체 종목 수급 데이터 삭제 성공", null));
         }
 
         @PostMapping("/categorize/init")

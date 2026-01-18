@@ -1,5 +1,6 @@
 package com.AISA.AISA.kisStock.dto.InvestorTrend;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.*;
 
 import java.math.BigDecimal;
@@ -11,19 +12,31 @@ import java.math.BigDecimal;
 @Builder
 @ToString
 public class InvestorTrendDto {
+    @JsonIgnore
     private String recent1MonthForeignerNetBuy;
+    @JsonIgnore
     private String recent1MonthInstitutionNetBuy;
+    @JsonIgnore
     private String recent3MonthForeignerNetBuy;
+    @JsonIgnore
     private String recent3MonthInstitutionNetBuy;
+    @JsonIgnore
     private String recent1YearForeignerNetBuy;
+    @JsonIgnore
     private String recent1YearInstitutionNetBuy;
 
     // 고급 분석 지표
+    @JsonIgnore
     private BigDecimal foreignerAvgPrice; // 외인 매집 평단가 (VWAP)
+    @JsonIgnore
     private BigDecimal institutionAvgPrice; // 기관 매집 평단가 (VWAP)
+    @JsonIgnore
     private BigDecimal foreignerOverheat; // 외인 과열 지수 (%)
+    @JsonIgnore
     private BigDecimal institutionOverheat; // 기관 과열 지수 (%)
+    @JsonIgnore
     private double foreignerZScore; // 외인 수급 강도 (Z-Score)
+    @JsonIgnore
     private double institutionZScore; // 기관 수급 강도 (Z-Score)
 
     private double supplyScore; // 종합 수급 점수 (0-100)

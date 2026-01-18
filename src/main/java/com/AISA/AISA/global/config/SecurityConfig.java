@@ -102,7 +102,8 @@ public class SecurityConfig {
                                                                 "/api/indices/kospi-usd-ratio",
                                                                 "/api/indices/kosdaq-usd-ratio",
                                                                 "/api/analysis/valuation/*/static-report",
-                                                                "/api/stocks/financial/investor-trend/daily/*")
+                                                                "/api/stocks/financial/investor-trend/daily/*",
+                                                                "/api/stocks/investor/*/accumulated")
                                                 .permitAll()
                                                 .anyRequest().authenticated())
                                 .oauth2Login(oauth2 -> oauth2

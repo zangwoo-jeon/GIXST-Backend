@@ -2,10 +2,12 @@ package com.AISA.AISA.kisStock.Entity.stock;
 
 // import com.AISA.AISA.kisStock.enums.Industry; // Removed
 // import com.AISA.AISA.kisStock.enums.SubIndustry; // Removed
+import com.AISA.AISA.kisStock.enums.MarketType;
 import java.util.ArrayList;
 import java.util.List;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
+import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
@@ -24,8 +26,9 @@ public class Stock {
     @Column(nullable = false)
     private String stockName;
 
+    @Enumerated(EnumType.STRING)
     @Column(nullable = false)
-    private String marketName;
+    private MarketType marketName;
 
     @OneToMany(mappedBy = "stock", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<StockIndustry> stockIndustries = new ArrayList<>();
@@ -39,21 +42,35 @@ public class Stock {
 
     public enum StockType {
         DOMESTIC, // 국내 주식
-        FOREIGN_ETF // 국내 상장 해외 ETF
+        FOREIGN_ETF, // 국내 상장 해외 ETF
+        US_STOCK // 미국 주식
     }
 
-    public static Stock create(String stockCode, String stockName, String marketName) {
+    public static Stock create(String stockCode, String stockName, MarketType market) {
         Stock stock = new Stock();
         stock.stockCode = stockCode;
         stock.stockName = stockName;
-        stock.marketName = marketName;
+        stock.marketName = market;
         stock.stockType = StockType.DOMESTIC; // Default
         return stock;
     }
 
-    public void updateInfo(String newName, String newMarketName) {
+    public static Stock createOverseas(String stockCode, String stockName, MarketType market) {
+        Stock stock = new Stock();
+        stock.stockCode = stockCode;
+        stock.stockName = stockName;
+        stock.marketName = market;
+        stock.stockType = StockType.US_STOCK;
+        return stock;
+    }
+
+    public void updateInfo(String newName, MarketType newMarket) {
         this.stockName = newName;
-        this.marketName = newMarketName;
+        this.marketName = newMarket;
+    }
+
+    public String getCurrency() {
+        return this.marketName != null ? this.marketName.getCurrency() : "KRW";
     }
 
     public void updateStockType(StockType stockType) {

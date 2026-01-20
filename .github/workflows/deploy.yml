@@ -116,6 +116,8 @@ jobs:
               -e KIS_FINANCIAL_RATIO_URL="/uapi/domestic-stock/v1/finance/financial-ratio" \
               -e KIS_INVESTOR_TREND_URL="/uapi/domestic-stock/v1/quotations/inquire-investor" \
               -e KIS_INVESTOR_TREND_DAILY_URL="/uapi/domestic-stock/v1/quotations/investor-trade-by-stock-daily" \
+              -e KIS_OVERSEA_PRICE_URL: "/uapi/overseas-price/v1/quotations/price-detail" \
+              -e KIS_OVERSEA_CHART_PRICE_URL: "/uapi/overseas-price/v1/quotations/dailyprice" \
               \
               -e JWT_SECRET="${{ secrets.JWT_SECRET }}" \
               -e JWT_ACCESS_TOKEN_EXPIRATION_TIME="21600000" \

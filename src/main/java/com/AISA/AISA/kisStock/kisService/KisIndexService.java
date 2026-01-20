@@ -3,6 +3,7 @@ package com.AISA.AISA.kisStock.kisService;
 import com.AISA.AISA.kisStock.Entity.Index.IndexDailyData;
 import com.AISA.AISA.kisStock.Entity.Index.OverseasIndexDailyData;
 import com.AISA.AISA.kisStock.config.KisApiProperties;
+import com.AISA.AISA.kisOverseasStock.config.KisOverseasApiProperties;
 import com.AISA.AISA.kisStock.dto.Index.IndexChartInfoDto;
 import com.AISA.AISA.kisStock.dto.Index.IndexChartPriceDto;
 import com.AISA.AISA.kisStock.dto.Index.IndexChartResponseDto;
@@ -43,6 +44,7 @@ public class KisIndexService {
 
     private final WebClient webClient;
     private final KisApiProperties kisApiProperties;
+    private final KisOverseasApiProperties overseasApiProperties; // Inject
     private final IndexDailyDataRepository indexDailyDataRepository;
     private final OverseasIndexDailyDataRepository overseasIndexDailyDataRepository;
     private final KisMacroService kisMacroService;
@@ -524,7 +526,7 @@ public class KisIndexService {
             String endDate) {
         KisOverseasDailyPriceResponseDto response = kisApiClient.fetch(token -> webClient.get()
                 .uri(uriBuilder -> uriBuilder
-                        .path(kisApiProperties.getOverseaUrl())
+                        .path(overseasApiProperties.getOverseaUrl())
                         .queryParam("FID_COND_MRKT_DIV_CODE", marketDivCode)
                         .queryParam("FID_INPUT_ISCD", symbol)
                         .queryParam("FID_INPUT_DATE_1", startDate)
@@ -553,7 +555,8 @@ public class KisIndexService {
 
         KisOverseasDailyPriceResponseDto response = kisApiClient.fetch(token -> webClient.get()
                 .uri(uriBuilder -> uriBuilder
-                        .path(kisApiProperties.getOverseaUrl()) // Use the same URL as history fetch (FHKST03030100)
+                        .path(overseasApiProperties.getOverseaUrl()) // Use the same URL as history fetch
+                                                                     // (FHKST03030100)
                         .queryParam("FID_COND_MRKT_DIV_CODE", "N")
                         .queryParam("FID_INPUT_ISCD", symbol)
                         .queryParam("FID_INPUT_DATE_1", today)

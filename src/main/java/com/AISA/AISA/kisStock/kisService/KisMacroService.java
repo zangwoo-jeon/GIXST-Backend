@@ -1,6 +1,7 @@
 package com.AISA.AISA.kisStock.kisService;
 
 import com.AISA.AISA.global.exception.BusinessException;
+import com.AISA.AISA.kisOverseasStock.config.KisOverseasApiProperties;
 import com.AISA.AISA.kisStock.config.KisApiProperties;
 import com.AISA.AISA.kisStock.dto.Macro.KisOverseasDailyPriceDto;
 import com.AISA.AISA.kisStock.dto.Macro.KisOverseasDailyPriceResponseDto;
@@ -38,6 +39,7 @@ public class KisMacroService {
 
     private final WebClient webClient;
     private final KisApiProperties kisApiProperties;
+    private final KisOverseasApiProperties overseasApiProperties; // Inject
     private final EcosApiProperties ecosApiProperties; // Added
     private final KisApiClient kisApiClient;
 
@@ -375,7 +377,7 @@ public class KisMacroService {
             String endDate) {
         KisOverseasDailyPriceResponseDto response = kisApiClient.fetch(token -> webClient.get()
                 .uri(uriBuilder -> uriBuilder
-                        .path(kisApiProperties.getOverseaUrl())
+                        .path(overseasApiProperties.getOverseaUrl())
                         .queryParam("FID_COND_MRKT_DIV_CODE", marketDivCode)
                         .queryParam("FID_INPUT_ISCD", symbol)
                         .queryParam("FID_INPUT_DATE_1", startDate)
@@ -404,7 +406,7 @@ public class KisMacroService {
 
         KisOverseasDailyPriceResponseDto response = kisApiClient.fetch(token -> webClient.get()
                 .uri(uriBuilder -> uriBuilder
-                        .path(kisApiProperties.getOverseaUrl())
+                        .path(overseasApiProperties.getOverseaUrl())
                         .queryParam("FID_COND_MRKT_DIV_CODE", "X")
                         .queryParam("FID_INPUT_ISCD", symbol)
                         .queryParam("FID_INPUT_DATE_1", today)

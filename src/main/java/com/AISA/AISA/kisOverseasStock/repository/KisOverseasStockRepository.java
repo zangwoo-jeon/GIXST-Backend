@@ -11,4 +11,8 @@ public interface KisOverseasStockRepository extends JpaRepository<Stock, Long> {
 
     @Query("SELECT s FROM Stock s WHERE (s.stockCode LIKE %:keyword% OR s.stockName LIKE %:keyword%) AND s.stockType = 'US_STOCK'")
     List<Stock> findByKeyword(@Param("keyword") String keyword);
+
+    List<Stock> findAllByStockType(Stock.StockType stockType);
+
+    List<Stock> findAllByStockTypeAndStockIdGreaterThanEqual(Stock.StockType stockType, Long stockId);
 }

@@ -17,7 +17,6 @@ public class KisApiProperties {
     private String indexChartUrl;
     private String stockChartUrl;
     private String dividendUrl;
-    private String overseaUrl;
     private String volumeRankUrl;
     private String incomeStatementUrl;
     private String balanceSheetUrl;

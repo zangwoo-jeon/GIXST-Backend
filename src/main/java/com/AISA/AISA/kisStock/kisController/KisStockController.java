@@ -2,9 +2,8 @@ package com.AISA.AISA.kisStock.kisController;
 
 import com.AISA.AISA.global.response.SuccessResponse;
 
-import com.AISA.AISA.kisStock.dto.StockPrice.StockChartResponseDto;
 import com.AISA.AISA.kisStock.dto.StockPrice.StockPriceDto;
-import com.AISA.AISA.kisStock.dto.StockSearchResponseDto;
+import com.AISA.AISA.kisStock.dto.StockSimpleSearchResponseDto; // Simplified DTO
 import com.AISA.AISA.kisStock.dto.VolumeRank.VolumeRankDto;
 import com.AISA.AISA.kisStock.kisService.Auth.KisAuthService;
 import com.AISA.AISA.kisStock.kisService.KisStockService;
@@ -106,10 +105,10 @@ public class KisStockController {
     }
 
     @GetMapping("/search")
-    @Operation(summary = "주식 검색", description = "종목 코드 또는 종목명으로 주식을 검색합니다 (포함 검색).")
-    public ResponseEntity<SuccessResponse<List<StockSearchResponseDto>>> searchStocks(
+    @Operation(summary = "주식 검색", description = "종목 코드 또는 종목명으로 주식을 검색합니다 (포함 검색, 국내 주식 전용).")
+    public ResponseEntity<SuccessResponse<List<StockSimpleSearchResponseDto>>> searchStocks(
             @RequestParam String keyword) {
-        List<StockSearchResponseDto> result = kisStockService
+        List<StockSimpleSearchResponseDto> result = kisStockService
                 .searchStocks(keyword);
         return ResponseEntity.ok(new SuccessResponse<>(true, "주식 검색 성공", result));
     }

@@ -1,5 +1,6 @@
 package com.AISA.AISA.kisStock.kisService;
 
+import com.AISA.AISA.kisStock.enums.MarketType;
 import com.AISA.AISA.global.exception.BusinessException;
 
 import com.AISA.AISA.kisStock.Entity.stock.Stock;
@@ -7,6 +8,7 @@ import com.AISA.AISA.kisStock.Entity.stock.StockDailyData;
 import com.AISA.AISA.kisStock.Entity.stock.StockMarketCap;
 import com.AISA.AISA.kisStock.config.KisApiProperties;
 import com.AISA.AISA.kisStock.dto.StockSearchResponseDto;
+import com.AISA.AISA.kisStock.dto.StockSimpleSearchResponseDto; // Import New DTO
 import com.AISA.AISA.kisStock.dto.VolumeRank.KisVolumeRankApiResponse;
 import com.AISA.AISA.kisStock.dto.VolumeRank.VolumeRankDto;
 import com.AISA.AISA.kisStock.dto.StockPrice.KisPriceApiResponse;
@@ -593,10 +595,11 @@ public class KisStockService {
                 }
         }
 
-        public List<StockSearchResponseDto> searchStocks(String keyword) {
-                List<Stock> stocks = stockRepository.findByStockCodeContainingOrStockNameContaining(keyword, keyword);
+        public List<StockSimpleSearchResponseDto> searchStocks(String keyword) {
+                // Modified to search only DOMESTIC stocks using domestic-specific query
+                List<Stock> stocks = stockRepository.findDomesticByKeyword(keyword);
                 return stocks.stream()
-                                .map(stock -> StockSearchResponseDto.builder()
+                                .map(stock -> StockSimpleSearchResponseDto.builder()
                                                 .stockCode(stock.getStockCode())
                                                 .stockName(stock.getStockName())
                                                 .marketName(stock.getMarketName())

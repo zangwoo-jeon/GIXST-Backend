@@ -1,36 +1,34 @@
 package com.AISA.AISA.kisStock.kisController;
 
 import com.AISA.AISA.global.response.SuccessResponse;
+import com.AISA.AISA.kisStock.Entity.stock.Stock;
 import com.AISA.AISA.kisStock.dto.FinancialRank.BalanceSheetDto;
-import com.AISA.AISA.kisStock.dto.FinancialRank.FinancialStatementDto;
-import com.AISA.AISA.kisStock.dto.FinancialRank.FinancialStatementDto;
 import com.AISA.AISA.kisStock.dto.FinancialRank.FinancialRatioRankDto;
+import com.AISA.AISA.kisStock.dto.FinancialRank.FinancialStatementDto;
 import com.AISA.AISA.kisStock.dto.FinancialRank.InvestmentMetricDto;
+import com.AISA.AISA.kisStock.dto.IndustryResponseDto;
+import com.AISA.AISA.kisStock.dto.InvestorTrend.InvestorTrendDto;
+import com.AISA.AISA.kisStock.dto.InvestorTrend.StockInvestorDailyDto;
 import com.AISA.AISA.kisStock.dto.StockPrice.StockPriceDto;
 import com.AISA.AISA.kisStock.dto.StockSearchResponseDto;
-import com.AISA.AISA.kisStock.Entity.stock.Stock; // Import
+import com.AISA.AISA.kisStock.dto.TaxonomyDto;
 import com.AISA.AISA.kisStock.kisService.CompetitorAnalysisService;
-import com.AISA.AISA.kisStock.kisService.IndustryCategorizationService; // Import
+import com.AISA.AISA.kisStock.kisService.IndustryCategorizationService;
 import com.AISA.AISA.kisStock.kisService.KisInformationService;
 import com.AISA.AISA.kisStock.kisService.KisStockService;
-import com.AISA.AISA.kisStock.dto.InvestorTrend.InvestorTrendDto;
-import com.AISA.AISA.kisStock.dto.InvestorTrend.StockInvestorDailyDto; // New DTO
-import com.AISA.AISA.kisStock.dto.IndustryResponseDto; // Import DTO
-import com.AISA.AISA.kisStock.repository.StockRepository; // Add Repo
-import com.AISA.AISA.global.response.SuccessResponse; // Corrected Import
+import com.AISA.AISA.kisStock.repository.StockRepository;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
-import java.util.stream.Collectors; // Import
-import com.AISA.AISA.kisStock.dto.TaxonomyDto;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/stocks/financial")

@@ -54,10 +54,19 @@ public class KisOverseasStockService {
     }
 
     public StockPriceDto getOverseasStockPrice(String stockCode) {
-        Stock stock = overseasStockRepository.findByKeyword(stockCode).stream()
-                .filter(s -> s.getStockCode().equals(stockCode))
-                .findFirst()
-                .orElseThrow(() -> new BusinessException(KisApiErrorCode.STOCK_NOT_FOUND));
+        Stock stock = overseasStockRepository.findByStockCodeAndStockType(stockCode, Stock.StockType.US_STOCK)
+                .orElseGet(() -> {
+                    try {
+                        Long stockId = Long.parseLong(stockCode);
+                        return overseasStockRepository.findById(stockId).orElse(null);
+                    } catch (NumberFormatException e) {
+                        return null;
+                    }
+                });
+
+        if (stock == null) {
+            throw new BusinessException(KisApiErrorCode.STOCK_NOT_FOUND);
+        }
 
         KisOverseasPriceApiResponse response;
         try {
@@ -66,7 +75,7 @@ public class KisOverseasStockService {
                             .path(overseasApiProperties.getOverseaPriceUrl())
                             .queryParam("AUTH", "")
                             .queryParam("EXCD", stock.getMarketName().getExchangeCode())
-                            .queryParam("SYMB", stockCode)
+                            .queryParam("SYMB", stock.getStockCode())
                             .build())
                     .header("Authorization", token)
                     .header("appKey", kisApiProperties.getAppkey())
@@ -119,10 +128,19 @@ public class KisOverseasStockService {
 
     public List<KisOverseasStockChartDto> getOverseasStockChart(String stockCode, String startDate, String endDate,
             String periodType) {
-        Stock stock = overseasStockRepository.findByKeyword(stockCode).stream()
-                .filter(s -> s.getStockCode().equals(stockCode))
-                .findFirst()
-                .orElseThrow(() -> new BusinessException(KisApiErrorCode.STOCK_NOT_FOUND));
+        Stock stock = overseasStockRepository.findByStockCodeAndStockType(stockCode, Stock.StockType.US_STOCK)
+                .orElseGet(() -> {
+                    try {
+                        Long stockId = Long.parseLong(stockCode);
+                        return overseasStockRepository.findById(stockId).orElse(null);
+                    } catch (NumberFormatException e) {
+                        return null;
+                    }
+                });
+
+        if (stock == null) {
+            throw new BusinessException(KisApiErrorCode.STOCK_NOT_FOUND);
+        }
 
         if (!"D".equalsIgnoreCase(periodType)) {
             return fetchAndMapFromApi(stock, startDate, endDate, periodType);
@@ -194,12 +212,23 @@ public class KisOverseasStockService {
         LocalDate targetStartDate = LocalDate.parse(startDateStr, formatter);
         LocalDate currentDate = LocalDate.now();
 
-        Stock stock = overseasStockRepository.findByKeyword(stockCode).stream()
-                .filter(s -> s.getStockCode().equals(stockCode))
-                .findFirst()
-                .orElseThrow(() -> new BusinessException(KisApiErrorCode.STOCK_NOT_FOUND));
+        Stock stock = overseasStockRepository.findByStockCodeAndStockType(stockCode, Stock.StockType.US_STOCK)
+                .orElseGet(() -> {
+                    try {
+                        Long stockId = Long.parseLong(stockCode);
+                        return overseasStockRepository.findById(stockId).orElse(null);
+                    } catch (NumberFormatException e) {
+                        return null;
+                    }
+                });
 
-        log.info("Starting historical overseas stock data fetch for {} from {} to {}", stockCode, currentDate,
+        if (stock == null) {
+            log.warn("Stock not found for code: {}. Skipping historical data fetch.", stockCode);
+            return;
+        }
+
+        log.info("Starting historical overseas stock data fetch for {} from {} to {}", stock.getStockCode(),
+                currentDate,
                 targetStartDate);
 
         int consecutiveFailures = 0;
@@ -214,7 +243,8 @@ public class KisOverseasStockService {
                 KisOverseasChartApiResponse response = fetchChartFromApi(stock, "0", currentDateStr);
 
                 if (response == null || response.getOutput2() == null || response.getOutput2().isEmpty()) {
-                    log.warn("No data returned for {} at {}. Stopping or retrying.", stockCode, currentDateStr);
+                    log.warn("No data returned for {} at {}. Stopping or retrying.", stock.getStockCode(),
+                            currentDateStr);
                     consecutiveFailures++;
                     if (consecutiveFailures > MAX_CONSECUTIVE_FAILURES)
                         break;
@@ -239,11 +269,11 @@ public class KisOverseasStockService {
                 Thread.sleep(100); // Rate limit protection
 
             } catch (Exception e) {
-                log.error("Error fetching historical data for {}: {}", stockCode, e.getMessage());
+                log.error("Error fetching historical data for {}: {}", stock.getStockCode(), e.getMessage());
                 currentDate = currentDate.minusDays(1);
             }
         }
-        log.info("Finished historical overseas stock data fetch for {}", stockCode);
+        log.info("Finished historical overseas stock data fetch for {}", stock.getStockCode());
     }
 
     public void fetchAllOverseasStocksHistoricalData(String startDateStr) {

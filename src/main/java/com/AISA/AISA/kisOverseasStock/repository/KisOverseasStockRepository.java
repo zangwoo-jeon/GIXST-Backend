@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.util.List;
+import java.util.Optional;
 
 public interface KisOverseasStockRepository extends JpaRepository<Stock, Long> {
 
@@ -13,6 +14,8 @@ public interface KisOverseasStockRepository extends JpaRepository<Stock, Long> {
     List<Stock> findByKeyword(@Param("keyword") String keyword);
 
     List<Stock> findAllByStockType(Stock.StockType stockType);
+
+    Optional<Stock> findByStockCodeAndStockType(String stockCode, Stock.StockType stockType);
 
     List<Stock> findAllByStockTypeAndStockIdGreaterThanEqual(Stock.StockType stockType, Long stockId);
 }

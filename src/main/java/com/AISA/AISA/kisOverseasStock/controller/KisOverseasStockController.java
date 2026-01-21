@@ -48,7 +48,7 @@ public class KisOverseasStockController {
     }
 
     @PostMapping("/init-history/{stockCode}")
-    @Operation(summary = "해외 주식 초기 데이터 구축", description = "특정 해외 주식의 과거 데이터를 수집하여 DB에 저장합니다.")
+    @Operation(summary = "해외 주식 초기 데이터 구축", description = "특정 해외 주식의 과거 데이터를 수집하여 DB에 저장합니다. stockCode는 티커(예: AAPL) 또는 DB의 stockId를 사용할 수 있습니다.")
     public ResponseEntity<SuccessResponse<String>> initHistoricalData(
             @PathVariable String stockCode,
             @RequestParam String startDate) {

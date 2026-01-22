@@ -47,13 +47,13 @@ public class KisOverseasStockController {
                 kisOverseasStockService.getOverseasStockChart(stockCode, startDate, endDate, periodType)));
     }
 
-    @PostMapping("/init-history/{stockCode}")
-    @Operation(summary = "해외 주식 초기 데이터 구축", description = "특정 해외 주식의 과거 데이터를 수집하여 DB에 저장합니다. stockCode는 티커(예: AAPL) 또는 DB의 stockId를 사용할 수 있습니다.")
+    @PostMapping("/init-history/{stockId}")
+    @Operation(summary = "해외 주식 초기 데이터 구축", description = "특정 해외 주식의 과거 데이터를 수집하여 DB에 저장합니다. stockId는 DB의 ID 또는 티커(예: AAPL)를 사용할 수 있습니다.")
     public ResponseEntity<SuccessResponse<String>> initHistoricalData(
-            @PathVariable String stockCode,
+            @PathVariable String stockId,
             @RequestParam String startDate) {
         // Run asynchronously to avoid blocking
-        new Thread(() -> kisOverseasStockService.fetchAndSaveHistoricalOverseasStockData(stockCode, startDate)).start();
+        new Thread(() -> kisOverseasStockService.fetchAndSaveHistoricalOverseasStockData(stockId, startDate)).start();
         return ResponseEntity.ok(new SuccessResponse<>(true, "해외 주식 초기 데이터 구축 시작 (백그라운드)", null));
     }
 

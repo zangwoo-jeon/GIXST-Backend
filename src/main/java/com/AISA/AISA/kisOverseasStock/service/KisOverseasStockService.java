@@ -207,15 +207,15 @@ public class KisOverseasStockService {
     }
 
     @Transactional
-    public void fetchAndSaveHistoricalOverseasStockData(String stockCode, String startDateStr) {
+    public void fetchAndSaveHistoricalOverseasStockData(String stockIdOrCode, String startDateStr) {
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
         LocalDate targetStartDate = LocalDate.parse(startDateStr, formatter);
         LocalDate currentDate = LocalDate.now();
 
-        Stock stock = overseasStockRepository.findByStockCodeAndStockType(stockCode, Stock.StockType.US_STOCK)
+        Stock stock = overseasStockRepository.findByStockCodeAndStockType(stockIdOrCode, Stock.StockType.US_STOCK)
                 .orElseGet(() -> {
                     try {
-                        Long stockId = Long.parseLong(stockCode);
+                        Long stockId = Long.parseLong(stockIdOrCode);
                         return overseasStockRepository.findById(stockId).orElse(null);
                     } catch (NumberFormatException e) {
                         return null;
@@ -223,7 +223,7 @@ public class KisOverseasStockService {
                 });
 
         if (stock == null) {
-            log.warn("Stock not found for code: {}. Skipping historical data fetch.", stockCode);
+            log.warn("Stock not found for code/ID: {}. Skipping historical data fetch.", stockIdOrCode);
             return;
         }
 

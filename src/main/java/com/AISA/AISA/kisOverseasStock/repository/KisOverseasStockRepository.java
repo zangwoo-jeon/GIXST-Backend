@@ -18,4 +18,7 @@ public interface KisOverseasStockRepository extends JpaRepository<Stock, Long> {
     Optional<Stock> findByStockCodeAndStockType(String stockCode, Stock.StockType stockType);
 
     List<Stock> findAllByStockTypeAndStockIdGreaterThanEqual(Stock.StockType stockType, Long stockId);
+
+    @Query("SELECT s FROM Stock s WHERE s.stockType = 'US_STOCK' AND NOT EXISTS (SELECT 1 FROM OverseasStockDailyData d WHERE d.stock = s)")
+    List<Stock> findStocksWithNoDailyData();
 }

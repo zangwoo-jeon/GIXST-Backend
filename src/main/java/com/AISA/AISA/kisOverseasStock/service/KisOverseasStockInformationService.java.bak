@@ -1,0 +1,278 @@
+﻿package com.AISA.AISA.kisOverseasStock.service;
+
+import com.AISA.AISA.global.errorcode.CommonErrorCode;
+import com.AISA.AISA.global.exception.BusinessException;
+import com.AISA.AISA.kisOverseasStock.config.KisOverseasApiProperties;
+import com.AISA.AISA.kisOverseasStock.dto.KisOverseasPriceApiResponse;
+import com.AISA.AISA.kisOverseasStock.dto.OverseasStockBalanceSheetDto;
+import com.AISA.AISA.kisOverseasStock.dto.OverseasStockFinancialStatementDto;
+import com.AISA.AISA.kisOverseasStock.dto.OverseasStockPriceDetailDto;
+import com.AISA.AISA.kisOverseasStock.entity.OverseasStockBalanceSheet;
+import com.AISA.AISA.kisOverseasStock.entity.OverseasStockFinancialRatio;
+import com.AISA.AISA.kisOverseasStock.entity.OverseasStockFinancialStatement;
+import com.AISA.AISA.kisOverseasStock.dto.OverseasFinancialRatioDto;
+import com.AISA.AISA.kisOverseasStock.repository.KisOverseasStockBalanceSheetRepository;
+import com.AISA.AISA.kisOverseasStock.repository.KisOverseasStockFinancialRatioRepository;
+import com.AISA.AISA.kisOverseasStock.repository.KisOverseasStockFinancialStatementRepository;
+import com.AISA.AISA.kisOverseasStock.repository.KisOverseasStockRepository;
+import com.AISA.AISA.kisStock.Entity.stock.Stock;
+import com.AISA.AISA.kisStock.config.KisApiProperties;
+import com.AISA.AISA.kisStock.exception.KisApiErrorCode;
+import com.AISA.AISA.kisStock.kisService.KisApiClient;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.reactive.function.client.WebClient;
+
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.stream.Collectors;
+
+@Service
+@RequiredArgsConstructor
+@Transactional(readOnly = true)
+@Slf4j
+public class KisOverseasStockInformationService {
+
+        private final KisOverseasStockFinancialStatementRepository financialStatementRepository;
+        private final KisOverseasStockBalanceSheetRepository balanceSheetRepository;
+        private final KisOverseasStockFinancialRatioRepository financialRatioRepository;
+        private final KisOverseasStockRepository overseasStockRepository;
+        private final WebClient webClient;
+        private final KisApiProperties kisApiProperties;
+        private final KisOverseasApiProperties overseasApiProperties;
+        private final KisApiClient kisApiClient;
+
+        private static final BigDecimal UNIT_MULTIPLIER = new BigDecimal("1000000"); // Million USD
+
+        /**
+         * ?뱀젙 醫낅ぉ???먯씡怨꾩궛???곗씠?곕? 議고쉶?⑸땲??
+         */
+        public List<OverseasStockFinancialStatementDto> getFinancialStatements(String stockCode, String divCode) {
+                return financialStatementRepository.findByStockCodeAndDivCodeOrderByStacYymmAsc(stockCode, divCode)
+                                .stream()
+                                .map(fs -> OverseasStockFinancialStatementDto.builder()
+                                                .stacYymm(fs.getStacYymm())
+                                                .totalRevenue(fs.getTotalRevenue())
+                                                .operatingIncome(fs.getOperatingIncome())
+                                                .netIncome(fs.getNetIncome())
+                                                .build())
+                                .collect(Collectors.toList());
+        }
+
+        /**
+         * ?뱀젙 醫낅ぉ???щТ?곹깭???곗씠?곕? 議고쉶?⑸땲??
+         */
+        public List<OverseasStockBalanceSheetDto> getBalanceSheets(String stockCode) {
+                return balanceSheetRepository.findAllByStockCode(stockCode)
+                                .stream()
+                                .map(bs -> OverseasStockBalanceSheetDto.builder()
+                                                .stacYymm(bs.getStacYymm())
+                                                .totalAssets(bs.getTotalAssets())
+                                                .totalLiabilities(bs.getTotalLiabilities())
+                                                .totalCapital(bs.getTotalCapital())
+                                                .build())
+                                .collect(Collectors.toList());
+        }
+
+        /**
+         * ?뱀젙 醫낅ぉ???ㅼ떆媛??곸꽭 媛寃??뺣낫(?쒓?珥앹븸, ?곸옣二쇱닔)瑜?議고쉶?⑸땲??
+         */
+        public OverseasStockPriceDetailDto getPriceDetail(String stockCode) {
+                Stock stock = overseasStockRepository.findByStockCodeAndStockType(stockCode, Stock.StockType.US_STOCK)
+                                .orElseThrow(() -> new BusinessException(KisApiErrorCode.STOCK_NOT_FOUND));
+
+                KisOverseasPriceApiResponse response = kisApiClient.fetch(token -> webClient.get()
+                                .uri(uriBuilder -> {
+                                        String url = overseasApiProperties.getOverseaPriceUrl();
+                                        if (url == null)
+                                                throw new BusinessException(CommonErrorCode.INTERNAL_SERVER_ERROR);
+                                        return uriBuilder
+                                                        .path(url)
+                                                        .queryParam("AUTH", "")
+                                                        .queryParam("EXCD", stock.getMarketName().getExchangeCode())
+                                                        .queryParam("SYMB", stock.getStockCode())
+                                                        .build();
+                                })
+                                .header("Authorization", token)
+                                .header("appKey", kisApiProperties.getAppkey())
+                                .header("appSecret", kisApiProperties.getAppsecret())
+                                .header("tr_id", "HHDFS76200200"), KisOverseasPriceApiResponse.class);
+
+                KisOverseasPriceApiResponse.KisOverseasPriceOutput output = response.getOutput();
+
+                // ?먰솕 ?섏궛 ?쒓?珥앹븸 怨꾩궛
+                String marketCapKrw = "0";
+                try {
+                        if (output.getMarketCap() != null && output.getExchangeRate() != null) {
+                                double mktCapUsd = Double.parseDouble(output.getMarketCap());
+                                double rate = Double.parseDouble(output.getExchangeRate());
+                                marketCapKrw = String.format("%.0f", mktCapUsd * rate);
+                        }
+                } catch (NumberFormatException e) {
+                        log.warn("Failed to calculate KRW market cap for {}: {}", stockCode, e.getMessage());
+                }
+
+                return OverseasStockPriceDetailDto.builder()
+                                .stockCode(stock.getStockCode())
+                                .marketCap(output.getMarketCap())
+                                .marketCapKrw(marketCapKrw)
+                                .listedShares(output.getListedShares())
+                                .build();
+        }
+
+        /**
+         * ?뱀젙 醫낅ぉ???щТ 吏?쒕? 怨꾩궛?섍퀬 ??ν빀?덈떎.
+         */
+        @Transactional
+        public List<OverseasStockFinancialRatio> calculateAndSaveFinancialRatios(String stockCode, String divCode) {
+                // 1. ?꾩슂???곗씠??議고쉶
+                List<OverseasStockFinancialStatement> statements = financialStatementRepository
+                                .findByStockCodeAndDivCodeOrderByStacYymmAsc(stockCode, divCode);
+                List<OverseasStockBalanceSheet> balanceSheets = balanceSheetRepository
+                                .findByStockCodeAndDivCodeOrderByStacYymmDesc(stockCode, divCode);
+
+                if (statements.isEmpty()) {
+                        log.warn("No financial statements found for stock: {}", stockCode);
+                        return new ArrayList<>();
+                }
+
+                // 2. ?꾩옱媛 諛??섏쑉 ?뺣낫 議고쉶 (PER, PBR ??怨꾩궛??
+                // ?ㅼ떆媛??꾩옱媛 議고쉶瑜??꾪빐 KIS API ?ы샇異?(?먮뒗 getPriceDetail ?뺤옣 ?꾩슂)
+                // getPriceDetail? ?꾩옱媛(lastPrice)瑜?諛섑솚?섏? ?딆쑝誘濡?吏곸젒 fetch
+                Stock stock = overseasStockRepository.findByStockCodeAndStockType(stockCode, Stock.StockType.US_STOCK)
+                                .orElseThrow(() -> new BusinessException(KisApiErrorCode.STOCK_NOT_FOUND));
+
+                KisOverseasPriceApiResponse priceResponse = kisApiClient.fetch(token -> webClient.get()
+                                .uri(uriBuilder -> uriBuilder
+                                                .path(overseasApiProperties.getOverseaPriceUrl())
+                                                .queryParam("AUTH", "")
+                                                .queryParam("EXCD", stock.getMarketName().getExchangeCode())
+                                                .queryParam("SYMB", stock.getStockCode())
+                                                .build())
+                                .header("Authorization", token)
+                                .header("appKey", kisApiProperties.getAppkey())
+                                .header("appSecret", kisApiProperties.getAppsecret())
+                                .header("tr_id", "HHDFS76200200"), KisOverseasPriceApiResponse.class);
+
+                BigDecimal currentPrice = new BigDecimal(priceResponse.getOutput().getPrice());
+                BigDecimal exchangeRate = new BigDecimal(priceResponse.getOutput().getExchangeRate());
+                BigDecimal listedShares = new BigDecimal(priceResponse.getOutput().getListedShares());
+
+                List<OverseasStockFinancialRatio> ratiosToSave = new ArrayList<>();
+
+                for (OverseasStockFinancialStatement stmt : statements) {
+                        String yymm = stmt.getStacYymm();
+                        OverseasStockBalanceSheet board = balanceSheets.stream()
+                                        .filter(bs -> bs.getStacYymm().equals(yymm))
+                                        .findFirst().orElse(null);
+
+                        // EPS 怨꾩궛 (Net Income / Listed Shares)
+                        BigDecimal epsUsd = BigDecimal.ZERO;
+                        if (listedShares.compareTo(BigDecimal.ZERO) > 0 && stmt.getNetIncome() != null) {
+                                epsUsd = stmt.getNetIncome().multiply(UNIT_MULTIPLIER)
+                                                .divide(listedShares, 4, RoundingMode.HALF_UP);
+                        }
+                        BigDecimal epsKrw = epsUsd.multiply(exchangeRate).setScale(2, RoundingMode.HALF_UP);
+
+                        // BPS 怨꾩궛 (Total Capital / Listed Shares)
+                        BigDecimal bpsUsd = BigDecimal.ZERO;
+                        if (board != null && board.getTotalCapital() != null
+                                        && listedShares.compareTo(BigDecimal.ZERO) > 0) {
+                                bpsUsd = board.getTotalCapital().multiply(UNIT_MULTIPLIER)
+                                                .divide(listedShares, 4, RoundingMode.HALF_UP);
+                        }
+                        BigDecimal bpsKrw = bpsUsd.multiply(exchangeRate).setScale(2, RoundingMode.HALF_UP);
+
+                        // ROE 怨꾩궛 (Net Income / Total Capital * 100)
+                        BigDecimal roe = BigDecimal.ZERO;
+                        if (board != null && board.getTotalCapital() != null
+                                        && board.getTotalCapital().compareTo(BigDecimal.ZERO) > 0) {
+                                roe = stmt.getNetIncome().divide(board.getTotalCapital(), 4, RoundingMode.HALF_UP)
+                                                .multiply(new BigDecimal("100")).setScale(2, RoundingMode.HALF_UP);
+                        }
+
+                        // 媛移?吏??怨꾩궛
+                        BigDecimal per = BigDecimal.ZERO;
+                        if (epsUsd.compareTo(BigDecimal.ZERO) != 0) {
+                                per = currentPrice.divide(epsUsd, 2, RoundingMode.HALF_UP);
+                        }
+
+                        BigDecimal pbr = BigDecimal.ZERO;
+                        if (bpsUsd.compareTo(BigDecimal.ZERO) != 0) {
+                                pbr = currentPrice.divide(bpsUsd, 2, RoundingMode.HALF_UP);
+                        }
+
+                        BigDecimal psr = BigDecimal.ZERO;
+                        if (stmt.getTotalRevenue() != null && listedShares.compareTo(BigDecimal.ZERO) > 0) {
+                                BigDecimal sps = stmt.getTotalRevenue().multiply(UNIT_MULTIPLIER)
+                                                .divide(listedShares, 4, RoundingMode.HALF_UP);
+                                if (sps.compareTo(BigDecimal.ZERO) != 0) {
+                                        psr = currentPrice.divide(sps, 2, RoundingMode.HALF_UP);
+                                }
+                        }
+
+                        // Upsert 濡쒖쭅
+                        OverseasStockFinancialRatio existing = financialRatioRepository
+                                        .findByStockCodeAndStacYymmAndDivCode(stockCode, yymm, divCode)
+                                        .orElse(null);
+
+                        OverseasStockFinancialRatio.OverseasStockFinancialRatioBuilder builder = (existing != null)
+                                        ? existing.toBuilder()
+                                        : OverseasStockFinancialRatio.builder()
+                                                        .stockCode(stockCode)
+                                                        .stacYymm(yymm)
+                                                        .divCode(divCode);
+
+                        builder.per(per)
+                                        .pbr(pbr)
+                                        .psr(psr)
+                                        .roe(roe)
+                                        .epsUsd(epsUsd)
+                                        .epsKrw(epsKrw)
+                                        .bpsUsd(bpsUsd)
+                                        .bpsKrw(bpsKrw)
+                                        .isSuspended(false);
+
+                        ratiosToSave.add(builder.build());
+                }
+
+                return financialRatioRepository.saveAll(ratiosToSave);
+        }
+
+        /**
+         * ?뱀젙 醫낅ぉ???щТ 吏?쒕? 議고쉶?⑸땲??
+         */
+        public List<OverseasFinancialRatioDto> getFinancialRatios(String stockCode, String divCode) {
+                return financialRatioRepository.findByStockCodeAndDivCodeOrderByStacYymmAsc(stockCode, divCode)
+                                .stream()
+                                .map(r -> OverseasFinancialRatioDto.builder()
+                                                .stockCode(r.getStockCode())
+                                                .stacYymm(r.getStacYymm())
+                                                .divCode(r.getDivCode())
+                                                .per(r.getPer())
+                                                .pbr(r.getPbr())
+                                                .psr(r.getPsr())
+                                                .roe(r.getRoe())
+                                                .epsUsd(r.getEpsUsd())
+                                                .epsKrw(r.getEpsKrw())
+                                                .bpsUsd(r.getBpsUsd())
+                                                .bpsKrw(r.getBpsKrw())
+                                                .build())
+                                .collect(Collectors.toList());
+        }
+
+        private BigDecimal parseBigDecimalSafe(String value) {
+                if (value == null || value.trim().isEmpty() || "-".equals(value.trim())) {
+                        return BigDecimal.ZERO;
+                }
+                try {
+                        return new BigDecimal(value.trim());
+                } catch (NumberFormatException e) {
+                        return BigDecimal.ZERO;
+                }
+        }
+}

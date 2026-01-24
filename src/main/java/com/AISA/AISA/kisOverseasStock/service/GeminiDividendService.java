@@ -1,7 +1,7 @@
-package com.AISA.AISA.analysis.service;
+package com.AISA.AISA.kisOverseasStock.service;
 
 import com.AISA.AISA.global.config.GeminiProperties;
-
+import com.AISA.AISA.kisOverseasStock.exception.GeminiQuotaExhaustedException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -9,44 +9,38 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
-import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicInteger;
 
 @Service
 @RequiredArgsConstructor
 @Slf4j
-public class GeminiService {
+public class GeminiDividendService {
 
     private final ObjectMapper objectMapper;
+
     private final GeminiProperties geminiProperties;
-    private final AtomicInteger keyIndex = new AtomicInteger(0);
+    private final java.util.concurrent.atomic.AtomicInteger keyIndex = new java.util.concurrent.atomic.AtomicInteger(0);
 
     private static final String GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent";
 
-    public String generateAdvice(String context) {
+    public String fetchBatchDividendData(String prompt) {
         List<String> keys = geminiProperties.getApiKeys();
         if (keys == null || keys.isEmpty()) {
-            // Fallback to single key if list is empty
-            if (geminiProperties.getApiKey() != null) {
-                keys = Collections.singletonList(geminiProperties.getApiKey());
-            } else {
-                return "Gemini API 키가 설정되지 않았습니다.";
-            }
+            log.error("No Gemini API keys configured");
+            return null;
         }
 
         int maxRetries = keys.size();
         for (int attempt = 0; attempt < maxRetries; attempt++) {
             String currentKey = getNextKey(keys);
             try {
-                String response = callGeminiApi(context, currentKey);
+                String response = callGeminiApi(prompt, currentKey);
                 return parseGeminiResponse(response);
-
-            } catch (WebClientResponseException e) {
+            } catch (org.springframework.web.reactive.function.client.WebClientResponseException e) {
                 if (e.getStatusCode().value() == 429) {
                     log.warn("Rate limit (429) exceeded for key index {}. Rotating key...",
                             keyIndex.get() % keys.size());
@@ -58,14 +52,13 @@ public class GeminiService {
                     continue; // Switch key and retry
                 }
                 log.error("WebClient error: {}", e.getMessage());
-                return "AI 서비스 연결 오류: " + e.getMessage();
+                break;
             } catch (Exception e) {
-                log.error("Failed to generate advice from Gemini", e);
-                return "AI 진단 서비스 연결 실패: " + e.getMessage();
+                log.error("Failed to fetch batch dividend data from Gemini", e);
+                break;
             }
         }
-
-        return "AI 서비스 사용량이 초과되었습니다. 잠시 후 다시 시도해주세요.";
+        throw new GeminiQuotaExhaustedException("Gemini API is unavailable or all quotas exhausted.");
     }
 
     private String getNextKey(List<String> keys) {
@@ -73,15 +66,16 @@ public class GeminiService {
         return keys.get(Math.abs(index));
     }
 
-    private String callGeminiApi(String context, String apiKey) {
+    private String callGeminiApi(String prompt, String apiKey) {
         WebClient webClient = WebClient.create();
 
-        Map<String, Object> requestBody = Map.of(
-                "contents", Collections.singletonList(
-                        Map.of("parts", Collections.singletonList(
-                                Map.of("text", context)))),
-                "tools", Collections.singletonList(
-                        Map.of("google_search", new HashMap<>())));
+        Map<String, Object> requestPart = new HashMap<>();
+        requestPart.put("parts", Collections.singletonList(Map.of("text", prompt)));
+
+        Map<String, Object> requestBody = new HashMap<>();
+        requestBody.put("contents", Collections.singletonList(requestPart));
+        requestBody.put("tools", Collections.singletonList(
+                Map.of("google_search", new HashMap<>())));
 
         return webClient.post()
                 .uri(GEMINI_API_URL + "?key={key}", apiKey)
@@ -94,24 +88,23 @@ public class GeminiService {
 
     private String parseGeminiResponse(String jsonResponse) {
         try {
-            // Use JsonNode for safe traversal without unchecked casts
             JsonNode root = objectMapper.readTree(jsonResponse);
 
             JsonNode candidates = root.path("candidates");
             if (candidates.isMissingNode() || candidates.isEmpty())
-                return "AI 응답을 분석할 수 없습니다.";
+                return null;
 
             JsonNode content = candidates.get(0).path("content");
             JsonNode parts = content.path("parts");
 
             if (parts.isMissingNode() || parts.isEmpty())
-                return "AI 응답 내용이 비어있습니다.";
+                return null;
 
             return parts.get(0).path("text").asText();
 
         } catch (Exception e) {
             log.error("Error parsing Gemini response", e);
-            return "AI 응답 해석 중 오류가 발생했습니다.";
+            return null;
         }
     }
 }

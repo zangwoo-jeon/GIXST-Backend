@@ -9,10 +9,14 @@ import java.util.Optional;
 
 @Repository
 public interface KisOverseasStockFinancialStatementRepository
-        extends JpaRepository<OverseasStockFinancialStatement, Long> {
+                extends JpaRepository<OverseasStockFinancialStatement, Long> {
 
-    List<OverseasStockFinancialStatement> findByStockCodeAndDivCodeOrderByStacYymmAsc(String stockCode, String divCode);
+        List<OverseasStockFinancialStatement> findAllByStockCode(String stockCode);
 
-    Optional<OverseasStockFinancialStatement> findByStockCodeAndStacYymmAndDivCode(String stockCode, String stacYymm,
-            String divCode);
+        List<OverseasStockFinancialStatement> findByStockCodeAndDivCodeOrderByStacYymmAsc(String stockCode,
+                        String divCode);
+
+        Optional<OverseasStockFinancialStatement> findByStockCodeAndStacYymmAndDivCode(String stockCode,
+                        String stacYymm,
+                        String divCode);
 }

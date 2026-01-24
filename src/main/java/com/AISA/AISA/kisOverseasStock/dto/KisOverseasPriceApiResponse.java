@@ -43,10 +43,25 @@ public class KisOverseasPriceApiResponse {
         @JsonProperty("tomv")
         private String marketCap;
 
+        @JsonProperty("shar")
+        private String listedShares;
+
         @JsonProperty("t_xprc")
         private String wonPrice; // Converted to KRW
 
         @JsonProperty("t_rate")
         private String exchangeRate; // Exchange Rate
+
+        @JsonProperty("perx")
+        private String per;
+
+        @JsonProperty("pbrx")
+        private String pbr;
+
+        @JsonProperty("epsx")
+        private String eps;
+
+        @JsonProperty("bpsx")
+        private String bps;
     }
 }

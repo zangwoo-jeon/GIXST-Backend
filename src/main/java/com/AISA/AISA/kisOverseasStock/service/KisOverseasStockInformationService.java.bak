@@ -1,4 +1,4 @@
-package com.AISA.AISA.kisOverseasStock.service;
+﻿package com.AISA.AISA.kisOverseasStock.service;
 
 import com.AISA.AISA.global.errorcode.CommonErrorCode;
 import com.AISA.AISA.global.exception.BusinessException;
@@ -21,10 +21,7 @@ import com.AISA.AISA.kisStock.exception.KisApiErrorCode;
 import com.AISA.AISA.kisStock.kisService.KisApiClient;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.reactive.function.client.WebClient;
 
@@ -49,14 +46,10 @@ public class KisOverseasStockInformationService {
         private final KisOverseasApiProperties overseasApiProperties;
         private final KisApiClient kisApiClient;
 
-        @Autowired
-        @Lazy
-        private KisOverseasStockInformationService self;
-
         private static final BigDecimal UNIT_MULTIPLIER = new BigDecimal("1000000"); // Million USD
 
         /**
-         * 특정 종목의 손익계산서 데이터를 조회합니다.
+         * ?뱀젙 醫낅ぉ???먯씡怨꾩궛???곗씠?곕? 議고쉶?⑸땲??
          */
         public List<OverseasStockFinancialStatementDto> getFinancialStatements(String stockCode, String divCode) {
                 return financialStatementRepository.findByStockCodeAndDivCodeOrderByStacYymmAsc(stockCode, divCode)
@@ -71,7 +64,7 @@ public class KisOverseasStockInformationService {
         }
 
         /**
-         * 특정 종목의 재무상태표 데이터를 조회합니다.
+         * ?뱀젙 醫낅ぉ???щТ?곹깭???곗씠?곕? 議고쉶?⑸땲??
          */
         public List<OverseasStockBalanceSheetDto> getBalanceSheets(String stockCode) {
                 return balanceSheetRepository.findAllByStockCode(stockCode)
@@ -86,7 +79,7 @@ public class KisOverseasStockInformationService {
         }
 
         /**
-         * 특정 종목의 실시간 상세 가격 정보(시가총액, 상장주수)를 조회합니다.
+         * ?뱀젙 醫낅ぉ???ㅼ떆媛??곸꽭 媛寃??뺣낫(?쒓?珥앹븸, ?곸옣二쇱닔)瑜?議고쉶?⑸땲??
          */
         public OverseasStockPriceDetailDto getPriceDetail(String stockCode) {
                 Stock stock = overseasStockRepository.findByStockCodeAndStockType(stockCode, Stock.StockType.US_STOCK)
@@ -111,7 +104,7 @@ public class KisOverseasStockInformationService {
 
                 KisOverseasPriceApiResponse.KisOverseasPriceOutput output = response.getOutput();
 
-                // 원화 환산 시가총액 계산
+                // ?먰솕 ?섏궛 ?쒓?珥앹븸 怨꾩궛
                 String marketCapKrw = "0";
                 try {
                         if (output.getMarketCap() != null && output.getExchangeRate() != null) {
@@ -132,27 +125,11 @@ public class KisOverseasStockInformationService {
         }
 
         /**
-         * 모든 해외 종목의 투자 지표를 일괄적으로 갱신합니다. (배치용)
+         * ?뱀젙 醫낅ぉ???щТ 吏?쒕? 怨꾩궛?섍퀬 ??ν빀?덈떎.
          */
-        public void refreshAllFinancialRatios(String divCode) {
-                List<Stock> stocks = overseasStockRepository.findAllByStockType(Stock.StockType.US_STOCK);
-                log.info("Starting Batch Financial Ratio Refresh for {} stocks (divCode={})", stocks.size(), divCode);
-
-                for (Stock stock : stocks) {
-                        try {
-                                self.calculateAndSaveFinancialRatios(stock.getStockCode(), divCode);
-                                Thread.sleep(100); // KIS API 과부하 방지 (0.1초 대기)
-                        } catch (Exception e) {
-                                log.error("Failed to refresh financial ratio for {}: {}", stock.getStockCode(),
-                                                e.getMessage());
-                        }
-                }
-                log.info("Completed Batch Financial Ratio Refresh");
-        }
-
-        @Transactional(propagation = Propagation.REQUIRES_NEW)
+        @Transactional
         public List<OverseasStockFinancialRatio> calculateAndSaveFinancialRatios(String stockCode, String divCode) {
-                // 1. 필요한 데이터 조회
+                // 1. ?꾩슂???곗씠??議고쉶
                 List<OverseasStockFinancialStatement> statements = financialStatementRepository
                                 .findByStockCodeAndDivCodeOrderByStacYymmAsc(stockCode, divCode);
                 List<OverseasStockBalanceSheet> balanceSheets = balanceSheetRepository
@@ -163,107 +140,72 @@ public class KisOverseasStockInformationService {
                         return new ArrayList<>();
                 }
 
-                // 2. 현재가 및 환율 정보 조회 (PER, PBR 등 계산용)
+                // 2. ?꾩옱媛 諛??섏쑉 ?뺣낫 議고쉶 (PER, PBR ??怨꾩궛??
+                // ?ㅼ떆媛??꾩옱媛 議고쉶瑜??꾪빐 KIS API ?ы샇異?(?먮뒗 getPriceDetail ?뺤옣 ?꾩슂)
+                // getPriceDetail? ?꾩옱媛(lastPrice)瑜?諛섑솚?섏? ?딆쑝誘濡?吏곸젒 fetch
                 Stock stock = overseasStockRepository.findByStockCodeAndStockType(stockCode, Stock.StockType.US_STOCK)
                                 .orElseThrow(() -> new BusinessException(KisApiErrorCode.STOCK_NOT_FOUND));
 
                 KisOverseasPriceApiResponse priceResponse = kisApiClient.fetch(token -> webClient.get()
-                                .uri(uriBuilder -> {
-                                        String url = overseasApiProperties.getOverseaPriceUrl();
-                                        if (url == null)
-                                                throw new BusinessException(CommonErrorCode.INTERNAL_SERVER_ERROR);
-                                        return uriBuilder
-                                                        .path(url)
-                                                        .queryParam("AUTH", "")
-                                                        .queryParam("EXCD", stock.getMarketName().getExchangeCode())
-                                                        .queryParam("SYMB", stock.getStockCode())
-                                                        .build();
-                                })
+                                .uri(uriBuilder -> uriBuilder
+                                                .path(overseasApiProperties.getOverseaPriceUrl())
+                                                .queryParam("AUTH", "")
+                                                .queryParam("EXCD", stock.getMarketName().getExchangeCode())
+                                                .queryParam("SYMB", stock.getStockCode())
+                                                .build())
                                 .header("Authorization", token)
                                 .header("appKey", kisApiProperties.getAppkey())
                                 .header("appSecret", kisApiProperties.getAppsecret())
                                 .header("tr_id", "HHDFS76200200"), KisOverseasPriceApiResponse.class);
 
-                KisOverseasPriceApiResponse.KisOverseasPriceOutput output = priceResponse.getOutput();
-                BigDecimal currentPrice = new BigDecimal(output.getPrice());
-                BigDecimal exchangeRate = new BigDecimal(output.getExchangeRate());
-                BigDecimal listedShares = new BigDecimal(output.getListedShares());
+                BigDecimal currentPrice = new BigDecimal(priceResponse.getOutput().getPrice());
+                BigDecimal exchangeRate = new BigDecimal(priceResponse.getOutput().getExchangeRate());
+                BigDecimal listedShares = new BigDecimal(priceResponse.getOutput().getListedShares());
 
                 List<OverseasStockFinancialRatio> ratiosToSave = new ArrayList<>();
-                String latestYymm = statements.get(statements.size() - 1).getStacYymm();
 
                 for (OverseasStockFinancialStatement stmt : statements) {
                         String yymm = stmt.getStacYymm();
-
-                        // 2022년 이전 데이터는 계산 및 저장에서 제외
-                        if (Integer.parseInt(yymm.substring(0, 4)) < 2022) {
-                                continue;
-                        }
                         OverseasStockBalanceSheet board = balanceSheets.stream()
                                         .filter(bs -> bs.getStacYymm().equals(yymm))
                                         .findFirst().orElse(null);
 
+                        // EPS 怨꾩궛 (Net Income / Listed Shares)
                         BigDecimal epsUsd = BigDecimal.ZERO;
-                        BigDecimal bpsUsd = BigDecimal.ZERO;
-                        BigDecimal per = BigDecimal.ZERO;
-                        BigDecimal pbr = BigDecimal.ZERO;
-                        BigDecimal roe = BigDecimal.ZERO;
-
-                        if (yymm.equals(latestYymm)) {
-                                // 최신 데이터는 한투 API에서 준 값 우선 사용
-                                epsUsd = parseBigDecimalSafe(output.getEps());
-                                bpsUsd = parseBigDecimalSafe(output.getBps());
-                                per = parseBigDecimalSafe(output.getPer());
-                                pbr = parseBigDecimalSafe(output.getPbr());
-
-                                // 만약 한투에서 준 값이 0이면 로컬 계산으로 보완
-                                if (epsUsd.compareTo(BigDecimal.ZERO) == 0 && stmt.getNetIncome() != null) {
-                                        epsUsd = stmt.getNetIncome().multiply(UNIT_MULTIPLIER)
-                                                        .divide(listedShares, 4, RoundingMode.HALF_UP);
-                                }
-                                if (bpsUsd.compareTo(BigDecimal.ZERO) == 0 && board != null
-                                                && board.getTotalCapital() != null) {
-                                        bpsUsd = board.getTotalCapital().multiply(UNIT_MULTIPLIER)
-                                                        .divide(listedShares, 4, RoundingMode.HALF_UP);
-                                }
-                                if (per.compareTo(BigDecimal.ZERO) == 0 && epsUsd.compareTo(BigDecimal.ZERO) != 0) {
-                                        per = currentPrice.divide(epsUsd, 2, RoundingMode.HALF_UP);
-                                }
-                                if (pbr.compareTo(BigDecimal.ZERO) == 0 && bpsUsd.compareTo(BigDecimal.ZERO) != 0) {
-                                        pbr = currentPrice.divide(bpsUsd, 2, RoundingMode.HALF_UP);
-                                }
-                        } else {
-                                // 과거 데이터는 로컬 계산
-                                if (listedShares.compareTo(BigDecimal.ZERO) > 0 && stmt.getNetIncome() != null) {
-                                        epsUsd = stmt.getNetIncome().multiply(UNIT_MULTIPLIER)
-                                                        .divide(listedShares, 4, RoundingMode.HALF_UP);
-                                }
-                                if (board != null && board.getTotalCapital() != null
-                                                && listedShares.compareTo(BigDecimal.ZERO) > 0) {
-                                        bpsUsd = board.getTotalCapital().multiply(UNIT_MULTIPLIER)
-                                                        .divide(listedShares, 4, RoundingMode.HALF_UP);
-                                }
-
-                                if (epsUsd.compareTo(BigDecimal.ZERO) != 0) {
-                                        per = currentPrice.divide(epsUsd, 2, RoundingMode.HALF_UP);
-                                }
-                                if (bpsUsd.compareTo(BigDecimal.ZERO) != 0) {
-                                        pbr = currentPrice.divide(bpsUsd, 2, RoundingMode.HALF_UP);
-                                }
+                        if (listedShares.compareTo(BigDecimal.ZERO) > 0 && stmt.getNetIncome() != null) {
+                                epsUsd = stmt.getNetIncome().multiply(UNIT_MULTIPLIER)
+                                                .divide(listedShares, 4, RoundingMode.HALF_UP);
                         }
-
-                        // 공통: 원화 환산 EPS, BPS
                         BigDecimal epsKrw = epsUsd.multiply(exchangeRate).setScale(2, RoundingMode.HALF_UP);
+
+                        // BPS 怨꾩궛 (Total Capital / Listed Shares)
+                        BigDecimal bpsUsd = BigDecimal.ZERO;
+                        if (board != null && board.getTotalCapital() != null
+                                        && listedShares.compareTo(BigDecimal.ZERO) > 0) {
+                                bpsUsd = board.getTotalCapital().multiply(UNIT_MULTIPLIER)
+                                                .divide(listedShares, 4, RoundingMode.HALF_UP);
+                        }
                         BigDecimal bpsKrw = bpsUsd.multiply(exchangeRate).setScale(2, RoundingMode.HALF_UP);
 
-                        // 공통: ROE 계산 (Net Income / Total Capital * 100)
+                        // ROE 怨꾩궛 (Net Income / Total Capital * 100)
+                        BigDecimal roe = BigDecimal.ZERO;
                         if (board != null && board.getTotalCapital() != null
                                         && board.getTotalCapital().compareTo(BigDecimal.ZERO) > 0) {
                                 roe = stmt.getNetIncome().divide(board.getTotalCapital(), 4, RoundingMode.HALF_UP)
                                                 .multiply(new BigDecimal("100")).setScale(2, RoundingMode.HALF_UP);
                         }
 
-                        // 공통: PSR 계산 (Price / (Revenue / Shares))
+                        // 媛移?吏??怨꾩궛
+                        BigDecimal per = BigDecimal.ZERO;
+                        if (epsUsd.compareTo(BigDecimal.ZERO) != 0) {
+                                per = currentPrice.divide(epsUsd, 2, RoundingMode.HALF_UP);
+                        }
+
+                        BigDecimal pbr = BigDecimal.ZERO;
+                        if (bpsUsd.compareTo(BigDecimal.ZERO) != 0) {
+                                pbr = currentPrice.divide(bpsUsd, 2, RoundingMode.HALF_UP);
+                        }
+
                         BigDecimal psr = BigDecimal.ZERO;
                         if (stmt.getTotalRevenue() != null && listedShares.compareTo(BigDecimal.ZERO) > 0) {
                                 BigDecimal sps = stmt.getTotalRevenue().multiply(UNIT_MULTIPLIER)
@@ -273,7 +215,7 @@ public class KisOverseasStockInformationService {
                                 }
                         }
 
-                        // Upsert 로직
+                        // Upsert 濡쒖쭅
                         OverseasStockFinancialRatio existing = financialRatioRepository
                                         .findByStockCodeAndStacYymmAndDivCode(stockCode, yymm, divCode)
                                         .orElse(null);
@@ -302,60 +244,7 @@ public class KisOverseasStockInformationService {
         }
 
         /**
-         * 특정 종목의 실시간 투자 지표를 조회합니다. (하이브리드 방식)
-         * - PER, PBR: 한투 API 실시간 데이터
-         * - PSR: (현재가 / (최신 매출액 / 상장주식수))로 실시간 계산
-         * - EPS, BPS, ROE: DB의 최신 데이터 활용
-         */
-        /**
-         * 특정 종목의 최신 투자 지표를 DB에서 조회합니다. (실시간 API 미사용)
-         */
-        public OverseasFinancialRatioDto getRealTimeFinancialRatio(String stockCode) {
-                // 1. DB에서 가장 최신의 재무 데이터 조회 (Annual '0' 기준 우선)
-                List<OverseasStockFinancialRatio> savedRatios = financialRatioRepository
-                                .findByStockCodeAndDivCodeOrderByStacYymmAsc(stockCode, "0");
-                if (savedRatios.isEmpty()) {
-                        // 연간 데이터가 없으면 분기 데이터라도 조회
-                        savedRatios = financialRatioRepository.findByStockCodeAndDivCodeOrderByStacYymmAsc(stockCode,
-                                        "1");
-                }
-
-                OverseasStockFinancialRatio latest = savedRatios.isEmpty() ? null
-                                : savedRatios.get(savedRatios.size() - 1);
-
-                if (latest == null) {
-                        return OverseasFinancialRatioDto.builder()
-                                        .stockCode(stockCode)
-                                        .stacYymm("N/A")
-                                        .divCode("0")
-                                        .per(BigDecimal.ZERO)
-                                        .pbr(BigDecimal.ZERO)
-                                        .psr(BigDecimal.ZERO)
-                                        .roe(BigDecimal.ZERO)
-                                        .epsUsd(BigDecimal.ZERO)
-                                        .epsKrw(BigDecimal.ZERO)
-                                        .bpsUsd(BigDecimal.ZERO)
-                                        .bpsKrw(BigDecimal.ZERO)
-                                        .build();
-                }
-
-                return OverseasFinancialRatioDto.builder()
-                                .stockCode(latest.getStockCode())
-                                .stacYymm(latest.getStacYymm())
-                                .divCode(latest.getDivCode())
-                                .per(latest.getPer())
-                                .pbr(latest.getPbr())
-                                .psr(latest.getPsr())
-                                .roe(latest.getRoe())
-                                .epsUsd(latest.getEpsUsd())
-                                .epsKrw(latest.getEpsKrw())
-                                .bpsUsd(latest.getBpsUsd())
-                                .bpsKrw(latest.getBpsKrw())
-                                .build();
-        }
-
-        /**
-         * 특정 종목의 모든 저장된 재무 지표를 조회합니다. (AI 리포트용)
+         * ?뱀젙 醫낅ぉ???щТ 吏?쒕? 議고쉶?⑸땲??
          */
         public List<OverseasFinancialRatioDto> getFinancialRatios(String stockCode, String divCode) {
                 return financialRatioRepository.findByStockCodeAndDivCodeOrderByStacYymmAsc(stockCode, divCode)

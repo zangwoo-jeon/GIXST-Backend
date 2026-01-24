@@ -43,7 +43,7 @@ def save_financial_data(stock_codes):
                 stock = yf.Ticker(ticker)
                 
                 # Fetch Data
-                annual_df = stock.financials.T.head(3)
+                annual_df = stock.financials.T.head(4)
                 quarterly_df = stock.quarterly_financials.T.head(5)
                 
                 with connection.cursor() as cursor:
@@ -71,6 +71,10 @@ def process_and_save_is(cursor, ticker, df, div_code):
     for date, row in df.iterrows():
         if pd.isna(date): continue
         stac_yymm = date.strftime('%Y%m')
+        
+        # 2021년 이전 데이터는 건너뜀 (5년치 데이터 확보를 위해 2021년부터 저장)
+        if int(stac_yymm[:4]) < 2021:
+            continue
         
         rev = get_val(row, ['Total Revenue'], 0)
         op_inc = get_val(row, ['Operating Income'], 0)

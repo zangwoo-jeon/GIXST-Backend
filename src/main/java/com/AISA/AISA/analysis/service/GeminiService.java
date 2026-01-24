@@ -1,19 +1,21 @@
 package com.AISA.AISA.analysis.service;
 
+import com.AISA.AISA.global.config.GeminiProperties;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
-import reactor.core.publisher.Mono;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 @Service
 @RequiredArgsConstructor
@@ -21,13 +23,57 @@ import java.util.Map;
 public class GeminiService {
 
     private final ObjectMapper objectMapper;
-
-    @Value("${google.ai.studio.api-key}")
-    private String geminiApiKey;
+    private final GeminiProperties geminiProperties;
+    private final AtomicInteger keyIndex = new AtomicInteger(0);
 
     private static final String GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent";
 
     public String generateAdvice(String context) {
+        List<String> keys = geminiProperties.getApiKeys();
+        if (keys == null || keys.isEmpty()) {
+            // Fallback to single key if list is empty
+            if (geminiProperties.getApiKey() != null) {
+                keys = Collections.singletonList(geminiProperties.getApiKey());
+            } else {
+                return "Gemini API 키가 설정되지 않았습니다.";
+            }
+        }
+
+        int maxRetries = keys.size();
+        for (int attempt = 0; attempt < maxRetries; attempt++) {
+            String currentKey = getNextKey(keys);
+            try {
+                String response = callGeminiApi(context, currentKey);
+                return parseGeminiResponse(response);
+
+            } catch (WebClientResponseException e) {
+                if (e.getStatusCode().value() == 429) {
+                    log.warn("Rate limit (429) exceeded for key index {}. Rotating key...",
+                            keyIndex.get() % keys.size());
+                    continue; // Switch key and retry
+                }
+                if (e.getStatusCode().is5xxServerError()) {
+                    log.warn("Gemini Server Error ({}) for key index {}. Rotating key...",
+                            e.getStatusCode().value(), keyIndex.get() % keys.size());
+                    continue; // Switch key and retry
+                }
+                log.error("WebClient error: {}", e.getMessage());
+                return "AI 서비스 연결 오류: " + e.getMessage();
+            } catch (Exception e) {
+                log.error("Failed to generate advice from Gemini", e);
+                return "AI 진단 서비스 연결 실패: " + e.getMessage();
+            }
+        }
+
+        return "AI 서비스 사용량이 초과되었습니다. 잠시 후 다시 시도해주세요.";
+    }
+
+    private String getNextKey(List<String> keys) {
+        int index = keyIndex.getAndIncrement() % keys.size();
+        return keys.get(Math.abs(index));
+    }
+
+    private String callGeminiApi(String context, String apiKey) {
         WebClient webClient = WebClient.create();
 
         Map<String, Object> requestBody = Map.of(
@@ -37,22 +83,13 @@ public class GeminiService {
                 "tools", Collections.singletonList(
                         Map.of("google_search", new HashMap<>())));
 
-        try {
-            String response = webClient.post()
-                    .uri(GEMINI_API_URL + "?key={key}", geminiApiKey)
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .bodyValue(requestBody)
-                    .retrieve()
-                    .bodyToMono(String.class)
-                    .block(); // Blocking for simplicity in this synchronous service flow, can be made async
-                              // if needed
-
-            return parseGeminiResponse(response);
-
-        } catch (Exception e) {
-            log.error("Failed to generate advice from Gemini", e);
-            return "AI 진단 서비스 연결 실패: " + e.getMessage();
-        }
+        return webClient.post()
+                .uri(GEMINI_API_URL + "?key={key}", apiKey)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(requestBody)
+                .retrieve()
+                .bodyToMono(String.class)
+                .block();
     }
 
     private String parseGeminiResponse(String jsonResponse) {

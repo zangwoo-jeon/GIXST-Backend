@@ -14,6 +14,8 @@ public interface KisOverseasStockBalanceSheetRepository extends JpaRepository<Ov
 
     List<OverseasStockBalanceSheet> findByStockCodeOrderByStacYymmAsc(String stockCode);
 
+    List<OverseasStockBalanceSheet> findByStockCodeAndDivCodeOrderByStacYymmDesc(String stockCode, String divCode);
+
     Optional<OverseasStockBalanceSheet> findByStockCodeAndStacYymmAndDivCode(String stockCode, String stacYymm,
             String divCode);
 }

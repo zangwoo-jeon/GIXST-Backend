@@ -43,7 +43,8 @@ def save_balance_sheets(stock_codes):
                 stock = yf.Ticker(ticker)
                 
                 # Balance Sheet 데이터 (자산, 부채, 자본) - 연간 데이터만 사용
-                annual_bs = stock.balance_sheet.T.head(3)
+                # Balance Sheet 데이터 (자산, 부채, 자본) - 연간 데이터만 사용
+                annual_bs = stock.balance_sheet.T.head(10)
                 
                 if annual_bs.empty:
                     continue
@@ -71,6 +72,10 @@ def process_and_save_bs(cursor, ticker, df, div_code):
     for date, row in df.iterrows():
         if pd.isna(date): continue
         stac_yymm = date.strftime('%Y%m')
+        
+        # 2022년 이전 데이터는 건너뜜 (데이터 가용성 및 정합성을 위해 2022년부터 저장)
+        if int(stac_yymm[:4]) < 2022:
+            continue
         
         # yfinance 항목 매핑
         assets = get_val(row, ['Total Assets'], 0)

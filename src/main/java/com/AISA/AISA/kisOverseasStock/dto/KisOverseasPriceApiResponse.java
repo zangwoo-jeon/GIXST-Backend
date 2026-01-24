@@ -51,5 +51,17 @@ public class KisOverseasPriceApiResponse {
 
         @JsonProperty("t_rate")
         private String exchangeRate; // Exchange Rate
+
+        @JsonProperty("perx")
+        private String per;
+
+        @JsonProperty("pbrx")
+        private String pbr;
+
+        @JsonProperty("epsx")
+        private String eps;
+
+        @JsonProperty("bpsx")
+        private String bps;
     }
 }

@@ -13,4 +13,5 @@ public class KisOverseasApiProperties {
     private String overseaUrl; // /uapi/overseas-price/v1/quotations/inquire-daily-chartprice
     private String overseaPriceUrl; // /uapi/overseas-price/v1/quotations/price-detail
     private String overseaChartPriceUrl; // /uapi/overseas-price/v1/quotations/dailyprice
+    private String overseaSearchInfoUrl; // /uapi/overseas-price/v1/quotations/search-info
 }

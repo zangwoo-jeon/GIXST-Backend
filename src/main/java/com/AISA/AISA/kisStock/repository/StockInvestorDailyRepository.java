@@ -28,7 +28,8 @@ public interface StockInvestorDailyRepository extends JpaRepository<StockInvesto
                         "SUM(s.foreignerNetBuyAmount) as foreignerNetBuyAmount, " +
                         "SUM(s.institutionNetBuyAmount) as institutionNetBuyAmount " +
                         "FROM StockInvestorDaily s " +
-                        "WHERE s.date >= :startDate " +
+                        "WHERE s.date >= :startDate AND s.stock.stockType = com.AISA.AISA.kisStock.Entity.stock.Stock.StockType.DOMESTIC "
+                        +
                         "GROUP BY s.stock.stockCode, s.stock.stockName")
         List<com.AISA.AISA.kisStock.dto.InvestorTrend.InvestorTrendAggregationProjection> findAggregatedInvestorTrend(
                         @Param("startDate") LocalDate startDate);

@@ -66,6 +66,13 @@ public class StockFinancialRatio {
     @Column(precision = 10, scale = 2)
     private BigDecimal psr; // Price Sales Ratio (Optional, requires Sales per Share)
 
+    // EV/EBITDA Metrics
+    @Column(precision = 10, scale = 2)
+    private BigDecimal evEbitda;
+
+    @Column(precision = 15, scale = 2) // Large number
+    private BigDecimal ebitda;
+
     @Column(nullable = false)
     @Builder.Default
     private Boolean isSuspended = false; // 거래 정지 여부

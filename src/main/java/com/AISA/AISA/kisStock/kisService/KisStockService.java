@@ -23,6 +23,7 @@ import com.AISA.AISA.kisStock.dto.InvestorTrend.StockInvestorDailyDto; // New DT
 import com.AISA.AISA.kisStock.dto.InvestorTrend.KisInvestorDailyResponse; // New DTO
 import com.AISA.AISA.kisStock.Entity.stock.StockInvestorDaily;
 import com.AISA.AISA.kisStock.repository.StockDailyDataRepository;
+import com.AISA.AISA.kisStock.repository.StockFinancialRatioRepository;
 import com.AISA.AISA.kisStock.repository.StockMarketCapRepository;
 import com.AISA.AISA.kisStock.repository.StockRepository;
 import com.AISA.AISA.kisStock.repository.StockInvestorDailyRepository; // New Repo
@@ -64,6 +65,8 @@ public class KisStockService {
         private final StockRepository stockRepository;
         private final StockDailyDataRepository stockDailyDataRepository;
         private final StockMarketCapRepository stockMarketCapRepository; // Added repo
+        private final StockFinancialRatioRepository stockFinancialRatioRepository; // Added
+                                                                                   // repo
         private final CacheManager cacheManager;
         private final StockInvestorDailyRepository stockInvestorDailyRepository; // New Repo field
         private final StockAiSummaryRepository stockAiSummaryRepository;
@@ -77,6 +80,10 @@ public class KisStockService {
                 Stock stock = stockRepository.findByStockCode(stockCode)
                                 .orElseThrow(() -> new BusinessException(
                                                 KisApiErrorCode.STOCK_NOT_FOUND));
+
+                if (stock.getStockType() != Stock.StockType.DOMESTIC) {
+                        throw new BusinessException(KisApiErrorCode.INVALID_STOCK_TYPE);
+                }
 
                 KisPriceApiResponse apiResponse;
                 try {
@@ -154,6 +161,7 @@ public class KisStockService {
         // Hybrid Caching: Past Data (Cached) + Today's Data (Real-time)
         public String getStockChartJson(String stockCode, String startDate, String endDate,
                         String dateType) {
+                validateDomesticStock(stockCode);
                 DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
                 LocalDate targetStartDate = LocalDate.parse(startDate, formatter);
                 LocalDate targetEndDate = LocalDate.parse(endDate, formatter);
@@ -392,6 +400,10 @@ public class KisStockService {
 
                 Stock stock = stockRepository.findByStockCode(stockCode)
                                 .orElseThrow(() -> new BusinessException(KisApiErrorCode.STOCK_NOT_FOUND));
+
+                if (stock.getStockType() != Stock.StockType.DOMESTIC) {
+                        throw new BusinessException(KisApiErrorCode.INVALID_STOCK_TYPE);
+                }
 
                 int consecutiveFailures = 0;
                 final int MAX_CONSECUTIVE_FAILURES = 5;
@@ -747,7 +759,11 @@ public class KisStockService {
         @Transactional(readOnly = true)
         public List<StockInvestorDailyDto> getDailyInvestorTrend(String stockCode, String period) {
                 Stock stock = stockRepository.findByStockCode(stockCode)
-                                .orElseThrow(() -> new IllegalArgumentException("Stock not found"));
+                                .orElseThrow(() -> new BusinessException(KisApiErrorCode.STOCK_NOT_FOUND));
+
+                if (stock.getStockType() != Stock.StockType.DOMESTIC) {
+                        throw new BusinessException(KisApiErrorCode.INVALID_STOCK_TYPE);
+                }
 
                 // Fetch based on period
                 LocalDate today = LocalDate.now();
@@ -788,7 +804,11 @@ public class KisStockService {
         @Cacheable(value = "investorTrend", key = "#stockCode")
         public InvestorTrendDto getInvestorTrend(String stockCode) {
                 Stock stock = stockRepository.findByStockCode(stockCode)
-                                .orElseThrow(() -> new IllegalArgumentException("Stock not found"));
+                                .orElseThrow(() -> new BusinessException(KisApiErrorCode.STOCK_NOT_FOUND));
+
+                if (stock.getStockType() != Stock.StockType.DOMESTIC) {
+                        throw new BusinessException(KisApiErrorCode.INVALID_STOCK_TYPE);
+                }
 
                 LocalDate today = LocalDate.now();
                 LocalDate oneYearAgo = today.minusYears(1);
@@ -1015,7 +1035,11 @@ public class KisStockService {
                 }
 
                 Stock stock = stockRepository.findByStockCode(stockCode)
-                                .orElseThrow(() -> new IllegalArgumentException("Stock not found"));
+                                .orElseThrow(() -> new BusinessException(KisApiErrorCode.STOCK_NOT_FOUND));
+
+                if (stock.getStockType() != Stock.StockType.DOMESTIC) {
+                        throw new BusinessException(KisApiErrorCode.INVALID_STOCK_TYPE);
+                }
 
                 LocalDate targetDate = LocalDate.now().minusYears(1);
                 LocalDate currentDate = LocalDate.now();
@@ -1210,5 +1234,83 @@ public class KisStockService {
                                 .stockName(stock.getStockName())
                                 .marketName(stock.getMarketName())
                                 .build());
+        }
+
+        @Transactional
+        public void updateOtherMajorRatios(String stockCode) {
+                // Validate StockType: Only DOMESTIC stocks are supported for this KIS API
+                validateDomesticStock(stockCode);
+
+                updateOtherMajorRatiosByDivCode(stockCode, "0"); // Yearly
+                updateOtherMajorRatiosByDivCode(stockCode, "1"); // Quarterly
+        }
+
+        private void updateOtherMajorRatiosByDivCode(String stockCode, String divCode) {
+                try {
+                        com.AISA.AISA.kisStock.dto.KisOtherMajorRatiosResponse response = kisApiClient.fetch(
+                                        token -> webClient.get()
+                                                        .uri(uriBuilder -> uriBuilder
+                                                                        .path(kisApiProperties.getOtherMajorRatiosUrl())
+                                                                        .queryParam("fid_cond_mrkt_div_code", "J")
+                                                                        .queryParam("fid_input_iscd", stockCode)
+                                                                        .queryParam("fid_div_cls_code", divCode)
+                                                                        .build())
+                                                        .header("authorization", token)
+                                                        .header("appkey", kisApiProperties.getAppkey())
+                                                        .header("appsecret", kisApiProperties.getAppsecret())
+                                                        .header("tr_id", "FHKST66430500")
+                                                        .header("custtype", "P"),
+                                        com.AISA.AISA.kisStock.dto.KisOtherMajorRatiosResponse.class);
+
+                        if (response != null && response.getOutput() != null) {
+                                for (com.AISA.AISA.kisStock.dto.KisOtherMajorRatiosResponse.Output out : response
+                                                .getOutput()) {
+                                        String yymm = out.getStacYymm();
+                                        BigDecimal evEbitda = parseBigDecimalSafe(out.getEvEbitda());
+                                        BigDecimal ebitda = parseBigDecimalSafe(out.getEbitda());
+
+                                        if (yymm == null)
+                                                continue;
+
+                                        // Find matching entity
+                                        com.AISA.AISA.kisStock.Entity.stock.StockFinancialRatio target = stockFinancialRatioRepository
+                                                        .findByStockCodeAndStacYymmAndDivCode(stockCode, yymm, divCode)
+                                                        .orElse(null);
+
+                                        if (target != null) {
+                                                // Use Builder to update (toBuilder=true assumed on Entity)
+                                                com.AISA.AISA.kisStock.Entity.stock.StockFinancialRatio updated = target
+                                                                .toBuilder()
+                                                                .evEbitda(evEbitda) // Update new fields
+                                                                .ebitda(ebitda)
+                                                                .build();
+                                                stockFinancialRatioRepository.save(updated);
+                                        }
+                                }
+                        }
+                } catch (Exception e) {
+                        log.error("Failed to update Other Major Ratios for {}: {}", stockCode, e.getMessage());
+                }
+        }
+
+        private BigDecimal parseBigDecimalSafe(String value) {
+                if (value == null || value.trim().isEmpty() || "-".equals(value.trim())) {
+                        return BigDecimal.ZERO;
+                }
+                try {
+                        return new BigDecimal(value.replace(",", "").trim());
+                } catch (Exception e) {
+                        return BigDecimal.ZERO;
+                }
+        }
+
+        public void validateDomesticStock(String stockCode) {
+                Stock stock = stockRepository.findByStockCode(stockCode)
+                                .orElseThrow(() -> new BusinessException(KisApiErrorCode.STOCK_NOT_FOUND));
+
+                if (stock.getStockType() != Stock.StockType.DOMESTIC) {
+                        log.warn("Invalid stock type for domestic service: {} ({})", stockCode, stock.getStockType());
+                        throw new BusinessException(KisApiErrorCode.INVALID_STOCK_TYPE);
+                }
         }
 }

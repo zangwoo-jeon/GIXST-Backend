@@ -35,4 +35,8 @@ public class InvestmentMetricDto {
 
     @Schema(description = "BPS (주당순자산가치)")
     private String bps;
+
+    @Schema(description = "EV/EBITDA")
+    private String evEbitda;
+
 }

@@ -3,6 +3,7 @@ package com.AISA.AISA.analysis.controller;
 import com.AISA.AISA.analysis.dto.CorrelationResultDto;
 import com.AISA.AISA.analysis.dto.RollingCorrelationDto;
 import com.AISA.AISA.analysis.service.AnalysisService;
+import com.AISA.AISA.analysis.service.OverseasValuationService;
 import com.AISA.AISA.global.response.SuccessResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -27,6 +28,7 @@ public class AnalysisController {
 
         private final AnalysisService analysisService;
         private final ValuationService valuationService;
+        private final OverseasValuationService overseasValuationService;
 
         @GetMapping("/correlation")
         @Operation(summary = "자산 간 상관관계 분석", description = "두 자산 간의 피어슨 상관계수를 계산합니다.<br>" +
@@ -75,6 +77,14 @@ public class AnalysisController {
                         @PathVariable String stockCode,
                         @RequestBody(required = false) ValuationDto.Request request) {
 
+                // Heuristic: If stockCode isn't 6 digits, assume Overseas (Simple check)
+                // Accurate way would be checking DB, but avoiding extra DB call if possible.
+                // KR stocks: "005930" (6 digits). US: "AAPL" (Letters).
+                if (!stockCode.matches("\\d{6}")) {
+                        return ResponseEntity.ok(new SuccessResponse<>(true, "해외 주식 적정 주가 진단 성공",
+                                        overseasValuationService.calculateValuation(stockCode, request)));
+                }
+
                 return ResponseEntity.ok(new SuccessResponse<>(true, "적정 주가 진단 성공",
                                 valuationService.calculateValuation(stockCode, request)));
         }
@@ -84,6 +94,11 @@ public class AnalysisController {
         public ResponseEntity<SuccessResponse<ValuationDto.Response>> valuationReport(
                         @PathVariable String stockCode,
                         @RequestBody(required = false) ValuationDto.Request request) {
+
+                if (!stockCode.matches("\\d{6}")) {
+                        return ResponseEntity.ok(new SuccessResponse<>(true, "해외 주식 AI 적정 주가 분석 리포트 생성 성공",
+                                        overseasValuationService.calculateValuationWithAi(stockCode, request)));
+                }
 
                 return ResponseEntity.ok(new SuccessResponse<>(true, "AI 적정 주가 분석 리포트 생성 성공",
                                 valuationService.calculateValuationWithAi(stockCode, request)));

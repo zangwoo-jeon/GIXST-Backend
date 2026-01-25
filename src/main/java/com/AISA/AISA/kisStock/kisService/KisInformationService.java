@@ -54,6 +54,7 @@ public class KisInformationService {
     private final StockFinancialStatementRepository stockFinancialStatementRepository;
 
     public List<BalanceSheetDto> getBalanceSheet(String stockCode, String divCode) {
+        validateDomesticStock(stockCode);
         // 1. Check DB (Read-Only)
         List<StockBalanceSheet> dbStatements = stockBalanceSheetRepository
                 .findByStockCodeAndDivCodeOrderByStacYymmDesc(stockCode, divCode);
@@ -70,7 +71,9 @@ public class KisInformationService {
                 .collect(Collectors.toList());
     }
 
+    @Transactional
     public List<BalanceSheetDto> refreshBalanceSheet(String stockCode, String divCode) {
+        validateDomesticStock(stockCode);
         try {
             KisBalanceSheetApiResponse response = kisApiClient.fetch(token -> webClient.get()
                     .uri(uriBuilder -> uriBuilder
@@ -284,7 +287,9 @@ public class KisInformationService {
         return FinancialRatioRankDto.builder().ranks(entries).build();
     }
 
+    @Transactional
     public List<StockFinancialRatio> fetchAndSaveFinancialRatio(String stockCode, String divCode) {
+        validateDomesticStock(stockCode);
         // 1. Fetch Current Price & Status FIRST (Needed for both API calculation and
         // fallback)
         StockPriceInfo priceInfo = fetchCurrentPrice(stockCode);
@@ -557,6 +562,7 @@ public class KisInformationService {
 
     @Cacheable(value = "stockFinancial", key = "#stockCode + '-' + #divCode", sync = true)
     public List<FinancialStatementDto> getIncomeStatement(String stockCode, String divCode) {
+        validateDomesticStock(stockCode);
         // 1. Check DB
         List<StockFinancialStatement> dbData = stockFinancialStatementRepository
                 .findByStockCodeAndDivCodeOrderByStacYymmAsc(stockCode, divCode);
@@ -569,7 +575,9 @@ public class KisInformationService {
         return refreshIncomeStatement(stockCode, divCode);
     }
 
+    @Transactional
     public List<FinancialStatementDto> refreshIncomeStatement(String stockCode, String divCode) {
+        validateDomesticStock(stockCode);
         try {
             KisIncomeStatementApiResponse response = kisApiClient.fetch(token -> webClient.get()
                     .uri(uriBuilder -> uriBuilder
@@ -888,8 +896,17 @@ public class KisInformationService {
         }
     }
 
-    @Cacheable(value = "stockMetrics", key = "#stockCode + '-v2'", sync = true)
+    @Cacheable(value = "stockMetrics", key = "#stockCode + '-v4'", sync = true)
     public InvestmentMetricDto getInvestmentMetrics(String stockCode) {
+        // Validate StockType: This controller is for domestic stocks
+        Stock stock = stockRepository.findByStockCode(stockCode)
+                .orElse(null);
+
+        if (stock != null && stock.getStockType() != Stock.StockType.DOMESTIC) {
+            log.warn("Requested domestic metrics for non-domestic stock: {}", stockCode);
+            return InvestmentMetricDto.builder().stockCode(stockCode).build();
+        }
+
         // 1. Fetch latest financial ratio from API and save to DB
         // Use "0" (Yearly) as default, can be parameterized if needed.
         List<StockFinancialRatio> ratios = fetchAndSaveFinancialRatio(stockCode, "0");
@@ -929,6 +946,12 @@ public class KisInformationService {
             return InvestmentMetricDto.builder().stockCode(stockCode).build();
         }
 
+        // EV/EBITDA from DB
+        String evEbitdaStr = "N/A";
+        if (latest.getEvEbitda() != null) {
+            evEbitdaStr = String.format("%.2fx", latest.getEvEbitda());
+        }
+
         return InvestmentMetricDto.builder()
                 .stockCode(latest.getStockCode())
                 .stacYymm(latest.getStacYymm())
@@ -938,6 +961,34 @@ public class KisInformationService {
                 .eps(latest.getEps() != null ? latest.getEps().toString() : "0")
                 .roe(latest.getRoe() != null ? latest.getRoe().toString() : "0")
                 .bps(latest.getBps() != null ? latest.getBps().toString() : "0")
+                .evEbitda(evEbitdaStr)
                 .build();
+    }
+
+    public String getEvEbitdaFromDb(String stockCode) {
+        validateDomesticStock(stockCode);
+        // Try "1" (Quarterly) first
+        StockFinancialRatio latest = stockFinancialRatioRepository
+                .findTop1ByStockCodeAndDivCodeOrderByStacYymmDesc(stockCode, "1");
+
+        if (latest == null || latest.getEvEbitda() == null) {
+            latest = stockFinancialRatioRepository
+                    .findTop1ByStockCodeAndDivCodeOrderByStacYymmDesc(stockCode, "0");
+        }
+
+        if (latest != null && latest.getEvEbitda() != null) {
+            return String.format("%.2fx", latest.getEvEbitda());
+        }
+        return null;
+    }
+
+    public void validateDomesticStock(String stockCode) {
+        Stock stock = stockRepository.findByStockCode(stockCode)
+                .orElseThrow(() -> new BusinessException(KisApiErrorCode.STOCK_NOT_FOUND));
+
+        if (stock.getStockType() != Stock.StockType.DOMESTIC) {
+            log.warn("Invalid stock type for domestic service: {} ({})", stockCode, stock.getStockType());
+            throw new BusinessException(KisApiErrorCode.INVALID_STOCK_TYPE);
+        }
     }
 }

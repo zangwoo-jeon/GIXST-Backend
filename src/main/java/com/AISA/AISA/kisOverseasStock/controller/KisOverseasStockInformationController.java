@@ -41,6 +41,29 @@ public class KisOverseasStockInformationController {
         return ResponseEntity.ok(new SuccessResponse<>(true, "해외 주식 재무상태표 조회 성공", result));
     }
 
+    @GetMapping("/shareholder-return/{stockCode}")
+    @Operation(summary = "해외 주식 주주환원율 정보 조회", description = "특정 종목의 자사주 매입 및 배당금 지급 데이터를 조회합니다. (연간 데이터 기준)")
+    public ResponseEntity<SuccessResponse<List<com.AISA.AISA.kisOverseasStock.dto.OverseasStockCashFlowDto>>> getShareholderReturnInfo(
+            @PathVariable String stockCode) {
+        var result = informationService.getShareholderReturnInfo(stockCode);
+        return ResponseEntity.ok(new SuccessResponse<>(true, "해외 주식 주주환원율 정보 조회 성공", result));
+    }
+
+    @PostMapping("/suspension-status/{stockCode}")
+    @Operation(summary = "해외 주식 거래정지 여부 업데이트", description = "KIS 상품 정보 조회 API를 통해 특정 종목의 거래정지 여부를 확인하고 업데이트합니다.")
+    public ResponseEntity<SuccessResponse<String>> updateSuspensionStatus(
+            @PathVariable String stockCode) {
+        informationService.updateSuspensionStatus(stockCode);
+        return ResponseEntity.ok(new SuccessResponse<>(true, "해외 주식 거래정지 여부 업데이트 성공", null));
+    }
+
+    @PostMapping("/suspension-status/refresh-all")
+    @Operation(summary = "전체 해외 주식 거래정지 여부 업데이트", description = "모든 해외 주식(US_STOCK)에 대해 거래정지 여부를 확인하고 일괄 업데이트합니다.")
+    public ResponseEntity<SuccessResponse<String>> updateAllSuspensionStatus() {
+        informationService.updateAllSuspensionStatus();
+        return ResponseEntity.ok(new SuccessResponse<>(true, "전체 해외 주식 거래정지 여부 업데이트 시작", null));
+    }
+
     @GetMapping("/price-detail/{stockCode}")
     @Operation(summary = "해외 주식 가격 상세 정보 조회", description = "특정 종목의 시가총액, 상장주수 등 상세 가격 정보를 조회합니다.")
     public ResponseEntity<SuccessResponse<OverseasStockPriceDetailDto>> getPriceDetail(

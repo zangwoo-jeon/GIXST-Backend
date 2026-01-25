@@ -34,6 +34,9 @@ public class OverseasStockFinancialScheduler {
         // 2. 재무상태표 업데이트 (fetch_us_balance_sheets.py)
         runPythonScript("fetch_us_balance_sheets.py", "Balance Sheet");
 
+        // 3. 현금흐름표 (자사주 매입/배당금) 업데이트 (fetch_us_cash_flow.py)
+        runPythonScript("fetch_us_cash_flow.py", "Cash Flow (Buyback & Dividend)");
+
         log.info("Completed all scheduled overseas financial data updates.");
     }
 

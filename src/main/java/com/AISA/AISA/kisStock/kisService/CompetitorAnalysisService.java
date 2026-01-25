@@ -5,6 +5,8 @@ import com.AISA.AISA.kisStock.Entity.stock.StockIndustry;
 import com.AISA.AISA.kisStock.Entity.stock.StockMarketCap;
 import com.AISA.AISA.kisStock.repository.StockMarketCapRepository;
 import com.AISA.AISA.kisStock.repository.StockRepository;
+import com.AISA.AISA.global.exception.BusinessException;
+import com.AISA.AISA.kisStock.exception.KisApiErrorCode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -29,7 +31,11 @@ public class CompetitorAnalysisService {
         industryCategorizationService.categorizeStock(stockCode);
 
         Stock targetStock = stockRepository.findByStockCode(stockCode)
-                .orElseThrow(() -> new IllegalArgumentException("Stock not found: " + stockCode));
+                .orElseThrow(() -> new BusinessException(KisApiErrorCode.STOCK_NOT_FOUND));
+
+        if (targetStock.getStockType() != Stock.StockType.DOMESTIC) {
+            throw new BusinessException(KisApiErrorCode.INVALID_STOCK_TYPE);
+        }
 
         List<StockIndustry> industries = targetStock.getStockIndustries();
 

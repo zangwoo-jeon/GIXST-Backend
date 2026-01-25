@@ -86,6 +86,10 @@ public class KisOverseasStockInformationService {
         }
 
         /**
+         * 특정 종목의 거래정지 여부를 확인하고 업데이트합니다. (KIS 상품 정보 조회 API 활용)
+         */
+
+        /**
          * 특정 종목의 실시간 상세 가격 정보(시가총액, 상장주수)를 조회합니다.
          */
         public OverseasStockPriceDetailDto getPriceDetail(String stockCode) {
@@ -129,6 +133,41 @@ public class KisOverseasStockInformationService {
                                 .marketCapKrw(marketCapKrw)
                                 .listedShares(output.getListedShares())
                                 .build();
+        }
+
+        /**
+         * 특정 종목의 실시간 현재가를 조회합니다. (ValuationService용)
+         */
+        public BigDecimal getCurrentPrice(String stockCode) {
+                Stock stock = overseasStockRepository.findByStockCodeAndStockType(stockCode, Stock.StockType.US_STOCK)
+                                .orElseThrow(() -> new BusinessException(KisApiErrorCode.STOCK_NOT_FOUND));
+
+                KisOverseasPriceApiResponse response = kisApiClient.fetch(token -> webClient.get()
+                                .uri(uriBuilder -> {
+                                        String url = overseasApiProperties.getOverseaPriceUrl();
+                                        if (url == null)
+                                                throw new BusinessException(CommonErrorCode.INTERNAL_SERVER_ERROR);
+                                        return uriBuilder
+                                                        .path(url)
+                                                        .queryParam("AUTH", "")
+                                                        .queryParam("EXCD", stock.getMarketName().getExchangeCode())
+                                                        .queryParam("SYMB", stock.getStockCode())
+                                                        .build();
+                                })
+                                .header("Authorization", token)
+                                .header("appKey", kisApiProperties.getAppkey())
+                                .header("appSecret", kisApiProperties.getAppsecret())
+                                .header("tr_id", "HHDFS76200200"), KisOverseasPriceApiResponse.class);
+
+                if (response == null || response.getOutput() == null || response.getOutput().getPrice() == null) {
+                        return BigDecimal.ZERO;
+                }
+
+                try {
+                        return new BigDecimal(response.getOutput().getPrice());
+                } catch (Exception e) {
+                        return BigDecimal.ZERO;
+                }
         }
 
         /**
@@ -385,5 +424,91 @@ public class KisOverseasStockInformationService {
                 } catch (NumberFormatException e) {
                         return BigDecimal.ZERO;
                 }
+        }
+
+        @Autowired
+        private com.AISA.AISA.kisOverseasStock.repository.KisOverseasStockCashFlowRepository cashFlowRepository;
+
+        /**
+         * 특정 종목의 주주환원율 정보(자사주 매입, 배당금 지급)를 조회합니다.
+         */
+        public List<com.AISA.AISA.kisOverseasStock.dto.OverseasStockCashFlowDto> getShareholderReturnInfo(
+                        String stockCode) {
+                return cashFlowRepository.findByStockCodeAndDivCodeOrderByStacYymmDesc(stockCode, "0") // 연간 데이터 기준
+                                .stream()
+                                .map(com.AISA.AISA.kisOverseasStock.dto.OverseasStockCashFlowDto::fromEntity)
+                                .collect(Collectors.toList());
+        }
+
+        /**
+         * 특정 종목의 거래정지 여부를 확인하고 업데이트합니다. (KIS 상품 정보 조회 API 활용)
+         */
+
+        public void updateSuspensionStatus(String stockCode) {
+                Stock stock = overseasStockRepository.findByStockCodeAndStockType(stockCode, Stock.StockType.US_STOCK)
+                                .orElseThrow(() -> new BusinessException(KisApiErrorCode.STOCK_NOT_FOUND));
+
+                String prdtTypeCd;
+                switch (stock.getMarketName()) {
+                        case NAS:
+                                prdtTypeCd = "512";
+                                break;
+                        case NYS:
+                                prdtTypeCd = "513";
+                                break;
+                        case AMS:
+                                prdtTypeCd = "529";
+                                break;
+                        default:
+                                prdtTypeCd = "512"; // Default to Nasdaq if unknown
+                }
+
+                com.AISA.AISA.kisOverseasStock.dto.KisOverseasStockSearchInfoApiResponse response = kisApiClient
+                                .fetch(token -> webClient.get()
+                                                .uri(uriBuilder -> {
+                                                        String url = overseasApiProperties.getOverseaSearchInfoUrl();
+                                                        if (url == null)
+                                                                throw new BusinessException(
+                                                                                CommonErrorCode.INTERNAL_SERVER_ERROR);
+                                                        return uriBuilder
+                                                                        .path(url)
+                                                                        .queryParam("PRDT_TYPE_CD", prdtTypeCd)
+                                                                        .queryParam("PDNO", stockCode)
+                                                                        .build();
+                                                })
+                                                .header("Authorization", token)
+                                                .header("appKey", kisApiProperties.getAppkey())
+                                                .header("appSecret", kisApiProperties.getAppsecret())
+                                                .header("tr_id", "CTPF1702R") // 상품 기본 정보 조회
+                                                .header("custtype", "P"),
+                                                com.AISA.AISA.kisOverseasStock.dto.KisOverseasStockSearchInfoApiResponse.class);
+
+                if (response != null && response.getOutput() != null) {
+                        String stopCode = response.getOutput().getOvrsStckTrStopDvsnCd();
+                        // 01:정상, 그 외(02~06): 거래정지/중단
+                        boolean isSuspended = !"01".equals(stopCode);
+
+                        stock.updateSuspensionStatus(isSuspended);
+                        overseasStockRepository.save(stock);
+                }
+        }
+
+        /**
+         * 모든 해외 주식(US_STOCK)의 거래정지 여부를 일괄적으로 업데이트합니다.
+         */
+        public void updateAllSuspensionStatus() {
+                List<Stock> stocks = overseasStockRepository.findAllByStockType(Stock.StockType.US_STOCK);
+                log.info("Starting Batch Suspension Status Update for {} stocks", stocks.size());
+
+                for (Stock stock : stocks) {
+                        try {
+                                self.updateSuspensionStatus(stock.getStockCode());
+                                Thread.sleep(50); // API Rate Limit 고려 (0.05초 대기)
+                        } catch (Exception e) {
+                                log.error("Failed to update suspension status for {}: {}", stock.getStockCode(),
+                                                e.getMessage());
+                        }
+                }
+                log.info("Completed Batch Suspension Status Update");
         }
 }

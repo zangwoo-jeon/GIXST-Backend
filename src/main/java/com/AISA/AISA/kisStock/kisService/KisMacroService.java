@@ -508,4 +508,33 @@ public class KisMacroService {
         return null;
     }
 
+    public BigDecimal getLatestBondYield(BondYield bond) {
+        LocalDate endDate = LocalDate.now();
+        LocalDate startDate = endDate.minusDays(7); // Check last 7 days
+
+        // 1. Try DB
+        List<MacroDailyData> data = macroDailyDataRepository
+                .findAllByStatCodeAndItemCodeAndDateBetweenOrderByDateAsc(
+                        STAT_CODE_BOND_YIELD, bond.getSymbol(), startDate, endDate);
+
+        if (!data.isEmpty()) {
+            return data.get(data.size() - 1).getValue();
+        }
+
+        // 2. If empty, try Fetch (and it will save to DB)
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
+        fetchAndSaveBondYield(bond, startDate.format(formatter), endDate.format(formatter));
+
+        // 3. Retry DB
+        data = macroDailyDataRepository
+                .findAllByStatCodeAndItemCodeAndDateBetweenOrderByDateAsc(
+                        STAT_CODE_BOND_YIELD, bond.getSymbol(), startDate, endDate);
+
+        if (!data.isEmpty()) {
+            return data.get(data.size() - 1).getValue();
+        }
+
+        return null;
+    }
+
 }

@@ -68,6 +68,7 @@ public class DividendService {
                         String stockCode,
                         String startDate,
                         String endDate) {
+                validateDomesticStock(stockCode);
 
                 // 1. DB에서 먼저 조회
                 List<StockDividend> savedDividends = stockDividendRepository
@@ -98,6 +99,10 @@ public class DividendService {
 
                 Stock stock = stockRepository.findByStockCode(stockCode)
                                 .orElseThrow(() -> new BusinessException(KisApiErrorCode.STOCK_NOT_FOUND));
+
+                if (stock.getStockType() != Stock.StockType.DOMESTIC) {
+                        throw new BusinessException(KisApiErrorCode.INVALID_STOCK_TYPE);
+                }
 
                 KisDividendApiResponse apiResponse = webClient.get()
                                 .uri(uriBuilder -> uriBuilder
@@ -411,6 +416,7 @@ public class DividendService {
 
         @Cacheable(value = "stockDividendDetail", key = "#stockCode", sync = true)
         public DividendDetailDto getDividendDetail(String stockCode) {
+                validateDomesticStock(stockCode);
                 // 1. 기간 설정 (최근 1년)
                 String endDate = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
                 String startDate = LocalDate.now().minusYears(1).format(DateTimeFormatter.ofPattern("yyyyMMdd"));
@@ -599,5 +605,14 @@ public class DividendService {
                                 .dividends(dividendList)
                                 .totalMonthlyDividend(totalMonthlyDividend)
                                 .build();
+        }
+
+        public void validateDomesticStock(String stockCode) {
+                Stock stock = stockRepository.findByStockCode(stockCode)
+                                .orElseThrow(() -> new BusinessException(KisApiErrorCode.STOCK_NOT_FOUND));
+
+                if (stock.getStockType() != Stock.StockType.DOMESTIC) {
+                        throw new BusinessException(KisApiErrorCode.INVALID_STOCK_TYPE);
+                }
         }
 }

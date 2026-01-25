@@ -1013,21 +1013,32 @@ public class ValuationService {
             // Parse AI Response (Container containing both AiVerdict and BeginnerVerdict)
             AiResponseJson aiResponse = parseAiResponse(aiAnalysis);
 
-            // Merge Logic: Enhance AI's partial investorTrend with original rich data
-            if (originalTrend != null && aiResponse.getAnalysisDetails() != null
-                    && aiResponse.getAnalysisDetails().getInvestorTrend() != null) {
-                InvestorTrendDto aiTrend = aiResponse.getAnalysisDetails().getInvestorTrend();
-                // Overwrite ONLY AI's interpretive fields onto the rich original data
-                originalTrend.setSupplyScore(aiTrend.getSupplyScore());
-                originalTrend.setTrendStatus(aiTrend.getTrendStatus());
-                originalTrend.setAdvice(aiTrend.getAdvice()); // Map the new AI advice field
-                // Do NOT overwrite quantitative fields like Overheat/AvgPrice with AI results
+            // Validate AnalysisDetails (Create if missing)
+            if (aiResponse.getAnalysisDetails() == null) {
+                aiResponse.setAnalysisDetails(ValuationDto.AnalysisDetails.builder().build());
+            }
 
-                // Use the enriched originalTrend for the final response
-                aiResponse.getAnalysisDetails().setInvestorTrend(originalTrend);
-            } else if (originalTrend != null && aiResponse.getAnalysisDetails() != null) {
-                // Fallback: If AI failed to provide investorTrend object, still show original
-                // data
+            // [New] Populate EV/EBITDA from DB
+            try {
+                StockFinancialRatio latestRatio = stockFinancialRatioRepository
+                        .findTop1ByStockCodeAndDivCodeOrderByStacYymmDesc(response.getStockCode(), "0");
+                if (latestRatio != null && latestRatio.getEvEbitda() != null) {
+                    aiResponse.getAnalysisDetails().setEvEbitda(String.format("%.2fx", latestRatio.getEvEbitda()));
+                }
+            } catch (Exception e) {
+                log.warn("Failed to populate EV/EBITDA from DB for {}: {}", response.getStockCode(), e.getMessage());
+            }
+
+            // Merge Logic: Enhance AI's partial investorTrend with original rich data
+            if (originalTrend != null) {
+                InvestorTrendDto aiTrend = aiResponse.getAnalysisDetails().getInvestorTrend();
+                if (aiTrend != null) {
+                    // Overwrite ONLY AI's interpretive fields onto the rich original data
+                    originalTrend.setSupplyScore(aiTrend.getSupplyScore());
+                    originalTrend.setTrendStatus(aiTrend.getTrendStatus());
+                    originalTrend.setAdvice(aiTrend.getAdvice());
+                }
+                // Use the enriched originalTrend (or just original if aiTrend was null)
                 aiResponse.getAnalysisDetails().setInvestorTrend(originalTrend);
             }
 

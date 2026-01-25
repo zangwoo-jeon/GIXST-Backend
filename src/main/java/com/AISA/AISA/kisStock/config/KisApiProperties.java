@@ -25,6 +25,7 @@ public class KisApiProperties {
     private String investorTrendUrl; // 투자자별 매매동향 (기간 합계)
     private String investorTrendDailyUrl; // 투자자별 매매동향 (일자별) - New Logic
     private String financialRatioUrl;
+    private String otherMajorRatiosUrl; // EV/EBITDA 등 기타 지표
     private String appkey;
     private String appsecret;
 }

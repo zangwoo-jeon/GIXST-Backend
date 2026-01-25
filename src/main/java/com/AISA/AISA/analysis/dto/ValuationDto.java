@@ -1,6 +1,8 @@
 package com.AISA.AISA.analysis.dto;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonInclude.Include;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -25,13 +27,16 @@ public class ValuationDto {
     public static class Request {
         private UserPropensity userPropensity; // "CONSERVATIVE", "NEUTRAL", "AGGRESSIVE"
         private Double expectedTotalReturn; // Advanced override (Optional)
+        @Builder.Default
+        private boolean forceRefresh = false; // Force regenerate AI report (Ignore Cache)
     }
 
     @Getter
     @Setter
     @NoArgsConstructor
     @AllArgsConstructor
-    @Builder
+    @Builder(toBuilder = true)
+    @JsonInclude(Include.NON_NULL)
     public static class Response {
         private String stockCode;
         private String stockName;
@@ -51,7 +56,8 @@ public class ValuationDto {
         private Summary summary;
 
         // Phase 6: Strategist Details
-        private AnalysisDetails analysisDetails;
+        private AnalysisDetails analysisDetails; // Domestic
+        private OverseasAnalysisDetails overseasAnalysisDetails; // Overseas
     }
 
     @Getter
@@ -67,6 +73,24 @@ public class ValuationDto {
         private List<String> risks; // 리스크 요인
         private PeerComparison peerComparison; // 경쟁사 비교
         private InvestorTrendDto investorTrend; // 수급 요약
+        private String evEbitda; // EV/EBITDA (Domestic)
+    }
+
+    @Getter
+    @Setter
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    public static class OverseasAnalysisDetails {
+        private String upsidePotential;
+        private String downsideRisk;
+        private String investmentTerm;
+        private List<String> catalysts;
+        private List<String> risks;
+
+        private String pegRatio; // e.g. "1.2 (Fair)"
+        private String evEbitda; // e.g. "12.5x"
+        private String shareholderYield; // e.g. "5.4% (Buyback 3.2% + Div 2.2%)"
     }
 
     @Getter

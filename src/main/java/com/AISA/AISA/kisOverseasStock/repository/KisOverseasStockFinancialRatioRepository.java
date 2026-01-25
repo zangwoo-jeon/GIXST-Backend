@@ -13,4 +13,9 @@ public interface KisOverseasStockFinancialRatioRepository extends JpaRepository<
             String divCode);
 
     List<OverseasStockFinancialRatio> findByStockCodeAndDivCodeOrderByStacYymmAsc(String stockCode, String divCode);
+
+    OverseasStockFinancialRatio findTop1ByStockCodeAndDivCodeOrderByStacYymmDesc(String stockCode, String divCode);
+
+    List<OverseasStockFinancialRatio> findTop5ByStockCodeAndDivCodeOrderByStacYymmDesc(String stockCode,
+            String divCode);
 }

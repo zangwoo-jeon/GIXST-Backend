@@ -137,6 +137,20 @@ public class KisInformationController {
                                 "Started background task."));
         }
 
+        @GetMapping("/ev-ebitda/{stockCode}")
+        @Operation(summary = "특정 종목 EV/EBITDA 조회 (DB)", description = "특정 종목의 EV/EBITDA를 DB에서 조회합니다.")
+        public ResponseEntity<SuccessResponse<String>> getEvEbitda(@PathVariable String stockCode) {
+                String result = kisInformationService.getEvEbitdaFromDb(stockCode);
+                return ResponseEntity.ok(new SuccessResponse<>(true, "EV/EBITDA 조회 성공 (미보유시 Null)", result));
+        }
+
+        @PostMapping("/other-major-ratios/refresh/{stockCode}")
+        @Operation(summary = "특정 종목 EV/EBITDA 등 기타 지표 갱신 (API -> DB)", description = "KIS API에서 최신 기타 지표(EV/EBITDA 등)를 가져와 DB에 저장합니다.")
+        public ResponseEntity<SuccessResponse<String>> refreshOtherMajorRatios(@PathVariable String stockCode) {
+                kisStockService.updateOtherMajorRatios(stockCode);
+                return ResponseEntity.ok(new SuccessResponse<>(true, "기타 지표(EV/EBITDA) 갱신 성공", null));
+        }
+
         @GetMapping("/investor-trend/{stockCode}")
         @Operation(summary = "종목별 투자자 수급(거래대금) 조회", description = "최근 3개월간 외국인/기관의 순매수 거래대금 추이를 조회합니다.")
         public ResponseEntity<SuccessResponse<InvestorTrendDto>> getInvestorTrend(@PathVariable String stockCode) {

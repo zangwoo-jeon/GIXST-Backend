@@ -38,7 +38,9 @@ public class DomesticValuationDto {
         private String stockName;
         private String currentPrice;
         private String marketCap;
+        @JsonIgnore
         private String targetReturn;
+        @JsonIgnore
         private DiscountRateInfo discountRate;
 
         private ValuationResult srim;

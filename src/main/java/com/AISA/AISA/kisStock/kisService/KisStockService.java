@@ -1236,6 +1236,27 @@ public class KisStockService {
                                 .build());
         }
 
+        public void refreshAllOtherMajorRatios() {
+                log.info("Starting batch update for all domestic stocks' other major ratios (EV/EBITDA, etc.)");
+                List<Stock> domesticStocks = stockRepository.findByStockType(Stock.StockType.DOMESTIC);
+
+                for (Stock stock : domesticStocks) {
+                        try {
+                                if (stock.isSuspended()) {
+                                        log.info("Skipping major ratios update for suspended stock: {} ({})",
+                                                        stock.getStockName(), stock.getStockCode());
+                                        continue;
+                                }
+                                updateOtherMajorRatios(stock.getStockCode());
+                                Thread.sleep(100); // Rate limit (10 req/sec)
+                        } catch (Exception e) {
+                                log.error("Failed to update other major ratios for {}: {}", stock.getStockCode(),
+                                                e.getMessage());
+                        }
+                }
+                log.info("Completed batch update for all domestic major ratios.");
+        }
+
         @Transactional
         public void updateOtherMajorRatios(String stockCode) {
                 // Validate StockType: Only DOMESTIC stocks are supported for this KIS API

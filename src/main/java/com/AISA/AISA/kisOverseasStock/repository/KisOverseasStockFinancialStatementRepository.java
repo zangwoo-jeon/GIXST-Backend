@@ -16,6 +16,9 @@ public interface KisOverseasStockFinancialStatementRepository
         List<OverseasStockFinancialStatement> findByStockCodeAndDivCodeOrderByStacYymmAsc(String stockCode,
                         String divCode);
 
+        List<OverseasStockFinancialStatement> findTop2ByStockCodeAndDivCodeOrderByStacYymmDesc(String stockCode,
+                        String divCode);
+
         Optional<OverseasStockFinancialStatement> findByStockCodeAndStacYymmAndDivCode(String stockCode,
                         String stacYymm,
                         String divCode);

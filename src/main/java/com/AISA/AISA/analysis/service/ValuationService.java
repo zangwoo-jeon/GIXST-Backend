@@ -1,8 +1,10 @@
 package com.AISA.AISA.analysis.service;
 
-import com.AISA.AISA.analysis.dto.ValuationDto;
-import com.AISA.AISA.analysis.dto.ValuationDto.*;
-import com.AISA.AISA.analysis.dto.ValuationDto.Summary.AiVerdict;
+import com.AISA.AISA.analysis.dto.ValuationBaseDto;
+import com.AISA.AISA.analysis.dto.ValuationBaseDto.*;
+import com.AISA.AISA.analysis.dto.ValuationBaseDto.Summary.*;
+import com.AISA.AISA.analysis.dto.DomesticValuationDto;
+import com.AISA.AISA.analysis.dto.DomesticValuationDto.*;
 import com.AISA.AISA.analysis.entity.StockAiSummary;
 import com.AISA.AISA.analysis.entity.StockStaticAnalysis;
 import com.AISA.AISA.analysis.repository.StockAiSummaryRepository;
@@ -11,6 +13,7 @@ import com.AISA.AISA.kisStock.Entity.stock.Stock;
 import com.AISA.AISA.kisStock.Entity.stock.StockBalanceSheet;
 import com.AISA.AISA.kisStock.Entity.stock.StockFinancialRatio;
 import com.AISA.AISA.kisStock.Entity.stock.StockFinancialStatement;
+import com.AISA.AISA.kisStock.kisService.CompetitorAnalysisService;
 import com.AISA.AISA.kisStock.kisService.KisStockService;
 import com.AISA.AISA.kisStock.dto.StockPrice.StockPriceDto;
 import com.AISA.AISA.kisStock.dto.InvestorTrend.InvestorTrendDto;
@@ -48,6 +51,7 @@ public class ValuationService {
     private final GeminiService geminiService;
     private final StockAiSummaryRepository stockAiSummaryRepository;
     private final StockStaticAnalysisRepository stockStaticAnalysisRepository;
+    private final CompetitorAnalysisService competitorAnalysisService;
 
     @Autowired
     public ValuationService(StockRepository stockRepository,
@@ -56,7 +60,8 @@ public class ValuationService {
             KisStockService kisStockService,
             GeminiService geminiService,
             StockAiSummaryRepository stockAiSummaryRepository,
-            StockStaticAnalysisRepository stockStaticAnalysisRepository) {
+            StockStaticAnalysisRepository stockStaticAnalysisRepository,
+            CompetitorAnalysisService competitorAnalysisService) {
         this.stockRepository = stockRepository;
         this.stockFinancialRatioRepository = stockFinancialRatioRepository;
         this.stockFinancialStatementRepository = stockFinancialStatementRepository;
@@ -64,21 +69,29 @@ public class ValuationService {
         this.geminiService = geminiService;
         this.stockAiSummaryRepository = stockAiSummaryRepository;
         this.stockStaticAnalysisRepository = stockStaticAnalysisRepository;
+        this.competitorAnalysisService = competitorAnalysisService;
     }
 
     @Transactional
-    public Response getStandardizedValuationReport(String stockCode) {
-        Request standardRequest = Request.builder().userPropensity(UserPropensity.NEUTRAL).build();
+    public Response getStandardizedValuationReport(String stockCode, boolean forceRefresh) {
+        Request standardRequest = Request.builder()
+                .userPropensity(UserPropensity.NEUTRAL)
+                .forceRefresh(forceRefresh)
+                .build();
         return calculateValuationWithAi(stockCode, standardRequest);
     }
 
     @Transactional
     public Response calculateValuationWithAi(String stockCode, Request request) {
+        if (request != null && request.isForceRefresh()) {
+            kisStockService.evictInvestorTrendCache(stockCode);
+        }
         Response response = calculateValuation(stockCode, request);
-        String aiAnalysis = getValuationAnalysis(stockCode, response);
+        String aiAnalysis = getValuationAnalysis(stockCode, response, request);
         InvestorTrendDto trend = null;
         try {
             trend = kisStockService.getInvestorTrend(stockCode);
+            log.info("Fetched investor trend for {}: advice={}", stockCode, trend != null ? trend.getAdvice() : "N/A");
         } catch (Exception e) {
             log.warn("Failed to fetch investor trend: {}", e.getMessage());
         }
@@ -111,7 +124,7 @@ public class ValuationService {
             currentPrice = latestRatio.getEps().multiply(latestRatio.getPer());
         }
 
-        ValuationDto.DiscountRateInfo discountRateInfo = determineCOE(request);
+        DiscountRateInfo discountRateInfo = determineCOE(request);
         BigDecimal coe = new BigDecimal(discountRateInfo.getValue().replace("%", "")).divide(new BigDecimal(100));
 
         ValuationResult srim = calculateSRIM(latestRatio, history, coe, currentPrice);
@@ -150,27 +163,34 @@ public class ValuationService {
         return value.toPlainString() + "원";
     }
 
-    private ValuationDto.DiscountRateInfo determineCOE(Request request) {
+    private DiscountRateInfo determineCOE(Request request) {
         if (request != null && request.getExpectedTotalReturn() != null) {
             String value = BigDecimal.valueOf(request.getExpectedTotalReturn()).multiply(new BigDecimal(100))
                     .setScale(1, RoundingMode.HALF_UP) + "%";
-            return ValuationDto.DiscountRateInfo.builder().profile("CUSTOM").value(value)
+            return DiscountRateInfo.builder().profile("CUSTOM").value(value)
                     .basis("User defined custom override").source("USER_OVERRIDE").build();
         }
         if (request != null && request.getUserPropensity() != null) {
             switch (request.getUserPropensity()) {
                 case CONSERVATIVE:
-                    return ValuationDto.DiscountRateInfo.builder().profile("CONSERVATIVE").value("10.0%")
-                            .basis("Safety First").source("PROFILE_DEFAULT").build();
+                    return DiscountRateInfo.builder().profile("CONSERVATIVE").value("10.0%")
+                            .basis("Safety First").source("PROFILE_DEFAULT")
+                            .note("보수적인 투자자를 위해 높은 안전 마진을 확보하고자 10%의 할인율을 적용했습니다.")
+                            .build();
                 case AGGRESSIVE:
-                    return ValuationDto.DiscountRateInfo.builder().profile("AGGRESSIVE").value("6.0%")
-                            .basis("Growth Focused").source("PROFILE_DEFAULT").build();
+                    return DiscountRateInfo.builder().profile("AGGRESSIVE").value("6.0%")
+                            .basis("Growth Focused").source("PROFILE_DEFAULT")
+                            .note("성장성을 중시하는 공격적 투자를 위해 시장 평균보다 낮은 6%의 할인율을 적용했습니다.")
+                            .build();
                 default:
                     break;
             }
         }
-        return ValuationDto.DiscountRateInfo.builder().profile("NEUTRAL").value("8.0%").basis("Market Reference")
-                .source("PROFILE_DEFAULT").build();
+        return DiscountRateInfo.builder().profile("NEUTRAL").value("8.0%")
+                .basis("Market Reference")
+                .source("PROFILE_DEFAULT")
+                .note("한국 시장의 표준 요구수익률 관행(8%)을 적용한 중립적 할인율입니다.")
+                .build();
     }
 
     private ValuationResult calculateSRIM(StockFinancialRatio latest, List<StockFinancialRatio> history, BigDecimal coe,
@@ -491,10 +511,12 @@ public class ValuationService {
     }
 
     @Transactional
-    public String getValuationAnalysis(String stockCode, Response val) {
+    public String getValuationAnalysis(String stockCode, Response val, Request request) {
         BigDecimal cur = new BigDecimal(val.getCurrentPrice().replace(",", ""));
         Optional<StockAiSummary> cached = stockAiSummaryRepository.findByStockCode(stockCode);
-        if (cached.isPresent() && !cached.get().isExpired(720)) {
+        boolean force = (request != null && request.isForceRefresh());
+
+        if (!force && cached.isPresent() && !cached.get().isExpired(720)) {
             BigDecimal ref = cached.get().getReferencePrice();
             if (ref != null && cur.subtract(ref).abs().divide(ref, 4, RoundingMode.HALF_UP)
                     .compareTo(new BigDecimal("0.05")) <= 0)
@@ -504,11 +526,14 @@ public class ValuationService {
         StockFinancialRatio ratio = stockFinancialRatioRepository
                 .findTop1ByStockCodeAndDivCodeOrderByStacYymmDesc(stockCode, "0");
         InvestorTrendDto trend = null;
+        PeerComparison peerComp = null;
         try {
             trend = kisStockService.getInvestorTrend(stockCode);
+            peerComp = calculatePeerComparison(stockCode);
         } catch (Exception e) {
+            log.warn("Failed to fetch contextual data for AI for {}: {}", stockCode, e.getMessage());
         }
-        String analysis = generateValuationAnalysisText(val, ratio, null, null, trend);
+        String analysis = generateValuationAnalysisText(val, ratio, null, null, trend, peerComp);
 
         AiResponseJson aiJson = parseAiResponse(analysis);
         String displayVerdict = val.getSummary().getOverallVerdict(), displayLabel = mapVerdictToLabel(displayVerdict,
@@ -578,51 +603,64 @@ public class ValuationService {
 
     private String generateValuationAnalysisText(Response val, StockFinancialRatio latestRatio,
             StockBalanceSheet balanceSheet, List<StockFinancialStatement> recentQuarters,
-            InvestorTrendDto investorTrend) {
+            InvestorTrendDto investorTrend, PeerComparison peerComp) {
         StringBuilder prompt = new StringBuilder();
-        prompt.append("너는 '대한민국 주식 투자 전략가(Critical Strategist)'이다. 국내 시장 특수성을 고려하여 비판적으로 분석하라.\n");
-        prompt.append(String.format("종목: %s (%s), 현재가: %s원\n", val.getStockName(), val.getStockCode(),
+        prompt.append(
+                "너는 '대한민국 주식 전문 투자 전략가(Critical Strategist)'이다. 국내 시장의 특수성(수급, 동종업계 밸류에이션)을 고려하여 비판적으로 분석하라.\n\n");
+        prompt.append(String.format("[대상 종목] %s (%s), 현재가: %s원\n", val.getStockName(), val.getStockCode(),
                 val.getCurrentPrice()));
-        if (latestRatio != null)
+
+        if (latestRatio != null) {
             prompt.append(String.format("[펀더멘털] PER: %.2f, PBR: %.2f, ROE: %.2f%%, EV/EBITDA: %s\n",
                     latestRatio.getPer(), latestRatio.getPbr(), latestRatio.getRoe(),
                     latestRatio.getEvEbitda() != null ? latestRatio.getEvEbitda() + "x" : "N/A"));
-        prompt.append("\n[시스템 Valuation 데이터 (Hard Data)]\n");
+        }
+
+        prompt.append("\n[시스템 가치평가 데이터]\n");
         prompt.append(
                 String.format("- S-RIM 적정가: %s원 (%s)\n", val.getSrim().getPrice(), val.getSrim().getDescription()));
         prompt.append(String.format("- PER 과거평균: %s원 (%s)\n", val.getPer().getPrice(), val.getPer().getDescription()));
         prompt.append(String.format("- PBR 과거평균: %s원 (%s)\n", val.getPbr().getPrice(), val.getPbr().getDescription()));
 
-        // 가격 위치 context 주입
-        if (val.getBand() != null) {
-            prompt.append(String.format("- 현재가 밴드 위치: %s (Status: %s)\n", val.getBand().getPosition(),
-                    val.getBand().getStatus()));
+        if (investorTrend != null) {
+            prompt.append("\n[외인/기관 수급 현황]\n");
+            prompt.append(String.format("- 수급 점수: %.1f/100 (%s)\n", investorTrend.getSupplyScore(),
+                    investorTrend.getTrendStatus()));
+            if (investorTrend.getAdvice() != null) {
+                prompt.append(String.format("- 시스템 수급 진단: %s\n", investorTrend.getAdvice()));
+            }
+            if (investorTrend.getForeignerAvgPrice() != null) {
+                prompt.append(String.format("- 외인 매집 평단: %s원 (현재가 대비 %.2f%%)\n",
+                        investorTrend.getForeignerAvgPrice(),
+                        new BigDecimal(val.getCurrentPrice().replace(",", ""))
+                                .subtract(investorTrend.getForeignerAvgPrice())
+                                .divide(investorTrend.getForeignerAvgPrice(), 4, RoundingMode.HALF_UP)
+                                .multiply(new BigDecimal(100))));
+            }
         }
 
-        // 품질 지표 컨텍스트 주입 (국내)
-        if (latestRatio != null) {
-            BigDecimal peg = BigDecimal.ZERO;
-            if (latestRatio.getPer() != null && latestRatio.getSalesGrowth() != null
-                    && latestRatio.getSalesGrowth().compareTo(BigDecimal.ZERO) > 0) {
-                peg = latestRatio.getPer().divide(latestRatio.getSalesGrowth(), 2, RoundingMode.HALF_UP).abs();
+        if (peerComp != null && peerComp.getPeers() != null) {
+            prompt.append("\n[동종업계 비교 데이터]\n");
+            prompt.append(String.format("- 섹터 평균 PER: %s\n", peerComp.getSectorAvgPer()));
+            for (PeerInfo peer : peerComp.getPeers()) {
+                prompt.append(String.format("- %s: PER %s, PBR %s\n", peer.getName(), peer.getPer(), peer.getPbr()));
             }
-            prompt.append(String.format("- PEG (추정): %.2f, EV/EBITDA: %s\n", peg,
-                    latestRatio.getEvEbitda() != null ? latestRatio.getEvEbitda() + "x" : "N/A"));
         }
 
         prompt.append("\n[전략가 미션]\n");
         prompt.append(
-                "1. **지표 등급 요약**: PEG, EV/EBITDA, 배당성향 등을 종합하여 '가성비' 및 '투자 매력도' 관점에서 등급화(우수/보통/주의)하여 1줄 평을 작성하라.\n");
+                "1. **국내 시장 맞춤 분석 (CRITICAL)**: 대한민국 시장 특성상 해외 지표인 **PEG ratio나 주주환원율(Yield)을 절대 언급하지 마라.** 만약 관련 데이터가 보이더라도 무시하라. 대신 현재 **'수급 상황(외인/기관)'**과 **'동종업계 대비 상대적 매력도'**를 집중적으로 분석하라.\n");
         prompt.append(
-                "2. **격차 분석 및 프리미엄 해석**: 시스템 S-RIM 가격과 현재가 사이의 괴리를 해석하라. 만약 Status가 ABOVE_BAND라면 '비싸다'는 표현 대신 '시장의 미래 성장 프리미엄이 X% 추가 반영된 상태'라고 전문적으로 브리핑하라.\n");
-        prompt.append(String.format("3. **생애주기 해석**: 시스템이 판정한 [%s] 티어의 타당성을 브리핑하라.\n",
-                val.getSrim().getDescription().split("]")[0] + "]"));
-        prompt.append("4. **지표 크로스 체크**: EV/EBITDA 등과 비교하여 가장 적합한 지표를 논하라.\n");
-        prompt.append("5. **정당성 검증**: 데이터 한계를 인정하되 전문가다운 전략적 매수/매도 시점(Timing) 제안.\n");
+                "2. **수급 모멘텀 해석**: 현재 수급 점수와 트렌드가 향후 주가 향방에 미칠 영향을 논하라. 가오리 차트나 수급 평단가 데이터를 활용하여 지지선/저항선을 제시하라.\n");
+        prompt.append("3. **상대적 밸류에이션**: 동종업계 경쟁사들의 PER/PBR 지표와 비교했을 때, 대상 종목의 현재 가격이 가지는 프리미엄의 적정성을 논하라.\n");
+        prompt.append("4. **프리미엄 해석**: S-RIM 적정가와의 격차를 '시장의 미래 성장 및 수급 프리미엄'으로 정의하고, 이를 긍정적 혹은 부정적으로 해석하라.\n");
+        prompt.append(
+                "5. **초보자 눈높이 요약**: `beginnerVerdict.summarySentence`에는 PEG 대신 '수급과 업종 평균'을 언급하며 친절하되 전문적으로 요약하라.\n");
+
         prompt.append("\n[출력 포맷 (JSON)]\n");
-        prompt.append("응답은 오직 순수한 JSON 형식이어야 하며, 필드명은 정확히 일치해야 합니다.\n");
+        prompt.append("응답은 오직 순수한 JSON 형식이어야 합니다.\n");
         prompt.append(
-                "```json\n{\n  \"keyInsight\": \"30자 이내 핵심 요약\",\n  \"aiVerdict\": {\"stance\": \"BUY/ACCUMULATE/HOLD/REDUCE/SELL\", \"timing\": \"EARLY/MID/LATE\", \"riskLevel\": \"LOW/MEDIUM/HIGH\", \"guidance\": \"분석 의견\"},\n  \"suggestedWeights\": {\"srim\": 0.15, \"per\": 0.55, \"pbr\": 0.3},\n  \"beginnerVerdict\": {\"summarySentence\": \"PEG와 지표 등급을 포함한 친근한 투자 포인트 요약\"},\n  \"catalysts\": [\"호재 1\"], \"risks\": [\"악재 1\"]\n}\n```\n");
+                "```json\n{\n  \"keyInsight\": \"30자 이내 핵심 요약\",\n  \"aiVerdict\": {\"stance\": \"BUY/ACCUMULATE/HOLD/REDUCE/SELL\", \"timing\": \"EARLY/MID/LATE\", \"riskLevel\": \"LOW/MEDIUM/HIGH\", \"guidance\": \"분석 의견\"},\n  \"suggestedWeights\": {\"srim\": 0.15, \"per\": 0.55, \"pbr\": 0.3},\n  \"beginnerVerdict\": {\"summarySentence\": \"수급 점수와 동종업계 비교를 포함한 투자 포인트 요약\"},\n  \"catalysts\": [\"호재 1\"], \"risks\": [\"악재 1\"]\n}\n```\n");
         return geminiService.generateAdvice(prompt.toString());
     }
 
@@ -643,6 +681,11 @@ public class ValuationService {
                 .keyInsight(aiJson.getKeyInsight() != null ? aiJson.getKeyInsight() : "AI 분석 리포트")
                 .verdicts(Summary.Verdicts.builder().aiVerdict(aiJson.getAiVerdict()).build())
                 .beginnerVerdict(aiJson.getBeginnerVerdict()).display(display).build();
+
+        // [Phase 9] Defensive mapping for missing advice (cache fallback)
+        if (trend != null && trend.getAdvice() == null) {
+            trend.setAdvice(generateFallbackSupplyAdvice(trend.getSupplyScore()));
+        }
 
         // [New Phase 2] 가격 전략 및 품질 지표 연동
         BigDecimal pegVal = null;
@@ -704,10 +747,18 @@ public class ValuationService {
             log.warn("Failed to refine price model: {}", e.getMessage());
         }
 
+        PeerComparison peerComp = null;
+        try {
+            peerComp = calculatePeerComparison(response.getStockCode());
+        } catch (Exception e) {
+            log.warn("Failed to calculate peer comparison: {}", e.getMessage());
+        }
+
         AnalysisDetails details = AnalysisDetails.builder().investmentTerm("6-12 Months")
                 .catalysts(aiJson.getCatalysts()).risks(aiJson.getRisks())
                 .priceModel(pmDto)
                 .qualityMetrics(AnalysisDetails.QualityMetrics.builder().evEbitda(evEbitdaStr).build())
+                .peerComparison(peerComp)
                 .investorTrend(trend).build();
 
         if (aiJson.getSuggestedWeights() != null && response.getBand() != null)
@@ -716,11 +767,54 @@ public class ValuationService {
         return response.toBuilder().summary(newSummary).analysisDetails(details).build();
     }
 
-    private String mapVerdictToLabel(String modelRating, ValuationDto.Stance aiStance) {
+    private PeerComparison calculatePeerComparison(String stockCode) {
+        List<Stock> competitors = competitorAnalysisService.findCompetitors(stockCode);
+        List<PeerInfo> peerInfos = new ArrayList<>();
+        BigDecimal sumPer = BigDecimal.ZERO;
+        int count = 0;
+
+        for (Stock comp : competitors) {
+            StockFinancialRatio ratio = stockFinancialRatioRepository
+                    .findTop1ByStockCodeAndDivCodeOrderByStacYymmDesc(comp.getStockCode(), "0");
+            if (ratio != null) {
+                peerInfos.add(PeerInfo.builder()
+                        .name(comp.getStockName())
+                        .per(ratio.getPer() != null ? ratio.getPer().toString() : "N/A")
+                        .pbr(ratio.getPbr() != null ? ratio.getPbr().toString() : "N/A")
+                        .build());
+                if (ratio.getPer() != null && ratio.getPer().compareTo(BigDecimal.ZERO) > 0) {
+                    sumPer = sumPer.add(ratio.getPer());
+                    count++;
+                }
+            }
+        }
+
+        String sectorAvgPer = count > 0 ? sumPer.divide(new BigDecimal(count), 2, RoundingMode.HALF_UP).toString()
+                : "N/A";
+        return PeerComparison.builder()
+                .sectorAvgPer(sectorAvgPer)
+                .peers(peerInfos)
+                .status("COMPLETED")
+                .build();
+    }
+
+    private String generateFallbackSupplyAdvice(double score) {
+        if (score >= 80)
+            return "외인/기관의 강력한 매집세가 확인되는 긍정적 구간입니다.";
+        if (score >= 60)
+            return "수급 흐름이 개선되고 있어 긍정적 시각을 유지합니다.";
+        if (score >= 40)
+            return "수급 주체 간 공방이 치열한 중립 구간입니다.";
+        if (score >= 20)
+            return "수급 유출 우려가 있어 보수적 관점이 필요합니다.";
+        return "수급 악화가 지속되고 있어 당분간 관망을 추천합니다.";
+    }
+
+    private String mapVerdictToLabel(String modelRating, Stance aiStance) {
         if ("BUY".equals(modelRating))
-            return aiStance == ValuationDto.Stance.ACCUMULATE ? "분할 매수" : "매수";
+            return aiStance == Stance.ACCUMULATE ? "분할 매수" : "매수";
         if ("SELL".equals(modelRating))
-            return aiStance == ValuationDto.Stance.REDUCE ? "비중 축소" : "매도";
+            return aiStance == Stance.REDUCE ? "비중 축소" : "매도";
         return "관망";
     }
 
@@ -730,7 +824,7 @@ public class ValuationService {
     private static class AiResponseJson {
         private String keyInsight;
         private AiVerdict aiVerdict;
-        private ValuationDto.Summary.BeginnerVerdict beginnerVerdict;
+        private BeginnerVerdict beginnerVerdict;
         private List<String> catalysts;
         private List<String> risks;
         private Map<String, Double> suggestedWeights;
@@ -787,7 +881,7 @@ public class ValuationService {
         fallback.setAiVerdict(AiVerdict.builder().stance(Stance.HOLD).riskLevel(RiskLevel.MEDIUM)
                 .guidance("서버 응답 오류로 기본 분석값을 제공합니다.").build());
         fallback.setBeginnerVerdict(
-                ValuationDto.Summary.BeginnerVerdict.builder().summarySentence("잠시 후 다시 시도해 주세요.").build());
+                BeginnerVerdict.builder().summarySentence("잠시 후 다시 시도해 주세요.").build());
         fallback.setCatalysts(List.of("분석 중"));
         fallback.setRisks(List.of("분석 중"));
         return fallback;

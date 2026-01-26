@@ -1,8 +1,9 @@
 package com.AISA.AISA.analysis.service;
 
-import com.AISA.AISA.analysis.dto.ValuationDto;
-import com.AISA.AISA.analysis.dto.ValuationDto.*;
-import com.AISA.AISA.analysis.dto.ValuationDto.Summary.AiVerdict;
+import com.AISA.AISA.analysis.dto.ValuationBaseDto.*;
+import com.AISA.AISA.analysis.dto.ValuationBaseDto.Summary.*;
+import com.AISA.AISA.analysis.dto.OverseasValuationDto;
+import com.AISA.AISA.analysis.dto.OverseasValuationDto.*;
 import com.AISA.AISA.analysis.repository.OverseasStockAiSummaryRepository;
 import com.AISA.AISA.kisOverseasStock.dto.OverseasStockCashFlowDto;
 import com.AISA.AISA.kisOverseasStock.repository.KisOverseasStockFinancialRatioRepository;
@@ -94,7 +95,7 @@ public class OverseasValuationService {
             }
         }
 
-        ValuationDto.DiscountRateInfo discountRateInfo = determineUSCOE(request);
+        DiscountRateInfo discountRateInfo = determineUSCOE(request);
         BigDecimal coe = new BigDecimal(discountRateInfo.getValue().replace("%", "")).divide(new BigDecimal(100));
 
         ValuationResult srim = calculateSRIM(latestRatio, history, coe, currentPrice);
@@ -113,11 +114,11 @@ public class OverseasValuationService {
                 .build();
     }
 
-    private ValuationDto.DiscountRateInfo determineUSCOE(Request request) {
+    private DiscountRateInfo determineUSCOE(Request request) {
         if (request != null && request.getExpectedTotalReturn() != null) {
             String value = BigDecimal.valueOf(request.getExpectedTotalReturn()).multiply(new BigDecimal(100))
                     .setScale(1, RoundingMode.HALF_UP) + "%";
-            return ValuationDto.DiscountRateInfo.builder()
+            return DiscountRateInfo.builder()
                     .profile("CUSTOM")
                     .value(value)
                     .basis("User defined custom override")
@@ -152,7 +153,7 @@ public class OverseasValuationService {
         }
 
         BigDecimal finalRate = us10y.add(spread);
-        return ValuationDto.DiscountRateInfo.builder()
+        return DiscountRateInfo.builder()
                 .profile(profile)
                 .value(finalRate.setScale(1, RoundingMode.HALF_UP) + "%")
                 .basis("US 10Y (" + us10y + "%) + Spread (" + spread + "%)")
@@ -690,7 +691,7 @@ public class OverseasValuationService {
     private static class AiResponseJson {
         private String keyInsight;
         private AiVerdict aiVerdict;
-        private ValuationDto.Summary.BeginnerVerdict beginnerVerdict;
+        private BeginnerVerdict beginnerVerdict;
         private List<String> catalysts;
         private List<String> risks;
         private Map<String, Double> suggestedWeights;
@@ -768,7 +769,7 @@ public class OverseasValuationService {
         fallback.setAiVerdict(AiVerdict.builder().stance(Stance.HOLD).riskLevel(RiskLevel.MEDIUM)
                 .guidance("서버 응답 오류로 기본 분석값을 제공합니다.").build());
         fallback.setBeginnerVerdict(
-                ValuationDto.Summary.BeginnerVerdict.builder().summarySentence("잠시 후 다시 시도해 주세요.").build());
+                BeginnerVerdict.builder().summarySentence("잠시 후 다시 시도해 주세요.").build());
         fallback.setCatalysts(List.of("분석 중"));
         fallback.setRisks(List.of("분석 중"));
         return fallback;

@@ -942,6 +942,9 @@ public class KisStockService {
                 // 7. Determine Trend Status
                 String trend = determineAdvancedTrend(fZ, iZ, fOverheat, iOverheat, supplyScore);
 
+                // 8. Generate Advice based on Supply Score & Trend
+                String advice = generateSupplyAdvice(supplyScore, trend);
+
                 BigDecimal million = new BigDecimal("1000000");
                 return InvestorTrendDto.builder()
                                 .recent1MonthForeignerNetBuy(f1m.multiply(million).toPlainString())
@@ -958,7 +961,20 @@ public class KisStockService {
                                 .institutionZScore(iZ)
                                 .supplyScore(supplyScore)
                                 .trendStatus(trend)
+                                .advice(advice)
                                 .build();
+        }
+
+        private String generateSupplyAdvice(double score, String status) {
+                if (score >= 80)
+                        return "외인과 기관의 강력한 동반 매수세가 확인됩니다. 수급 측면에서 매우 긍정적인 전형적인 매집 구간입니다.";
+                if (score >= 60)
+                        return "전반적인 수급 상황이 우호적입니다. 스마트 머니의 유입이 이어지고 있어 긍정적 시각을 유지합니다.";
+                if (score >= 40)
+                        return "수급 주체 간에 매공방이 치열하며 뚜렷한 방향성이 잡히지 않은 중립적인 구간입니다.";
+                if (score >= 20)
+                        return "수급 유출이 발생하고 있어 유의가 필요합니다. 주요 수급 주체의 복귀 여부를 지켜봐야 합니다.";
+                return "강력한 매도세가 지속되고 있습니다. 수급 안정이 확인될 때까지 보수적인 접근이 권장됩니다.";
         }
 
         private BigDecimal calculateOverheat(BigDecimal current, BigDecimal avg) {
@@ -1197,6 +1213,12 @@ public class KisStockService {
                 } catch (Exception e) {
                         return 0L;
                 }
+        }
+
+        @Transactional
+        @org.springframework.cache.annotation.CacheEvict(value = "investorTrend", key = "#stockCode")
+        public void evictInvestorTrendCache(String stockCode) {
+                log.info("Evicting investor trend cache for {}", stockCode);
         }
 
         @Transactional

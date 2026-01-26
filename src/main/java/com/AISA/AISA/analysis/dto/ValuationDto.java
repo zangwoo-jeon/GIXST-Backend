@@ -52,6 +52,7 @@ public class ValuationDto {
         private ValuationResult per;
         private ValuationResult pbr;
 
+        @JsonIgnore
         private ValuationBand band;
         private Summary summary;
 
@@ -66,14 +67,38 @@ public class ValuationDto {
     @AllArgsConstructor
     @Builder
     public static class AnalysisDetails {
-        private String upsidePotential; // "23.28%"
-        private String downsideRisk; // "-10.93%"
         private String investmentTerm; // "6-12 Months"
-        private List<String> catalysts; // 상승 동력
-        private List<String> risks; // 리스크 요인
-        private PeerComparison peerComparison; // 경쟁사 비교
-        private InvestorTrendDto investorTrend; // 수급 요약
-        private String evEbitda; // EV/EBITDA (Domestic)
+        private List<String> catalysts;
+        private List<String> risks;
+
+        @JsonIgnore
+        private PriceModel priceModel;
+        private QualityMetrics qualityMetrics;
+
+        @Getter
+        @Setter
+        @NoArgsConstructor
+        @AllArgsConstructor
+        @Builder
+        public static class PriceModel {
+            private String upsidePotential;
+            private String downsideRisk;
+        }
+
+        @Getter
+        @Setter
+        @NoArgsConstructor
+        @AllArgsConstructor
+        @Builder
+        public static class QualityMetrics {
+            private String evEbitda;
+        }
+
+        // Keep for AI parsing if needed, or map from AI output
+        @JsonIgnore
+        private PeerComparison peerComparison;
+        @JsonIgnore
+        private InvestorTrendDto investorTrend;
     }
 
     @Getter
@@ -82,15 +107,34 @@ public class ValuationDto {
     @AllArgsConstructor
     @Builder
     public static class OverseasAnalysisDetails {
-        private String upsidePotential;
-        private String downsideRisk;
         private String investmentTerm;
         private List<String> catalysts;
         private List<String> risks;
 
-        private String pegRatio; // e.g. "1.2 (Fair)"
-        private String evEbitda; // e.g. "12.5x"
-        private String shareholderYield; // e.g. "5.4% (Buyback 3.2% + Div 2.2%)"
+        @JsonIgnore
+        private PriceModel priceModel;
+        private QualityMetrics qualityMetrics;
+
+        @Getter
+        @Setter
+        @NoArgsConstructor
+        @AllArgsConstructor
+        @Builder
+        public static class PriceModel {
+            private String upsidePotential;
+            private String downsideRisk;
+        }
+
+        @Getter
+        @Setter
+        @NoArgsConstructor
+        @AllArgsConstructor
+        @Builder
+        public static class QualityMetrics {
+            private String pegRatio;
+            private String evEbitda;
+            private String shareholderYield;
+        }
     }
 
     @Getter
@@ -151,6 +195,8 @@ public class ValuationDto {
             private String verdictLabel; // "관망" (User Friendly Label)
             private String summary; // "한 줄 요약"
             private String risk; // "MEDIUM" (Safe String)
+            private String targetPrice; // "목표가"
+            private String stopLossPrice; // "손절가"
         }
 
         @Getter

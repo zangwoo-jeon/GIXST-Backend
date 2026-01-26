@@ -151,6 +151,14 @@ public class KisInformationController {
                 return ResponseEntity.ok(new SuccessResponse<>(true, "기타 지표(EV/EBITDA) 갱신 성공", null));
         }
 
+        @PostMapping("/other-major-ratios/refresh/all")
+        @Operation(summary = "전체 국내 주식 EV/EBITDA 등 기타 지표 일괄 갱신", description = "모든 국내 주식 종목에 대해 KIS API를 통해 기타 지표(EV/EBITDA 등)를 일괄적으로 갱신합니다. (비동기)")
+        public ResponseEntity<SuccessResponse<String>> refreshAllOtherMajorRatios() {
+                new Thread(() -> kisStockService.refreshAllOtherMajorRatios()).start();
+                return ResponseEntity.ok(new SuccessResponse<>(true, "전체 종목 기타 지표 갱신 시작 (백그라운드 실행)",
+                                "Started background task"));
+        }
+
         @GetMapping("/investor-trend/{stockCode}")
         @Operation(summary = "종목별 투자자 수급(거래대금) 조회", description = "최근 3개월간 외국인/기관의 순매수 거래대금 추이를 조회합니다.")
         public ResponseEntity<SuccessResponse<InvestorTrendDto>> getInvestorTrend(@PathVariable String stockCode) {

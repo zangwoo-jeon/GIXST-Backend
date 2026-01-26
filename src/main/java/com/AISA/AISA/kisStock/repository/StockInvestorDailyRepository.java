@@ -2,6 +2,8 @@ package com.AISA.AISA.kisStock.repository;
 
 import com.AISA.AISA.kisStock.Entity.stock.Stock;
 import com.AISA.AISA.kisStock.Entity.stock.StockInvestorDaily;
+import com.AISA.AISA.kisStock.dto.InvestorTrend.AccumulatedInvestorProjection;
+import com.AISA.AISA.kisStock.dto.InvestorTrend.InvestorTrendAggregationProjection;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -31,7 +33,7 @@ public interface StockInvestorDailyRepository extends JpaRepository<StockInvesto
                         "WHERE s.date >= :startDate AND s.stock.stockType = com.AISA.AISA.kisStock.Entity.stock.Stock.StockType.DOMESTIC "
                         +
                         "GROUP BY s.stock.stockCode, s.stock.stockName")
-        List<com.AISA.AISA.kisStock.dto.InvestorTrend.InvestorTrendAggregationProjection> findAggregatedInvestorTrend(
+        List<InvestorTrendAggregationProjection> findAggregatedInvestorTrend(
                         @Param("startDate") LocalDate startDate);
 
         // 특정 종목의 특정 기간 수급 데이터 합계 조회
@@ -40,7 +42,7 @@ public interface StockInvestorDailyRepository extends JpaRepository<StockInvesto
                         "SUM(s.institutionNetBuyAmount) as institutionNetBuyAmount " +
                         "FROM StockInvestorDaily s " +
                         "WHERE s.stock = :stock AND s.date >= :startDate")
-        com.AISA.AISA.kisStock.dto.InvestorTrend.AccumulatedInvestorProjection findAggregatedInvestorTrendByStock(
+        AccumulatedInvestorProjection findAggregatedInvestorTrendByStock(
                         @Param("stock") Stock stock,
                         @Param("startDate") LocalDate startDate);
 }

@@ -15,6 +15,8 @@ import org.springframework.data.domain.Pageable;
 public interface StockRepository extends JpaRepository<Stock, Long> {
         Optional<Stock> findByStockCode(String stockCode);
 
+        List<Stock> findByStockType(Stock.StockType stockType);
+
         List<Stock> findAllByStockIdBetween(Long startId, Long endId);
 
         List<Stock> findByStockCodeContainingOrStockNameContaining(String stockCode, String stockName);

@@ -13,7 +13,8 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
-import com.AISA.AISA.analysis.dto.ValuationDto;
+import com.AISA.AISA.analysis.dto.DomesticValuationDto;
+import com.AISA.AISA.analysis.dto.OverseasValuationDto;
 import com.AISA.AISA.analysis.service.ValuationService;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -73,16 +74,24 @@ public class AnalysisController {
         @Operation(summary = "종목 적정 주가 진단 (S-RIM/PER/PBR)", description = "특정 종목의 적정 주가를 S-RIM, PER, PBR 모델로 분석하고 밴드를 제시합니다. \n\n"
                         + "userPropensity 옵션: CONSERVATIVE (보수적, 10%), NEUTRAL (중립, 8%, 기본값), AGGRESSIVE (공격적, 6%) \n"
                         + "(할인율 커스텀 가능)")
-        public ResponseEntity<SuccessResponse<ValuationDto.Response>> valuation(
+        public ResponseEntity<SuccessResponse<?>> valuation(
                         @PathVariable String stockCode,
-                        @RequestBody(required = false) ValuationDto.Request request) {
+                        @RequestBody(required = false) DomesticValuationDto.Request request) {
 
                 // Heuristic: If stockCode isn't 6 digits, assume Overseas (Simple check)
                 // Accurate way would be checking DB, but avoiding extra DB call if possible.
                 // KR stocks: "005930" (6 digits). US: "AAPL" (Letters).
                 if (!stockCode.matches("\\d{6}")) {
+                        OverseasValuationDto.Request overseasRequest = null;
+                        if (request != null) {
+                                overseasRequest = OverseasValuationDto.Request.builder()
+                                                .userPropensity(request.getUserPropensity())
+                                                .expectedTotalReturn(request.getExpectedTotalReturn())
+                                                .forceRefresh(request.isForceRefresh())
+                                                .build();
+                        }
                         return ResponseEntity.ok(new SuccessResponse<>(true, "해외 주식 적정 주가 진단 성공",
-                                        overseasValuationService.calculateValuation(stockCode, request)));
+                                        overseasValuationService.calculateValuation(stockCode, overseasRequest)));
                 }
 
                 return ResponseEntity.ok(new SuccessResponse<>(true, "적정 주가 진단 성공",
@@ -91,13 +100,21 @@ public class AnalysisController {
 
         @PostMapping("/valuation/{stockCode}/report")
         @Operation(summary = "종목 적정 주가 진단 + AI 리포트", description = "종목 진단 결과와 함께 Gemini AI가 분석한 투자 조언 리포트를 제공합니다. (약 3~5초 소요)")
-        public ResponseEntity<SuccessResponse<ValuationDto.Response>> valuationReport(
+        public ResponseEntity<SuccessResponse<?>> valuationReport(
                         @PathVariable String stockCode,
-                        @RequestBody(required = false) ValuationDto.Request request) {
+                        @RequestBody(required = false) DomesticValuationDto.Request request) {
 
                 if (!stockCode.matches("\\d{6}")) {
+                        OverseasValuationDto.Request overseasRequest = null;
+                        if (request != null) {
+                                overseasRequest = OverseasValuationDto.Request.builder()
+                                                .userPropensity(request.getUserPropensity())
+                                                .expectedTotalReturn(request.getExpectedTotalReturn())
+                                                .forceRefresh(request.isForceRefresh())
+                                                .build();
+                        }
                         return ResponseEntity.ok(new SuccessResponse<>(true, "해외 주식 AI 적정 주가 분석 리포트 생성 성공",
-                                        overseasValuationService.calculateValuationWithAi(stockCode, request)));
+                                        overseasValuationService.calculateValuationWithAi(stockCode, overseasRequest)));
                 }
 
                 return ResponseEntity.ok(new SuccessResponse<>(true, "AI 적정 주가 분석 리포트 생성 성공",
@@ -106,10 +123,11 @@ public class AnalysisController {
 
         @GetMapping("/valuation/{stockCode}/optimized-report")
         @Operation(summary = "AI 적정 주가 분석 리포트 (최적화/캐싱)", description = "표준화된(NEUTRAL) 설정으로 AI 리포트를 생성하거나 캐시된 결과를 즉시 반환합니다. (속도 빠름)")
-        public ResponseEntity<SuccessResponse<ValuationDto.Response>> optimizedValuationReport(
-                        @PathVariable String stockCode) {
+        public ResponseEntity<SuccessResponse<?>> optimizedValuationReport(
+                        @PathVariable String stockCode,
+                        @RequestParam(defaultValue = "false") boolean refresh) {
                 return ResponseEntity.ok(new SuccessResponse<>(true, "AI 적정 주가 분석 리포트 조회 성공 (최적화)",
-                                valuationService.getStandardizedValuationReport(stockCode)));
+                                valuationService.getStandardizedValuationReport(stockCode, refresh)));
         }
 
         @GetMapping("/valuation/{stockCode}/static-report")

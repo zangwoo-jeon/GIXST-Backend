@@ -23,37 +23,30 @@ public class GeminiService {
 
     private final ObjectMapper objectMapper;
     private final GeminiProperties geminiProperties;
-    private final AtomicInteger keyIndex = new AtomicInteger(0);
-
-    private static final String GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent";
 
     public String generateAdvice(String context) {
         List<String> keys = geminiProperties.getApiKeys();
         if (keys == null || keys.isEmpty()) {
-            // Fallback to single key if list is empty
-            if (geminiProperties.getApiKey() != null) {
-                keys = Collections.singletonList(geminiProperties.getApiKey());
-            } else {
+            if (geminiProperties.getApiKey() == null) {
                 return "Gemini API 키가 설정되지 않았습니다.";
             }
         }
 
-        int maxRetries = keys.size();
+        int maxRetries = (keys != null && !keys.isEmpty()) ? keys.size() : 1;
+
         for (int attempt = 0; attempt < maxRetries; attempt++) {
-            String currentKey = getNextKey(keys);
+            String currentKey = geminiProperties.getNextKey();
             try {
                 String response = callGeminiApi(context, currentKey);
                 return parseGeminiResponse(response);
 
             } catch (WebClientResponseException e) {
                 if (e.getStatusCode().value() == 429) {
-                    log.warn("Rate limit (429) exceeded for key index {}. Rotating key...",
-                            keyIndex.get() % keys.size());
+                    log.warn("Rate limit (429) exceeded. Rotating key...");
                     continue; // Switch key and retry
                 }
                 if (e.getStatusCode().is5xxServerError()) {
-                    log.warn("Gemini Server Error ({}) for key index {}. Rotating key...",
-                            e.getStatusCode().value(), keyIndex.get() % keys.size());
+                    log.warn("Gemini Server Error ({}). Rotating key...", e.getStatusCode().value());
                     continue; // Switch key and retry
                 }
                 log.error("WebClient error: {}", e.getMessage());
@@ -67,11 +60,6 @@ public class GeminiService {
         return "AI 서비스 사용량이 초과되었습니다. 잠시 후 다시 시도해주세요.";
     }
 
-    private String getNextKey(List<String> keys) {
-        int index = keyIndex.getAndIncrement() % keys.size();
-        return keys.get(Math.abs(index));
-    }
-
     private String callGeminiApi(String context, String apiKey) {
         WebClient webClient = WebClient.create();
 
@@ -83,7 +71,7 @@ public class GeminiService {
                         Map.of("google_search", new HashMap<>())));
 
         return webClient.post()
-                .uri(GEMINI_API_URL + "?key={key}", apiKey)
+                .uri(geminiProperties.getUrl() + "?key={key}", apiKey)
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(requestBody)
                 .retrieve()

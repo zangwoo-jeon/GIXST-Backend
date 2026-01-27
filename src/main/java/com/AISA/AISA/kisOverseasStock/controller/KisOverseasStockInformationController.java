@@ -97,4 +97,5 @@ public class KisOverseasStockInformationController {
         informationService.refreshAllFinancialRatios(divCode);
         return ResponseEntity.ok(new SuccessResponse<>(true, "전체 해외 주식 투자 지표 갱신 시작", null));
     }
+
 }

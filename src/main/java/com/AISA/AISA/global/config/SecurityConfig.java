@@ -104,7 +104,16 @@ public class SecurityConfig {
                                                                 "/api/analysis/valuation/*/static-report",
                                                                 "/api/stocks/financial/investor-trend/daily/*",
                                                                 "/api/stocks/investor/*/accumulated",
-                                                                "/api/overseas/dividend/**")
+                                                                "/api/overseas/dividend/**",
+                                                                "/api/overseas-stocks/search",
+                                                                "/api/overseas-stocks/*/price",
+                                                                "/api/overseas-stocks/*/chart",
+                                                                "/api/overseas-stocks/information/financial-statement/*",
+                                                                "/api/overseas-stocks/information/balance-sheet/*",
+                                                                "/api/overseas-stocks/information/shareholder-return/*",
+                                                                "/api/overseas-stocks/information/price-detail/*",
+                                                                "/api/overseas-stocks/information/financial-ratio/*",
+                                                                "/api/analysis/overseas/static-analysis/*")
                                                 .permitAll()
                                                 .anyRequest().authenticated())
                                 .oauth2Login(oauth2 -> oauth2

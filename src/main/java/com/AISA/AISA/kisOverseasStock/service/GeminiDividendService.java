@@ -9,6 +9,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -23,32 +24,28 @@ public class GeminiDividendService {
     private final ObjectMapper objectMapper;
 
     private final GeminiProperties geminiProperties;
-    private final java.util.concurrent.atomic.AtomicInteger keyIndex = new java.util.concurrent.atomic.AtomicInteger(0);
-
-    private static final String GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent";
 
     public String fetchBatchDividendData(String prompt) {
         List<String> keys = geminiProperties.getApiKeys();
-        if (keys == null || keys.isEmpty()) {
+        if ((keys == null || keys.isEmpty()) && geminiProperties.getApiKey() == null) {
             log.error("No Gemini API keys configured");
             return null;
         }
 
-        int maxRetries = keys.size();
+        int maxRetries = (keys != null && !keys.isEmpty()) ? keys.size() : 1;
+
         for (int attempt = 0; attempt < maxRetries; attempt++) {
-            String currentKey = getNextKey(keys);
+            String currentKey = geminiProperties.getNextKey();
             try {
                 String response = callGeminiApi(prompt, currentKey);
                 return parseGeminiResponse(response);
-            } catch (org.springframework.web.reactive.function.client.WebClientResponseException e) {
+            } catch (WebClientResponseException e) {
                 if (e.getStatusCode().value() == 429) {
-                    log.warn("Rate limit (429) exceeded for key index {}. Rotating key...",
-                            keyIndex.get() % keys.size());
+                    log.warn("Rate limit (429) exceeded. Rotating key...");
                     continue; // Switch key and retry
                 }
                 if (e.getStatusCode().is5xxServerError()) {
-                    log.warn("Gemini Server Error ({}) for key index {}. Rotating key...",
-                            e.getStatusCode().value(), keyIndex.get() % keys.size());
+                    log.warn("Gemini Server Error ({}). Rotating key...", e.getStatusCode().value());
                     continue; // Switch key and retry
                 }
                 log.error("WebClient error: {}", e.getMessage());
@@ -59,11 +56,6 @@ public class GeminiDividendService {
             }
         }
         throw new GeminiQuotaExhaustedException("Gemini API is unavailable or all quotas exhausted.");
-    }
-
-    private String getNextKey(List<String> keys) {
-        int index = keyIndex.getAndIncrement() % keys.size();
-        return keys.get(Math.abs(index));
     }
 
     private String callGeminiApi(String prompt, String apiKey) {
@@ -78,7 +70,7 @@ public class GeminiDividendService {
                 Map.of("google_search", new HashMap<>())));
 
         return webClient.post()
-                .uri(GEMINI_API_URL + "?key={key}", apiKey)
+                .uri(geminiProperties.getUrl() + "?key={key}", apiKey)
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(requestBody)
                 .retrieve()

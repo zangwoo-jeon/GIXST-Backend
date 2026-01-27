@@ -511,4 +511,5 @@ public class KisOverseasStockInformationService {
                 }
                 log.info("Completed Batch Suspension Status Update");
         }
+
 }

@@ -107,7 +107,9 @@ public class RedisConfig {
                 configMap.put("dividendRank", longTermConfig);
                 configMap.put("ecosBondYield", longTermConfig);
                 configMap.put("portfolioDiagnosis", mediumTermConfig);
+                configMap.put("portfolioDiagnosis", mediumTermConfig);
                 configMap.put("staticAnalysis", sevenDayConfig);
+                configMap.put("overseasStaticAnalysis", sevenDayConfig);
 
                 return RedisCacheManager.builder(connectionFactory)
                                 .cacheDefaults(defaultConfig)

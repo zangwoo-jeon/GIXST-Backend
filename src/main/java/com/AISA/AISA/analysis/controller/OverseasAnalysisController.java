@@ -1,9 +1,12 @@
 package com.AISA.AISA.analysis.controller;
 
 import com.AISA.AISA.analysis.dto.OverseasValuationDto;
+import com.AISA.AISA.analysis.service.OverseasStockAnalysisService;
 import com.AISA.AISA.analysis.service.OverseasValuationService;
 import com.AISA.AISA.global.response.SuccessResponse;
 import com.AISA.AISA.kisOverseasStock.entity.OverseasStockTradingMultiple;
+
+import com.AISA.AISA.kisOverseasStock.service.OverseasTradingMultipleService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -17,7 +20,8 @@ import org.springframework.web.bind.annotation.*;
 public class OverseasAnalysisController {
 
         private final OverseasValuationService overseasValuationService;
-        private final com.AISA.AISA.kisOverseasStock.service.OverseasTradingMultipleService overseasTradingMultipleService;
+        private final OverseasTradingMultipleService overseasTradingMultipleService;
+        private final OverseasStockAnalysisService overseasStockAnalysisService;
 
         @PostMapping("/valuation/{stockCode}")
         @Operation(summary = "해외 주식 적정 주가 진단 (S-RIM/PER/PBR)", description = "해외 주식의 적정 주가를 S-RIM, PER, PBR 모델로 분석합니다. (주주환원율 데이터 반영)")
@@ -54,5 +58,13 @@ public class OverseasAnalysisController {
                         @PathVariable String stockCode) {
                 return ResponseEntity.ok(new SuccessResponse<>(true, "투자 지표 조회 성공",
                                 overseasTradingMultipleService.getTradingMultiples(stockCode).orElse(null)));
+        }
+
+        @GetMapping("/static-analysis/{stockCode}")
+        @Operation(summary = "해외 주식 AI 기업 분석 조회", description = "Gemini를 사용하여 기업 개요, 미래 성장 동력, 리스크 요인을 조회합니다. (1주일 캐싱)")
+        public ResponseEntity<SuccessResponse<String>> getStaticAnalysis(
+                        @PathVariable String stockCode) {
+                String result = overseasStockAnalysisService.getStaticAnalysis(stockCode);
+                return ResponseEntity.ok(new SuccessResponse<>(true, "해외 주식 AI 기업 분석 조회 성공", result));
         }
 }

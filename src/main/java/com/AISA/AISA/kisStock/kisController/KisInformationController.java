@@ -175,13 +175,16 @@ public class KisInformationController {
                                 kisStockService.getDailyInvestorTrend(stockCode, period)));
         }
 
-        @PostMapping("/investor-trend/init-all")
-        @Operation(summary = "전체 종목 투자자 수급 데이터 초기화 (DB)", description = "모든 종목에 대해 최근 1년치 일자별 수급 데이터를 가져와 DB에 저장합니다. (비동기)")
-        public ResponseEntity<SuccessResponse<String>> initAllInvestorTrends() {
+        @PostMapping("/investor-trend/init-all/by-date")
+        @Operation(summary = "전체 종목 투자자 수급 데이터 초기화 (DB) - 기간 설정", description = "모든 종목에 대해 지정된 기간의 일자별 수급 데이터를 가져와 DB에 저장합니다. (비동기, format: YYYYMMDD)")
+        public ResponseEntity<SuccessResponse<String>> initAllInvestorTrendsByDate(
+                        @RequestParam String startDate,
+                        @RequestParam String endDate) {
                 new Thread(() -> {
-                        kisStockService.updateAllInvestorTrends();
+                        kisStockService.updateAllInvestorTrends(startDate, endDate);
                 }).start();
-                return ResponseEntity.ok(new SuccessResponse<>(true, "전체 종목 수급 데이터 초기화 시작 (백그라운드)",
+                return ResponseEntity.ok(new SuccessResponse<>(true,
+                                "전체 종목 수급 데이터 초기화 시작 (백그라운드, " + startDate + "~" + endDate + ")",
                                 "Started background task."));
         }
 

@@ -1044,6 +1044,11 @@ public class KisStockService {
 
         @Transactional
         public void fetchAndSaveInvestorTrend(String stockCode) {
+                fetchAndSaveInvestorTrend(stockCode, LocalDate.now().minusYears(1), LocalDate.now());
+        }
+
+        @Transactional
+        public void fetchAndSaveInvestorTrend(String stockCode, LocalDate startDate, LocalDate endDate) {
                 String url = kisApiProperties.getInvestorTrendDailyUrl();
                 if (url == null || url.isEmpty()) {
                         log.error("KisApiProperties.investorTrendDailyUrl is NULL. Check application.yml");
@@ -1057,8 +1062,8 @@ public class KisStockService {
                         throw new BusinessException(KisApiErrorCode.INVALID_STOCK_TYPE);
                 }
 
-                LocalDate targetDate = LocalDate.now().minusYears(1);
-                LocalDate currentDate = LocalDate.now();
+                LocalDate targetDate = startDate;
+                LocalDate currentDate = endDate;
 
                 while (currentDate.isAfter(targetDate)) {
                         try {
@@ -1228,6 +1233,16 @@ public class KisStockService {
         }
 
         public void updateAllInvestorTrends() {
+                updateAllInvestorTrends(
+                                LocalDate.now().minusDays(7).format(DateTimeFormatter.ofPattern("yyyyMMdd")),
+                                LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd")));
+        }
+
+        public void updateAllInvestorTrends(String startDateStr, String endDateStr) {
+                DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
+                LocalDate startDate = LocalDate.parse(startDateStr, formatter);
+                LocalDate endDate = LocalDate.parse(endDateStr, formatter);
+
                 List<Stock> stocks = stockRepository.findAll();
                 for (Stock stock : stocks) {
                         try {
@@ -1236,14 +1251,14 @@ public class KisStockService {
                                                         stock.getStockName(), stock.getStockCode());
                                         continue;
                                 }
-                                fetchAndSaveInvestorTrend(stock.getStockCode());
+                                fetchAndSaveInvestorTrend(stock.getStockCode(), startDate, endDate);
                                 Thread.sleep(100); // Rate limit (10 req/sec safe limit is ~100ms)
                         } catch (Exception e) {
                                 log.error("Failed to update investor trend for {}: {}", stock.getStockCode(),
                                                 e.getMessage());
                         }
                 }
-                log.info("Completed batch update for all investor trends.");
+                log.info("Completed batch update for all investor trends ({} to {}).", startDateStr, endDateStr);
         }
 
         @Transactional(readOnly = true)

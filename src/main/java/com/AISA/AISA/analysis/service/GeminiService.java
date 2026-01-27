@@ -1,7 +1,6 @@
 package com.AISA.AISA.analysis.service;
 
 import com.AISA.AISA.global.config.GeminiProperties;
-
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;

@@ -120,6 +120,8 @@ jobs:
               -e KIS_OVERSEA_CHART_PRICE_URL="/uapi/overseas-price/v1/quotations/dailyprice" \
               -e KIS_OVERSEA_SEARCH_INFO_URL="/uapi/overseas-price/v1/quotations/search-info" \
               -e KIS_OTHER_MAJOR_RATIOS_URL="/uapi/domestic-stock/v1/finance/other-major-ratios" \
+              -e KIS_INVESTOR_TREND_MARKET_URL="/uapi/domestic-stock/v1/quotations/inquire-investor-daily-by-market" \
+              -e KIS_SEARCH_STOCK_INFO_URL="/uapi/domestic-stock/v1/quotations/search-stock-info" \
               \
               -e JWT_SECRET="${{ secrets.JWT_SECRET }}" \
               -e JWT_ACCESS_TOKEN_EXPIRATION_TIME="21600000" \

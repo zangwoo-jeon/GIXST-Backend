@@ -127,6 +127,10 @@ public class KisStockService {
 
                         if (raw.getMarketCapRaw() != null && !raw.getMarketCapRaw().isEmpty()) {
                                 BigDecimal marketCap = new BigDecimal(raw.getMarketCapRaw().replace(",", ""));
+                                BigDecimal listedShares = raw.getListedSharesCount() != null
+                                                ? new BigDecimal(raw.getListedSharesCount())
+                                                : BigDecimal.ZERO;
+
                                 // Update StockMarketCap Entity
                                 StockMarketCap marketCapEntity = stockMarketCapRepository
                                                 .findByStock(stock).orElse(null);
@@ -134,8 +138,13 @@ public class KisStockService {
                                 if (marketCapEntity == null) {
                                         marketCapEntity = StockMarketCap
                                                         .create(stock, marketCap);
+                                        marketCapEntity.updateDomesticInfo(marketCap, listedShares,
+                                                        raw.getStockPriceRaw(), raw.getPriceChangeRaw(),
+                                                        raw.getChangeRateRaw(), raw.getChangeSignRaw());
                                 } else {
-                                        marketCapEntity.updateMarketCap(marketCap);
+                                        marketCapEntity.updateDomesticInfo(marketCap, listedShares,
+                                                        raw.getStockPriceRaw(), raw.getPriceChangeRaw(),
+                                                        raw.getChangeRateRaw(), raw.getChangeSignRaw());
                                 }
                                 stockMarketCapRepository.save(marketCapEntity);
                         }
@@ -633,28 +642,12 @@ public class KisStockService {
                 long offset = start - 1;
 
                 Pageable pageable = new OffsetBasedPageRequest(offset, limit);
-                List<StockMarketCap> marketCaps = stockMarketCapRepository.findByOrderByMarketCapDesc(pageable);
+                List<StockMarketCap> marketCaps = stockMarketCapRepository
+                                .findByStockStockTypeOrderByMarketCapDesc(Stock.StockType.DOMESTIC, pageable);
 
                 return marketCaps.stream()
                                 .map(smc -> {
                                         Stock stock = smc.getStock();
-
-                                        String currentPrice = null;
-                                        String priceChange = null;
-                                        String changeRate = null;
-
-                                        try {
-                                                // Fetch from Cache (Redis)
-                                                // Since we have a warmer, this should be fast.
-                                                StockPriceDto priceDto = getStockPrice(stock.getStockCode());
-                                                if (priceDto != null) {
-                                                        currentPrice = priceDto.getStockPrice();
-                                                        priceChange = priceDto.getPriceChange();
-                                                        changeRate = priceDto.getChangeRate();
-                                                }
-                                        } catch (Exception e) {
-                                                // Ignore error to avoid breaking the whole list
-                                        }
 
                                         return StockSearchResponseDto.builder()
                                                         .stockCode(stock.getStockCode())
@@ -663,9 +656,9 @@ public class KisStockService {
                                                         .marketCap(smc.getMarketCap() != null
                                                                         ? smc.getMarketCap().toString()
                                                                         : null)
-                                                        .currentPrice(currentPrice)
-                                                        .priceChange(priceChange)
-                                                        .changeRate(changeRate)
+                                                        .currentPrice(smc.getCurrentPrice())
+                                                        .priceChange(smc.getPriceChange())
+                                                        .changeRate(smc.getChangeRate())
                                                         .build();
                                 })
                                 .collect(Collectors.toList());

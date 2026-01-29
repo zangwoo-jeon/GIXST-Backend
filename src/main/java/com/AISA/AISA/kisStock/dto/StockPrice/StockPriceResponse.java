@@ -19,6 +19,9 @@ public class StockPriceResponse {
     @JsonProperty("prdy_ctrt") // 전일 대비율
     private String changeRateRaw;
 
+    @JsonProperty("prdy_vrss_sign") // 대비 부호 (1: 상한, 2: 상승, 3: 보합, 4: 하한, 5: 하락)
+    private String changeSignRaw;
+
     @JsonProperty("acml_vol") // 누적 거래량
     private String accumulatedVolumeRaw;
 

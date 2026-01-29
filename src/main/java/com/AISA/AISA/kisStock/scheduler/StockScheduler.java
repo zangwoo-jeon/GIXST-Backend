@@ -1,6 +1,8 @@
 package com.AISA.AISA.kisStock.scheduler;
 
+import com.AISA.AISA.kisOverseasStock.service.KisOverseasStockInformationService;
 import com.AISA.AISA.kisStock.enums.OverseasIndex;
+import com.AISA.AISA.kisStock.kisService.KisInvestorService;
 import com.AISA.AISA.kisStock.kisService.KisStockService;
 import com.AISA.AISA.kisStock.kisService.KisIndexService;
 import com.AISA.AISA.kisStock.kisService.KisMacroService;
@@ -44,6 +46,8 @@ public class StockScheduler {
     private final KisInformationService kisInformationService;
     private final KisAuthService kisAuthService;
     private final DataSource dataSource;
+    private final KisInvestorService kisInvestorService;
+    private final KisOverseasStockInformationService kisOverseasStockInformationService;
 
     // Run at 2 AM every day
     @Scheduled(cron = "0 0 2 * * *")
@@ -322,5 +326,47 @@ public class StockScheduler {
             log.error("Failed to update investor trend data: {}", e.getMessage());
         }
         log.info("Completed scheduled investor trend data update.");
+    }
+
+    // Run at 5:30 PM every weekday (Market Investor Trend Data)
+    @Scheduled(cron = "0 30 17 * * MON-FRI")
+    public void syncDailyMarketInvestorTrend() {
+        log.info("Starting scheduled daily market investor trend data sync...");
+        try {
+            LocalDate today = LocalDate.now();
+            // Sync KOSPI
+            kisInvestorService.fetchHistoricalMarketData("0001", today, today);
+            Thread.sleep(1000);
+            // Sync KOSDAQ
+            kisInvestorService.fetchHistoricalMarketData("1001", today, today);
+        } catch (Exception e) {
+            log.error("Failed to sync daily market investor trend data: {}", e.getMessage());
+        }
+        log.info("Completed scheduled daily market investor trend data sync.");
+    }
+
+    // Run every 5 minutes during US market hours (Hybrid Ranking Refresh)
+    // Covers approx. 21:00 - 08:00 KST (inclusive of pre/post market)
+    @Scheduled(cron = "0 0/5 0-7,21-23 * * MON-SAT")
+    public void warmupOverseasTopMarketCap() {
+        log.info("Starting scheduled high-frequency overseas top 100 market cap update...");
+        try {
+            kisOverseasStockInformationService.updateTopMarketCapPrices(100);
+        } catch (Exception e) {
+            log.error("Failed to update top overseas market cap data: {}", e.getMessage());
+        }
+        log.info("Completed scheduled high-frequency overseas top 100 market cap update.");
+    }
+
+    // Run at 7 AM every day (Overseas Market Cap Update - Full Sync)
+    @Scheduled(cron = "0 0 7 * * *")
+    public void syncOverseasMarketCap() {
+        log.info("Starting scheduled full overseas market cap data update...");
+        try {
+            kisOverseasStockInformationService.updateAllMarketCap();
+        } catch (Exception e) {
+            log.error("Failed to update all overseas market cap data: {}", e.getMessage());
+        }
+        log.info("Completed scheduled full overseas market cap data update.");
     }
 }

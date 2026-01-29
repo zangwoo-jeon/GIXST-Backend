@@ -26,6 +26,8 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import java.math.BigDecimal;
@@ -44,6 +46,7 @@ public class KisOverseasStockInformationService {
         private final KisOverseasStockBalanceSheetRepository balanceSheetRepository;
         private final KisOverseasStockFinancialRatioRepository financialRatioRepository;
         private final KisOverseasStockRepository overseasStockRepository;
+        private final com.AISA.AISA.kisStock.repository.StockMarketCapRepository stockMarketCapRepository;
         private final WebClient webClient;
         private final KisApiProperties kisApiProperties;
         private final KisOverseasApiProperties overseasApiProperties;
@@ -92,6 +95,7 @@ public class KisOverseasStockInformationService {
         /**
          * 특정 종목의 실시간 상세 가격 정보(시가총액, 상장주수)를 조회합니다.
          */
+        @Transactional(readOnly = false)
         public OverseasStockPriceDetailDto getPriceDetail(String stockCode) {
                 Stock stock = overseasStockRepository.findByStockCodeAndStockType(stockCode, Stock.StockType.US_STOCK)
                                 .orElseThrow(() -> new BusinessException(KisApiErrorCode.STOCK_NOT_FOUND));
@@ -127,12 +131,87 @@ public class KisOverseasStockInformationService {
                         log.warn("Failed to calculate KRW market cap for {}: {}", stockCode, e.getMessage());
                 }
 
+                log.info("Updating market cap for {}: USD {}, Shares {}, Rate {}, KRW {}",
+                                stockCode, output.getMarketCap(), output.getListedShares(), output.getExchangeRate(),
+                                marketCapKrw);
+
+                // DB에 저장 또는 업데이트
+                try {
+                        BigDecimal mktCapUsd = output.getMarketCap() != null ? new BigDecimal(output.getMarketCap())
+                                        : null;
+                        BigDecimal mktCapKrwVal = new BigDecimal(marketCapKrw);
+                        BigDecimal listedShares = output.getListedShares() != null
+                                        ? new BigDecimal(output.getListedShares())
+                                        : null;
+
+                        com.AISA.AISA.kisStock.Entity.stock.StockMarketCap marketCapEntity = stockMarketCapRepository
+                                        .findByStock(stock).orElse(null);
+
+                        if (marketCapEntity == null) {
+                                log.info("Creating new market cap entity for {}", stockCode);
+                                marketCapEntity = com.AISA.AISA.kisStock.Entity.stock.StockMarketCap
+                                                .createOverseas(stock, mktCapKrwVal, mktCapUsd, listedShares,
+                                                                output.getPrice(), output.getPriceChange(),
+                                                                output.getChangeRate(), output.getChangeSign());
+                        } else {
+                                log.info("Updating existing market cap entity for {}", stockCode);
+                                marketCapEntity.updateOverseasInfo(mktCapKrwVal, mktCapUsd, listedShares,
+                                                output.getPrice(), output.getPriceChange(), output.getChangeRate(),
+                                                output.getChangeSign());
+                        }
+                        stockMarketCapRepository.save(marketCapEntity);
+                        log.info("Successfully persisted market cap for {}", stockCode);
+                } catch (Exception e) {
+                        log.warn("Failed to persist market cap for {}: {}", stockCode, e.getMessage());
+                }
+
                 return OverseasStockPriceDetailDto.builder()
                                 .stockCode(stock.getStockCode())
                                 .marketCap(output.getMarketCap())
                                 .marketCapKrw(marketCapKrw)
                                 .listedShares(output.getListedShares())
                                 .build();
+        }
+
+        /**
+         * 모든 해외 주식의 시가총액 정보를 일괄 업데이트합니다.
+         */
+        @Transactional(propagation = Propagation.NOT_SUPPORTED)
+        public void updateAllMarketCap() {
+                List<Stock> stocks = overseasStockRepository.findAllByStockType(Stock.StockType.US_STOCK);
+                log.info("Updating market cap for {} US stocks...", stocks.size());
+
+                for (Stock stock : stocks) {
+                        try {
+                                self.getPriceDetail(stock.getStockCode());
+                                Thread.sleep(200); // KIS API Rate limit
+                        } catch (Exception e) {
+                                log.error("Error updating market cap for {}: {}", stock.getStockCode(), e.getMessage());
+                        }
+                }
+                log.info("Finished updating US stock market caps.");
+        }
+
+        /**
+         * 시가총액 상위 N개 종목의 정보를 집중적으로 업데이트합니다. (하이브리드 랭킹용)
+         */
+        @Transactional(propagation = Propagation.NOT_SUPPORTED)
+        public void updateTopMarketCapPrices(int topN) {
+                log.info("Updating top {} overseas stocks for real-time ranking...", topN);
+                Pageable pageable = PageRequest.of(0, topN);
+                List<com.AISA.AISA.kisStock.Entity.stock.StockMarketCap> topMarketCaps = stockMarketCapRepository
+                                .findByStockStockTypeOrderByMarketCapDesc(Stock.StockType.US_STOCK, pageable);
+
+                for (com.AISA.AISA.kisStock.Entity.stock.StockMarketCap smc : topMarketCaps) {
+                        try {
+                                self.getPriceDetail(smc.getStock().getStockCode());
+                                Thread.sleep(200); // KIS API Rate limit
+                        } catch (Exception e) {
+                                log.error("Error updating top market cap for {}: {}", smc.getStock().getStockCode(),
+                                                e.getMessage());
+                        }
+                }
+                log.info("Finished updating top {} US stock market caps.", topN);
         }
 
         /**

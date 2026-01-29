@@ -19,6 +19,7 @@ import com.AISA.AISA.kisStock.repository.StockBalanceSheetRepository;
 import com.AISA.AISA.kisStock.Entity.stock.StockFinancialRatio;
 import com.AISA.AISA.kisStock.repository.StockFinancialRatioRepository;
 import com.AISA.AISA.kisStock.dto.FinancialRank.KisFinancialRatioApiResponse;
+import com.AISA.AISA.kisStock.dto.FinancialRank.KisStockSearchInfoApiResponse;
 import com.AISA.AISA.kisStock.dto.FinancialRank.FinancialRatioRankDto;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -980,6 +981,60 @@ public class KisInformationService {
             return String.format("%.2fx", latest.getEvEbitda());
         }
         return null;
+    }
+
+    @Transactional
+    public void updateListingDate(String stockCode) {
+        validateDomesticStock(stockCode);
+        Stock stock = stockRepository.findByStockCode(stockCode)
+                .orElseThrow(() -> new BusinessException(KisApiErrorCode.STOCK_NOT_FOUND));
+
+        try {
+            KisStockSearchInfoApiResponse response = kisApiClient.fetch(token -> webClient.get()
+                    .uri(uriBuilder -> uriBuilder
+                            .path(kisApiProperties.getSearchStockInfoUrl())
+                            .queryParam("PRDT_TYPE_CD", "300")
+                            .queryParam("PDNO", stockCode)
+                            .build())
+                    .header("authorization", token)
+                    .header("appkey", kisApiProperties.getAppkey())
+                    .header("appsecret", kisApiProperties.getAppsecret())
+                    .header("tr_id", "CTPF1002R")
+                    .header("custtype", "P"), KisStockSearchInfoApiResponse.class);
+
+            if (response != null && "0".equals(response.getRtCd()) && response.getOutput() != null) {
+                String listingDateStr = response.getOutput().getSctsMketLstgDt();
+                if (listingDateStr == null || listingDateStr.trim().isEmpty() || "00000000".equals(listingDateStr)) {
+                    listingDateStr = response.getOutput().getKosdaqMketLstgDt();
+                }
+
+                if (listingDateStr != null && listingDateStr.length() == 8) {
+                    LocalDate listingDate = LocalDate.parse(listingDateStr, DateTimeFormatter.ofPattern("yyyyMMdd"));
+                    stock.updateListingDate(listingDate);
+                    stockRepository.save(stock);
+                    log.info("Successfully updated listing date for {}: {}", stockCode, listingDate);
+                }
+            }
+        } catch (Exception e) {
+            log.error("Failed to fetch listing date for {}: {}", stockCode, e.getMessage());
+        }
+    }
+
+    public void updateAllListingDates() {
+        List<Stock> domesticStocks = stockRepository.findAll().stream()
+                .filter(s -> s.getStockType() == Stock.StockType.DOMESTIC)
+                .collect(Collectors.toList());
+
+        log.info("Starting batch listing date update for {} stocks", domesticStocks.size());
+        for (Stock stock : domesticStocks) {
+            try {
+                updateListingDate(stock.getStockCode());
+                Thread.sleep(100);
+            } catch (Exception e) {
+                log.error("Error updating listing date for {}: {}", stock.getStockCode(), e.getMessage());
+            }
+        }
+        log.info("Completed batch listing date update");
     }
 
     public void validateDomesticStock(String stockCode) {

@@ -3,6 +3,7 @@ package com.AISA.AISA.kisStock.Entity.stock;
 // import com.AISA.AISA.kisStock.enums.Industry; // Removed
 // import com.AISA.AISA.kisStock.enums.SubIndustry; // Removed
 import com.AISA.AISA.kisStock.enums.MarketType;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import jakarta.persistence.*;
@@ -39,6 +40,9 @@ public class Stock {
 
     @Column(nullable = false)
     private boolean isSuspended = false;
+
+    @Column
+    private LocalDate listingDate;
 
     public enum StockType {
         DOMESTIC, // 국내 주식
@@ -88,5 +92,9 @@ public class Stock {
 
     public void updateSuspensionStatus(boolean isSuspended) {
         this.isSuspended = isSuspended;
+    }
+
+    public void updateListingDate(LocalDate listingDate) {
+        this.listingDate = listingDate;
     }
 }

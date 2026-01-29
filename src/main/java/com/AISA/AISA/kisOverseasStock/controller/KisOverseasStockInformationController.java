@@ -98,4 +98,11 @@ public class KisOverseasStockInformationController {
         return ResponseEntity.ok(new SuccessResponse<>(true, "전체 해외 주식 투자 지표 갱신 시작", null));
     }
 
+    @PostMapping("/market-cap/refresh-all")
+    @Operation(summary = "전체 해외 주식 시가총액 정보 갱신", description = "모든 해외 주식의 시가총액 및 상장주수 정보를 KIS API로부터 가져와 DB에 갱신합니다.")
+    public ResponseEntity<SuccessResponse<String>> refreshAllMarketCap() {
+        new Thread(() -> informationService.updateAllMarketCap()).start();
+        return ResponseEntity.ok(new SuccessResponse<>(true, "전체 해외 주식 시가총액 정보 갱신 시작 (백그라운드)", null));
+    }
+
 }

@@ -159,6 +159,21 @@ public class KisInformationController {
                                 "Started background task"));
         }
 
+        @PostMapping("/listing-date/refresh/{stockCode}")
+        @Operation(summary = "특정 종목 상장일 갱신 (API -> DB)", description = "KIS API에서 최신 상장일 정보를 가져와 DB에 저장합니다.")
+        public ResponseEntity<SuccessResponse<String>> refreshListingDate(@PathVariable String stockCode) {
+                kisInformationService.updateListingDate(stockCode);
+                return ResponseEntity.ok(new SuccessResponse<>(true, "상장일 갱신 성공 (" + stockCode + ")", null));
+        }
+
+        @PostMapping("/listing-date/refresh/all")
+        @Operation(summary = "전체 국내 주식 상장일 일괄 갱신", description = "모든 국내 주식 종목에 대해 KIS API를 통해 상장일을 일괄적으로 갱신합니다. (비동기)")
+        public ResponseEntity<SuccessResponse<String>> refreshAllListingDates() {
+                new Thread(() -> kisInformationService.updateAllListingDates()).start();
+                return ResponseEntity.ok(new SuccessResponse<>(true, "전체 종목 상장일 갱신 시작 (백그라운드 실행)",
+                                "Started background task"));
+        }
+
         @GetMapping("/investor-trend/{stockCode}")
         @Operation(summary = "종목별 투자자 수급(거래대금) 조회", description = "최근 3개월간 외국인/기관의 순매수 거래대금 추이를 조회합니다.")
         public ResponseEntity<SuccessResponse<InvestorTrendDto>> getInvestorTrend(@PathVariable String stockCode) {

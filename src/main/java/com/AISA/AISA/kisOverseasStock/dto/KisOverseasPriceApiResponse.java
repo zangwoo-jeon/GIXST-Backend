@@ -37,6 +37,9 @@ public class KisOverseasPriceApiResponse {
         @JsonProperty("rate")
         private String changeRate; // Change Rate (%)
 
+        @JsonProperty("sign")
+        private String changeSign; // Change Sign (1: 상한, 2: 상승, 3: 보합, 4: 하한, 5: 하락)
+
         @JsonProperty("tvol")
         private String volume;
 

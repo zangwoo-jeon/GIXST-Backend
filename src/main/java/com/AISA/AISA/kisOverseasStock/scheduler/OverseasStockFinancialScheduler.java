@@ -28,11 +28,11 @@ public class OverseasStockFinancialScheduler {
     public void scheduledUpdateOverseasFinancials() {
         log.info("Starting scheduled update for overseas stock financial data...");
 
-        // 1. 손익계산서 업데이트 (fetch_us_financials.py)
-        runPythonScript("fetch_us_financials.py", "Income Statement");
+        // 1. 손익계산서 업데이트 (fetch_financials_hankyung.py)
+        runPythonScript("fetch_financials_hankyung.py", "Income Statement (Hankyung)");
 
-        // 2. 재무상태표 업데이트 (fetch_us_balance_sheets.py)
-        runPythonScript("fetch_us_balance_sheets.py", "Balance Sheet");
+        // 2. 재무상태표 업데이트 (fetch_balance_hankyung.py)
+        runPythonScript("fetch_balance_hankyung.py", "Balance Sheet (Hankyung)");
 
         // 3. 현금흐름표 (자사주 매입/배당금) 업데이트 (fetch_us_cash_flow.py)
         runPythonScript("fetch_us_cash_flow.py", "Cash Flow (Buyback & Dividend)");

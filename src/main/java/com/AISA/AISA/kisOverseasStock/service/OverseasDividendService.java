@@ -44,7 +44,6 @@ public class OverseasDividendService {
     private OverseasDividendService self;
 
     private static final DateTimeFormatter RECORD_DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyyMMdd");
-    private static final DateTimeFormatter PAYMENT_DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy/MM/dd");
 
     public void refreshDividendInfo(String stockCode) {
         Stock stock = overseasStockRepository.findByStockCodeAndStockType(stockCode, Stock.StockType.US_STOCK)
@@ -182,8 +181,15 @@ public class OverseasDividendService {
                     if (dto.getRecordDate() == null || dto.getDividendAmount() == null)
                         continue;
 
-                    // Clean date string (remove - or /) for robust parsing
-                    String cleanRecordDate = dto.getRecordDate().replaceAll("[^0-9]", "");
+                    // Clean date strings
+                    String cleanRecordDate = dto.getRecordDate().replaceAll("[^0-9]", ""); // YYYYMMDD
+                    String rawPaymentDate = dto.getPaymentDate().replaceAll("[^0-9]", "");
+                    String formattedPaymentDate = rawPaymentDate;
+                    if (rawPaymentDate.length() == 8) {
+                        formattedPaymentDate = rawPaymentDate.substring(0, 4) + "/" +
+                                rawPaymentDate.substring(4, 6) + "/" +
+                                rawPaymentDate.substring(6, 8); // YYYY/MM/DD
+                    }
 
                     if (stockDividendRepository.existsByStock_StockCodeAndRecordDate(stock.getStockCode(),
                             cleanRecordDate)) {
@@ -215,8 +221,8 @@ public class OverseasDividendService {
 
                     entitiesToSave.add(StockDividend.builder()
                             .stock(stock)
-                            .recordDate(dto.getRecordDate())
-                            .paymentDate(dto.getPaymentDate())
+                            .recordDate(cleanRecordDate) // Ensure standardized format
+                            .paymentDate(formattedPaymentDate) // Ensure standardized format
                             .dividendAmount(new BigDecimal(dto.getDividendAmount()))
                             .dividendRate(yield)
                             .stockPrice(closePrice)
@@ -237,6 +243,91 @@ public class OverseasDividendService {
         }
     }
 
+    @Transactional
+    public void calculateMissingRates() {
+        log.info("Starting calculation of missing dividend rates and prices for US stocks...");
+        List<StockDividend> targetDividends = stockDividendRepository.findUSDividendsWithMissingPrice();
+        log.info("Found {} dividend records with missing prices.", targetDividends.size());
+
+        int count = 0;
+        for (StockDividend div : targetDividends) {
+            try {
+                LocalDate recordDate = LocalDate.parse(div.getRecordDate(), RECORD_DATE_FORMATTER);
+                Stock stock = div.getStock();
+
+                // Find closing price at record date or most recent before it
+                Optional<OverseasStockDailyData> dailyData = dailyDataRepository.findByStockAndDate(stock, recordDate);
+
+                BigDecimal closePrice = BigDecimal.ZERO;
+                if (dailyData.isPresent()) {
+                    closePrice = dailyData.get().getClosingPrice();
+                } else {
+                    // Look back up to 10 days to find the last trading day price
+                    List<OverseasStockDailyData> previousData = dailyDataRepository.findByStockAndDateBetween(stock,
+                            recordDate.minusDays(10), recordDate);
+                    if (!previousData.isEmpty()) {
+                        closePrice = previousData.get(previousData.size() - 1).getClosingPrice();
+                    }
+                }
+
+                if (closePrice.compareTo(BigDecimal.ZERO) > 0) {
+                    BigDecimal amount = div.getDividendAmount();
+                    double yield = amount.divide(closePrice, 4, RoundingMode.HALF_UP)
+                            .multiply(new BigDecimal(100)).doubleValue();
+
+                    // Update entity - we need a setter or use reflection if not available.
+                    // StockDividend entity has dividendRate and stockPrice fields.
+                    // Based on previous view_file, they don't have public setters, only
+                    // updateDates.
+                    // However, we can use reflection or add a method.
+                    // Let's check StockDividend.java again.
+                    div.updatePriceAndRate(closePrice, yield);
+                    count++;
+                }
+            } catch (Exception e) {
+                log.warn("Failed to calculate rate for dividend id {}: {}", div.getId(), e.getMessage());
+            }
+        }
+        log.info("Updated {} dividend records with prices and rates.", count);
+    }
+
+    /**
+     * 기존 배당 데이터의 날짜 형식을 표준화합니다.
+     * RecordDate: YYYYMMDD, PaymentDate: YYYY/MM/DD
+     */
+    @Transactional
+    public void standardizeExistingDividends() {
+        log.info("Starting standardization of existing dividend date formats...");
+        List<StockDividend> allDividends = stockDividendRepository.findAll();
+        int count = 0;
+
+        for (StockDividend div : allDividends) {
+            if (div.getStock().getStockType() != Stock.StockType.US_STOCK)
+                continue;
+
+            String cleanRecordDate = div.getRecordDate().replaceAll("[^0-9]", "");
+            String cleanPaymentDate = div.getPaymentDate().replaceAll("[^0-9]", "");
+
+            String formattedPaymentDate = cleanPaymentDate;
+            if (cleanPaymentDate.length() == 8) {
+                formattedPaymentDate = cleanPaymentDate.substring(0, 4) + "/" +
+                        cleanPaymentDate.substring(4, 6) + "/" +
+                        cleanPaymentDate.substring(6, 8);
+            }
+
+            // Update only if changed
+            if (!div.getRecordDate().equals(cleanRecordDate) || !div.getPaymentDate().equals(formattedPaymentDate)) {
+                div.updateDates(cleanRecordDate, formattedPaymentDate);
+                log.info("Standardized dividend for {}: RecordDate({} -> {}), PaymentDate({} -> {})",
+                        div.getStock().getStockCode(),
+                        div.getRecordDate(), cleanRecordDate,
+                        div.getPaymentDate(), formattedPaymentDate);
+                count++;
+            }
+        }
+        log.info("Finished standardization. Total {} records updated.", count);
+    }
+
     private String createBatchDividendPrompt(List<Stock> stocks) {
         StringBuilder sb = new StringBuilder();
         String currentDate = LocalDate.now().toString();
@@ -255,7 +346,7 @@ public class OverseasDividendService {
         }
         sb.append("\nExample format: {\"AAPL\": [{\"recordDate\": \"20240209\", ...}], \"MSFT\": [...]} \n");
         sb.append(
-                "ONLY return the JSON object, NO other text. Mandatory: Use ONLY YYYYMMDD style for recordDate (NO dashes, NO slashes). Ensure you include the latest 2024/2025 records if they have been announced.");
+                "ONLY return the JSON object, NO other text. Mandatory: Use ONLY YYYYMMDD style for recordDate (NO dashes, NO slashes). And use YYYY/MM/DD style for paymentDate (WITH slashes). Ensure you include the latest 2024/2025 records if they have been announced.");
         return sb.toString();
     }
 }

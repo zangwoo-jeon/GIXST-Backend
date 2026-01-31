@@ -12,6 +12,8 @@ import java.util.Optional;
 public interface StockMarketCapRepository extends JpaRepository<StockMarketCap, Long> {
     Optional<StockMarketCap> findByStock(Stock stock);
 
+    Optional<StockMarketCap> findByStock_StockCode(String stockCode);
+
     @EntityGraph(attributePaths = "stock")
     List<StockMarketCap> findTop100ByOrderByMarketCapDesc();
 

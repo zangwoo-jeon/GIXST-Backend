@@ -23,4 +23,6 @@ public interface KisOverseasStockDailyDataRepository extends JpaRepository<Overs
     boolean existsByStockAndDate(Stock stock, LocalDate date);
 
     Optional<OverseasStockDailyData> findByStockAndDate(Stock stock, LocalDate date);
+
+    List<OverseasStockDailyData> findTop5ByStockOrderByDateDesc(Stock stock);
 }

@@ -22,7 +22,7 @@ public class DividendRankDto {
     @Builder
     @ToString
     public static class DividendRankEntry {
-        private String rank;
+        private Integer rank;
         private String stockCode;
         private String stockName;
         private String dividendAmount;

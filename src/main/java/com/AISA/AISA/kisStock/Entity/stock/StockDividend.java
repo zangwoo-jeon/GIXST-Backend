@@ -36,4 +36,13 @@ public class StockDividend {
     @Column(nullable = true)
     private BigDecimal stockPrice; // 배당 기준일 당시 주가 (원) - 계산용
 
+    public void updateDates(String recordDate, String paymentDate) {
+        this.recordDate = recordDate;
+        this.paymentDate = paymentDate;
+    }
+
+    public void updatePriceAndRate(BigDecimal stockPrice, Double dividendRate) {
+        this.stockPrice = stockPrice;
+        this.dividendRate = dividendRate;
+    }
 }

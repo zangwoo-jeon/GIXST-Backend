@@ -24,11 +24,34 @@ public class GeminiService {
     private final ObjectMapper objectMapper;
     private final GeminiProperties geminiProperties;
 
+    /**
+     * Generates a context-aware market strategy based on the valuation data.
+     * Returns null if generation fails (to allow fallback to static strategy).
+     */
+    public String generateMarketStrategy(com.AISA.AISA.analysis.dto.MarketValuationDto dto) {
+        try {
+            String prompt = buildStrategyPrompt(dto);
+            return generateResponseWithRetry(prompt);
+        } catch (Exception e) {
+            log.warn("Failed to generate AI strategy: {}", e.getMessage());
+            return null; // Fallback to static
+        }
+    }
+
     public String generateAdvice(String context) {
+        try {
+            return generateResponseWithRetry(context);
+        } catch (Exception e) {
+            log.error("Failed to generate advice", e);
+            return "AI 서비스 연결 오류: " + e.getMessage();
+        }
+    }
+
+    private String generateResponseWithRetry(String context) throws Exception {
         List<String> keys = geminiProperties.getApiKeys();
         if (keys == null || keys.isEmpty()) {
             if (geminiProperties.getApiKey() == null) {
-                return "Gemini API 키가 설정되지 않았습니다.";
+                throw new IllegalStateException("Gemini API 키가 설정되지 않았습니다.");
             }
         }
 
@@ -43,21 +66,16 @@ public class GeminiService {
             } catch (WebClientResponseException e) {
                 if (e.getStatusCode().value() == 429) {
                     log.warn("Rate limit (429) exceeded. Rotating key...");
-                    continue; // Switch key and retry
+                    continue;
                 }
                 if (e.getStatusCode().is5xxServerError()) {
                     log.warn("Gemini Server Error ({}). Rotating key...", e.getStatusCode().value());
-                    continue; // Switch key and retry
+                    continue;
                 }
-                log.error("WebClient error: {}", e.getMessage());
-                return "AI 서비스 연결 오류: " + e.getMessage();
-            } catch (Exception e) {
-                log.error("Failed to generate advice from Gemini", e);
-                return "AI 진단 서비스 연결 실패: " + e.getMessage();
+                throw e;
             }
         }
-
-        return "AI 서비스 사용량이 초과되었습니다. 잠시 후 다시 시도해주세요.";
+        throw new RuntimeException("AI 서비스 사용량이 초과되었습니다.");
     }
 
     private String callGeminiApi(String context, String apiKey) {
@@ -67,8 +85,9 @@ public class GeminiService {
                 "contents", Collections.singletonList(
                         Map.of("parts", Collections.singletonList(
                                 Map.of("text", context)))),
-                "tools", Collections.singletonList(
-                        Map.of("google_search", new HashMap<>())));
+                "generationConfig", Map.of(
+                        "temperature", 0.7,
+                        "maxOutputTokens", 500));
 
         return webClient.post()
                 .uri(geminiProperties.getUrl() + "?key={key}", apiKey)
@@ -81,24 +100,42 @@ public class GeminiService {
 
     private String parseGeminiResponse(String jsonResponse) {
         try {
-            // Use JsonNode for safe traversal without unchecked casts
             JsonNode root = objectMapper.readTree(jsonResponse);
-
             JsonNode candidates = root.path("candidates");
             if (candidates.isMissingNode() || candidates.isEmpty())
-                return "AI 응답을 분석할 수 없습니다.";
+                throw new RuntimeException("No candidates found");
 
             JsonNode content = candidates.get(0).path("content");
             JsonNode parts = content.path("parts");
 
             if (parts.isMissingNode() || parts.isEmpty())
-                return "AI 응답 내용이 비어있습니다.";
+                throw new RuntimeException("Empty response parts");
 
             return parts.get(0).path("text").asText();
-
         } catch (Exception e) {
             log.error("Error parsing Gemini response", e);
-            return "AI 응답 해석 중 오류가 발생했습니다.";
+            throw new RuntimeException("Parsing error", e);
         }
+    }
+
+    private String buildStrategyPrompt(com.AISA.AISA.analysis.dto.MarketValuationDto dto) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("Role: Professional Market Analyst (Quant-based)\n");
+        sb.append("Task: Write a concise market strategy (Korean, 3~4 sentences) based on the input data.\n");
+        sb.append("Constraint: Focus on the conflict or alignment between Valuation, Sentiment, and Yield Gap.\n");
+        sb.append("Input Data:\n");
+        sb.append("- Market: ").append(dto.getMarket()).append("\n");
+        sb.append("- Total Score: ").append(dto.getTotalScore()).append("/100 (Grade: ").append(dto.getGrade())
+                .append(")\n");
+        sb.append("- CAPE: ").append(dto.getValuation().getCape()).append(" (Range: ")
+                .append(dto.getScoreDetails().getCapeRangePosition()).append("%)\n");
+        sb.append("- Yield Gap: ").append(dto.getValuation().getYieldGap()).append("% (Inversion: ")
+                .append(dto.getScoreDetails().getYieldGapInversion()).append(")\n");
+        sb.append("- Sentiment: ").append(dto.getScoreDetails().getSentimentSignal()).append("\n");
+        sb.append("- Investor Trend: Foreign=").append(dto.getInvestorTrend().getForeignTrend())
+                .append(", Individual=").append(dto.getInvestorTrend().getIndividualTrend()).append("\n");
+
+        sb.append("\nOutput (Korean):");
+        return sb.toString();
     }
 }

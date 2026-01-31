@@ -1,6 +1,7 @@
 package com.AISA.AISA.kisStock.repository;
 
 import com.AISA.AISA.kisStock.Entity.stock.Stock;
+import com.AISA.AISA.kisStock.enums.MarketType;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -16,6 +17,8 @@ public interface StockRepository extends JpaRepository<Stock, Long> {
         Optional<Stock> findByStockCode(String stockCode);
 
         List<Stock> findByStockType(Stock.StockType stockType);
+
+        List<Stock> findByMarketName(MarketType marketName);
 
         List<Stock> findAllByStockIdBetween(Long startId, Long endId);
 

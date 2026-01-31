@@ -298,7 +298,10 @@ public class DividendService {
                                         }
 
                                         return DividendRankDto.DividendRankEntry.builder()
-                                                        .rank(entity.getRank())
+                                                        .rank(entity.getRank()) // The rank
+                                                                                // field is
+                                                                                // now
+                                                                                // Integer
                                                         .stockCode(entity.getStockCode())
                                                         .stockName(entity.getStockName())
                                                         .dividendAmount(entity.getDividendAmount())
@@ -374,7 +377,7 @@ public class DividendService {
                                                 .stockName(stock.getStockName())
                                                 .dividendAmount(totalDividend.toString())
                                                 .dividendRate(String.format("%.2f", yield))
-                                                .rank("0") // Will assign later
+                                                .rank(0) // Will assign later
                                                 .build();
 
                                 newRankList.add(rankEntity);
@@ -404,7 +407,7 @@ public class DividendService {
                                         .stockName(old.getStockName())
                                         .dividendAmount(old.getDividendAmount())
                                         .dividendRate(old.getDividendRate())
-                                        .rank(String.valueOf(i + 1))
+                                        .rank(i + 1)
                                         .build());
                 }
 

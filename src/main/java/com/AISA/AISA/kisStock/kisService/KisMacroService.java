@@ -149,7 +149,7 @@ public class KisMacroService {
         return fetchMacroData(STAT_CODE_BOND_YIELD, bond.getSymbol(), "I", bond.getSymbol(), startDate, endDate);
     }
 
-    private List<MacroIndicatorDto> fetchMacroData(String statCode, String itemCode, String marketDivCode,
+    public List<MacroIndicatorDto> fetchMacroData(String statCode, String itemCode, String marketDivCode,
             String symbol, String startDate, String endDate) {
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
         LocalDate start = LocalDate.parse(startDate, formatter);
@@ -445,20 +445,27 @@ public class KisMacroService {
     // ECOS Bond Yield (3Y BBB-)
     // STAT_CODE: 817Y002
     // ITEM_CODE: 010320000
-    private static final String STAT_CODE_ECOS_BOND_YIELD = "817Y002";
-    private static final String ITEM_CODE_ECOS_BOND_YIELD = "010320000";
+    public static final String STAT_CODE_ECOS_BOND_YIELD = "817Y002";
+    public static final String ITEM_CODE_ECOS_BOND_YIELD = "010320000";
 
     @Transactional
     public void fetchAndSaveEcosBondYield() {
+        fetchAndSaveEcosData(STAT_CODE_ECOS_BOND_YIELD, ITEM_CODE_ECOS_BOND_YIELD, 7);
+    }
+
+    @Transactional
+    public void fetchAndSaveEcosData(String statCode, String itemCode, int lookbackDays) {
         try {
             LocalDate today = LocalDate.now();
-            LocalDate startDate = today.minusDays(7); // Check last 7 days
+            LocalDate startDate = today.minusDays(lookbackDays);
             String startStr = startDate.format(DateTimeFormatter.ofPattern("yyyyMMdd"));
             String endStr = today.format(DateTimeFormatter.ofPattern("yyyyMMdd"));
 
             String key = ecosApiProperties.getApiKey();
-            String url = String.format("/StatisticSearch/%s/json/kr/1/10/%s/D/%s/%s/%s",
-                    key, STAT_CODE_ECOS_BOND_YIELD, startStr, endStr, ITEM_CODE_ECOS_BOND_YIELD);
+            String url = String.format("/StatisticSearch/%s/json/kr/1/100/%s/D/%s/%s/%s",
+                    key, statCode, startStr, endStr, itemCode);
+
+            log.info("Fetching ECOS data: stat={}, item={}, range=[{}~{}]", statCode, itemCode, startStr, endStr);
 
             EcosApiResponseDto response = webClient.get()
                     .uri("https://ecos.bok.or.kr/api" + url)
@@ -474,13 +481,13 @@ public class KisMacroService {
 
                     boolean exists = macroDailyDataRepository
                             .findAllByStatCodeAndItemCodeAndDateBetweenOrderByDateAsc(
-                                    STAT_CODE_ECOS_BOND_YIELD, ITEM_CODE_ECOS_BOND_YIELD, date, date)
+                                    statCode, itemCode, date, date)
                             .stream().findAny().isPresent();
 
                     if (!exists) {
                         MacroDailyData entity = MacroDailyData.builder()
-                                .statCode(STAT_CODE_ECOS_BOND_YIELD)
-                                .itemCode(ITEM_CODE_ECOS_BOND_YIELD)
+                                .statCode(statCode)
+                                .itemCode(itemCode)
                                 .date(date)
                                 .value(value)
                                 .build();
@@ -489,22 +496,34 @@ public class KisMacroService {
                 }
             }
         } catch (Exception e) {
-            log.error("Failed to fetch/save ECOS bond yield: {}", e.getMessage());
+            log.error("Failed to fetch/save ECOS data (stat={}): {}", statCode, e.getMessage());
         }
     }
 
-    @Cacheable(value = "ecosBondYield", key = "'latest'", unless = "#result == null")
-    public String getLatestEcosBondYield() {
+    @Cacheable(value = "ecosBondYield", key = "#statCode + '-' + #itemCode", unless = "#result == null")
+    public BigDecimal getLatestEcosData(String statCode, String itemCode) {
         LocalDate endDate = LocalDate.now();
         LocalDate startDate = endDate.minusDays(14); // Look back 2 weeks just in case
 
         List<MacroDailyData> data = macroDailyDataRepository
                 .findAllByStatCodeAndItemCodeAndDateBetweenOrderByDateAsc(
-                        STAT_CODE_ECOS_BOND_YIELD, ITEM_CODE_ECOS_BOND_YIELD, startDate, endDate);
+                        statCode, itemCode, startDate, endDate);
 
         if (!data.isEmpty()) {
-            return data.get(data.size() - 1).getValue().toString();
+            return data.get(data.size() - 1).getValue();
         }
+
+        // Try fetch
+        fetchAndSaveEcosData(statCode, itemCode, 14);
+
+        data = macroDailyDataRepository
+                .findAllByStatCodeAndItemCodeAndDateBetweenOrderByDateAsc(
+                        statCode, itemCode, startDate, endDate);
+
+        if (!data.isEmpty()) {
+            return data.get(data.size() - 1).getValue();
+        }
+
         return null;
     }
 

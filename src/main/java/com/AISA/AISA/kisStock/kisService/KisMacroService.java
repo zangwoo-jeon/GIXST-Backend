@@ -235,6 +235,7 @@ public class KisMacroService {
                 .build();
     }
 
+    @Cacheable(value = "exchangeRateStatus", key = "'USD'")
     public ExchangeRateStatusDto getExchangeRateStatus() {
         return getExchangeRateStatus(ExchangeRateCode.USD);
     }
@@ -527,6 +528,7 @@ public class KisMacroService {
         return null;
     }
 
+    @Cacheable(value = "macroBond", key = "'latest-' + #bond.name()", unless = "#result == null")
     public BigDecimal getLatestBondYield(BondYield bond) {
         LocalDate endDate = LocalDate.now();
         LocalDate startDate = endDate.minusDays(7); // Check last 7 days

@@ -404,6 +404,7 @@ public class KisIndexService {
         return indexList;
     }
 
+    @Cacheable(value = "overseasIndexStatus", key = "#index.name()")
     public OverseasIndexStatusDto getOverseasIndexStatus(OverseasIndex index) {
         KisOverseasIndexBasicInfoDto latest = fetchOverseasIndexBasicInfo(index.getSymbol());
 

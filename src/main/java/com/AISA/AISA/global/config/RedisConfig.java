@@ -111,6 +111,8 @@ public class RedisConfig {
                 configMap.put("staticAnalysis", sevenDayConfig);
                 configMap.put("overseasStaticAnalysis", sevenDayConfig);
                 configMap.put("marketValuation", longTermConfig);
+                configMap.put("overseasIndexStatus", shortTermConfig);
+                configMap.put("exchangeRateStatus", shortTermConfig);
 
                 return RedisCacheManager.builder(connectionFactory)
                                 .cacheDefaults(defaultConfig)

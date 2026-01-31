@@ -1,4 +1,4 @@
-package com.AISA.AISA.kisStock.Entity.stock;
+package com.AISA.AISA.kisOverseasStock.entity;
 
 import jakarta.persistence.*;
 import lombok.*;
@@ -8,8 +8,8 @@ import lombok.*;
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @AllArgsConstructor
 @Builder
-@Table(name = "stock_dividend_rank")
-public class StockDividendRank {
+@Table(name = "overseas_stock_dividend_rank")
+public class OverseasStockDividendRank {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -29,13 +29,4 @@ public class StockDividendRank {
 
     @Column(nullable = false)
     private String dividendRate;
-
-    // API does not provide recordDate in the rank list directly in the same format
-    // always,
-    // but based on previous DTO it was not explicitly used in domain logic yet.
-    // We will store it if available or keep it simple as per DTO.
-    // Looking at previous DTO, it had fields map to KisDividendRankApiResponse.
-    // KisDividendRankApiResponse.Output has: rank, sht_cd, isin_name,
-    // per_sto_divi_amt, divi_rate
-
 }

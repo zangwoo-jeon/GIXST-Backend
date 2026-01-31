@@ -78,4 +78,7 @@ public interface StockFinancialStatementRepository extends JpaRepository<StockFi
         List<StockFinancialStatement> findAllByDivCode(String divCode);
 
         List<StockFinancialStatement> findByDivCodeAndStacYymmGreaterThanEqual(String divCode, String stacYymm);
+
+        List<StockFinancialStatement> findByStockCodeInAndDivCode(java.util.Collection<String> stockCodes,
+                        String divCode);
 }

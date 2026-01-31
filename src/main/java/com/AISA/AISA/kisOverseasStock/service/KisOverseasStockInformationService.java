@@ -4,7 +4,9 @@ import com.AISA.AISA.global.errorcode.CommonErrorCode;
 import com.AISA.AISA.global.exception.BusinessException;
 import com.AISA.AISA.kisOverseasStock.config.KisOverseasApiProperties;
 import com.AISA.AISA.kisOverseasStock.dto.KisOverseasPriceApiResponse;
+import com.AISA.AISA.kisOverseasStock.dto.KisOverseasStockSearchInfoApiResponse;
 import com.AISA.AISA.kisOverseasStock.dto.OverseasStockBalanceSheetDto;
+import com.AISA.AISA.kisOverseasStock.dto.OverseasStockCashFlowDto;
 import com.AISA.AISA.kisOverseasStock.dto.OverseasStockFinancialStatementDto;
 import com.AISA.AISA.kisOverseasStock.dto.OverseasStockPriceDetailDto;
 import com.AISA.AISA.kisOverseasStock.entity.OverseasStockBalanceSheet;
@@ -16,9 +18,11 @@ import com.AISA.AISA.kisOverseasStock.repository.KisOverseasStockFinancialRatioR
 import com.AISA.AISA.kisOverseasStock.repository.KisOverseasStockFinancialStatementRepository;
 import com.AISA.AISA.kisOverseasStock.repository.KisOverseasStockRepository;
 import com.AISA.AISA.kisStock.Entity.stock.Stock;
+import com.AISA.AISA.kisStock.Entity.stock.StockMarketCap;
 import com.AISA.AISA.kisStock.config.KisApiProperties;
 import com.AISA.AISA.kisStock.exception.KisApiErrorCode;
 import com.AISA.AISA.kisStock.kisService.KisApiClient;
+import com.AISA.AISA.kisStock.repository.StockMarketCapRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -46,7 +50,7 @@ public class KisOverseasStockInformationService {
         private final KisOverseasStockBalanceSheetRepository balanceSheetRepository;
         private final KisOverseasStockFinancialRatioRepository financialRatioRepository;
         private final KisOverseasStockRepository overseasStockRepository;
-        private final com.AISA.AISA.kisStock.repository.StockMarketCapRepository stockMarketCapRepository;
+        private final StockMarketCapRepository stockMarketCapRepository;
         private final WebClient webClient;
         private final KisApiProperties kisApiProperties;
         private final KisOverseasApiProperties overseasApiProperties;
@@ -144,12 +148,12 @@ public class KisOverseasStockInformationService {
                                         ? new BigDecimal(output.getListedShares())
                                         : null;
 
-                        com.AISA.AISA.kisStock.Entity.stock.StockMarketCap marketCapEntity = stockMarketCapRepository
+                        StockMarketCap marketCapEntity = stockMarketCapRepository
                                         .findByStock(stock).orElse(null);
 
                         if (marketCapEntity == null) {
                                 log.info("Creating new market cap entity for {}", stockCode);
-                                marketCapEntity = com.AISA.AISA.kisStock.Entity.stock.StockMarketCap
+                                marketCapEntity = StockMarketCap
                                                 .createOverseas(stock, mktCapKrwVal, mktCapUsd, listedShares,
                                                                 output.getPrice(), output.getPriceChange(),
                                                                 output.getChangeRate(), output.getChangeSign());
@@ -199,10 +203,10 @@ public class KisOverseasStockInformationService {
         public void updateTopMarketCapPrices(int topN) {
                 log.info("Updating top {} overseas stocks for real-time ranking...", topN);
                 Pageable pageable = PageRequest.of(0, topN);
-                List<com.AISA.AISA.kisStock.Entity.stock.StockMarketCap> topMarketCaps = stockMarketCapRepository
+                List<StockMarketCap> topMarketCaps = stockMarketCapRepository
                                 .findByStockStockTypeOrderByMarketCapDesc(Stock.StockType.US_STOCK, pageable);
 
-                for (com.AISA.AISA.kisStock.Entity.stock.StockMarketCap smc : topMarketCaps) {
+                for (StockMarketCap smc : topMarketCaps) {
                         try {
                                 self.getPriceDetail(smc.getStock().getStockCode());
                                 Thread.sleep(200); // KIS API Rate limit
@@ -308,7 +312,6 @@ public class KisOverseasStockInformationService {
                 BigDecimal listedShares = new BigDecimal(output.getListedShares());
 
                 List<OverseasStockFinancialRatio> ratiosToSave = new ArrayList<>();
-                String latestYymm = statements.get(statements.size() - 1).getStacYymm();
 
                 for (OverseasStockFinancialStatement stmt : statements) {
                         String yymm = stmt.getStacYymm();
@@ -327,47 +330,27 @@ public class KisOverseasStockInformationService {
                         BigDecimal pbr = BigDecimal.ZERO;
                         BigDecimal roe = BigDecimal.ZERO;
 
-                        if (yymm.equals(latestYymm)) {
-                                // 최신 데이터는 한투 API에서 준 값 우선 사용
-                                epsUsd = parseBigDecimalSafe(output.getEps());
-                                bpsUsd = parseBigDecimalSafe(output.getBps());
-                                per = parseBigDecimalSafe(output.getPer());
-                                pbr = parseBigDecimalSafe(output.getPbr());
+                        // 항상 DB에 저장된 신뢰할 수 있는 재무 데이터(순이익, 자본총계)를 기반으로 계산
+                        // KIS API의 eps, per 등은 적자 기업의 경우 양수로 나오는 오류가 있어 사용하지 않음
 
-                                // 만약 한투에서 준 값이 0이면 로컬 계산으로 보완
-                                if (epsUsd.compareTo(BigDecimal.ZERO) == 0 && stmt.getNetIncome() != null) {
-                                        epsUsd = stmt.getNetIncome().multiply(UNIT_MULTIPLIER)
-                                                        .divide(listedShares, 4, RoundingMode.HALF_UP);
-                                }
-                                if (bpsUsd.compareTo(BigDecimal.ZERO) == 0 && board != null
-                                                && board.getTotalCapital() != null) {
-                                        bpsUsd = board.getTotalCapital().multiply(UNIT_MULTIPLIER)
-                                                        .divide(listedShares, 4, RoundingMode.HALF_UP);
-                                }
-                                if (per.compareTo(BigDecimal.ZERO) == 0 && epsUsd.compareTo(BigDecimal.ZERO) != 0) {
-                                        per = currentPrice.divide(epsUsd, 2, RoundingMode.HALF_UP);
-                                }
-                                if (pbr.compareTo(BigDecimal.ZERO) == 0 && bpsUsd.compareTo(BigDecimal.ZERO) != 0) {
-                                        pbr = currentPrice.divide(bpsUsd, 2, RoundingMode.HALF_UP);
-                                }
-                        } else {
-                                // 과거 데이터는 로컬 계산
-                                if (listedShares.compareTo(BigDecimal.ZERO) > 0 && stmt.getNetIncome() != null) {
-                                        epsUsd = stmt.getNetIncome().multiply(UNIT_MULTIPLIER)
-                                                        .divide(listedShares, 4, RoundingMode.HALF_UP);
-                                }
-                                if (board != null && board.getTotalCapital() != null
-                                                && listedShares.compareTo(BigDecimal.ZERO) > 0) {
-                                        bpsUsd = board.getTotalCapital().multiply(UNIT_MULTIPLIER)
-                                                        .divide(listedShares, 4, RoundingMode.HALF_UP);
-                                }
+                        if (listedShares.compareTo(BigDecimal.ZERO) > 0 && stmt.getNetIncome() != null) {
+                                epsUsd = stmt.getNetIncome().multiply(UNIT_MULTIPLIER)
+                                                .divide(listedShares, 4, RoundingMode.HALF_UP);
+                        }
+                        if (board != null && board.getTotalCapital() != null
+                                        && listedShares.compareTo(BigDecimal.ZERO) > 0) {
+                                bpsUsd = board.getTotalCapital().multiply(UNIT_MULTIPLIER)
+                                                .divide(listedShares, 4, RoundingMode.HALF_UP);
+                        }
 
-                                if (epsUsd.compareTo(BigDecimal.ZERO) != 0) {
-                                        per = currentPrice.divide(epsUsd, 2, RoundingMode.HALF_UP);
-                                }
-                                if (bpsUsd.compareTo(BigDecimal.ZERO) != 0) {
-                                        pbr = currentPrice.divide(bpsUsd, 2, RoundingMode.HALF_UP);
-                                }
+                        // EPS가 0이 아니면 PER 계산 (음수 EPS인 경우 음수 PER 계산됨)
+                        if (epsUsd.compareTo(BigDecimal.ZERO) != 0) {
+                                per = currentPrice.divide(epsUsd, 2, RoundingMode.HALF_UP);
+                        }
+
+                        // BPS가 0이 아니면 PBR 계산
+                        if (bpsUsd.compareTo(BigDecimal.ZERO) != 0) {
+                                pbr = currentPrice.divide(bpsUsd, 2, RoundingMode.HALF_UP);
                         }
 
                         // 공통: 원화 환산 EPS, BPS
@@ -494,28 +477,17 @@ public class KisOverseasStockInformationService {
                                 .collect(Collectors.toList());
         }
 
-        private BigDecimal parseBigDecimalSafe(String value) {
-                if (value == null || value.trim().isEmpty() || "-".equals(value.trim())) {
-                        return BigDecimal.ZERO;
-                }
-                try {
-                        return new BigDecimal(value.trim());
-                } catch (NumberFormatException e) {
-                        return BigDecimal.ZERO;
-                }
-        }
-
         @Autowired
         private com.AISA.AISA.kisOverseasStock.repository.KisOverseasStockCashFlowRepository cashFlowRepository;
 
         /**
          * 특정 종목의 주주환원율 정보(자사주 매입, 배당금 지급)를 조회합니다.
          */
-        public List<com.AISA.AISA.kisOverseasStock.dto.OverseasStockCashFlowDto> getShareholderReturnInfo(
+        public List<OverseasStockCashFlowDto> getShareholderReturnInfo(
                         String stockCode) {
                 return cashFlowRepository.findByStockCodeAndDivCodeOrderByStacYymmDesc(stockCode, "0") // 연간 데이터 기준
                                 .stream()
-                                .map(com.AISA.AISA.kisOverseasStock.dto.OverseasStockCashFlowDto::fromEntity)
+                                .map(OverseasStockCashFlowDto::fromEntity)
                                 .collect(Collectors.toList());
         }
 
@@ -542,7 +514,7 @@ public class KisOverseasStockInformationService {
                                 prdtTypeCd = "512"; // Default to Nasdaq if unknown
                 }
 
-                com.AISA.AISA.kisOverseasStock.dto.KisOverseasStockSearchInfoApiResponse response = kisApiClient
+                KisOverseasStockSearchInfoApiResponse response = kisApiClient
                                 .fetch(token -> webClient.get()
                                                 .uri(uriBuilder -> {
                                                         String url = overseasApiProperties.getOverseaSearchInfoUrl();
@@ -560,7 +532,7 @@ public class KisOverseasStockInformationService {
                                                 .header("appSecret", kisApiProperties.getAppsecret())
                                                 .header("tr_id", "CTPF1702R") // 상품 기본 정보 조회
                                                 .header("custtype", "P"),
-                                                com.AISA.AISA.kisOverseasStock.dto.KisOverseasStockSearchInfoApiResponse.class);
+                                                KisOverseasStockSearchInfoApiResponse.class);
 
                 if (response != null && response.getOutput() != null) {
                         String stopCode = response.getOutput().getOvrsStckTrStopDvsnCd();

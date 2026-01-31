@@ -60,4 +60,18 @@ public class OverseasDividendController {
         return ResponseEntity
                 .ok(new SuccessResponse<>(true, "Batch dividend refresh resumed from " + stockCode, null));
     }
+
+    @PostMapping("/standardize")
+    @Operation(summary = "해외 주식 배당 데이터 날짜 형식 표준화", description = "기존 배당 데이터의 날짜 형식을 yyyyMMdd(기준일), yyyy/MM/dd(지급일)로 통일합니다.")
+    public ResponseEntity<SuccessResponse<String>> standardizeExistingDividends() {
+        overseasDividendService.standardizeExistingDividends();
+        return ResponseEntity.ok(new SuccessResponse<>(true, "Overseas dividend date standardization triggered", null));
+    }
+
+    @PostMapping("/calculate-rates")
+    @Operation(summary = "해외 주식 배당률 및 주가 업데이트", description = "배당 기준일의 종가를 조회하여 누락된 주가와 배당률을 계산하고 업데이트합니다.")
+    public ResponseEntity<SuccessResponse<String>> calculateMissingRates() {
+        overseasDividendService.calculateMissingRates();
+        return ResponseEntity.ok(new SuccessResponse<>(true, "Overseas dividend rates calculation triggered", null));
+    }
 }

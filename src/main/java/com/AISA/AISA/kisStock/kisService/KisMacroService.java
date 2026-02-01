@@ -295,6 +295,7 @@ public class KisMacroService {
                 .build();
     }
 
+    @Cacheable(value = "exchangeRateMap", key = "#startDate + '-' + #endDate")
     public Map<String, Double> getExchangeRateMap(String startDate, String endDate) {
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
         LocalDate start = LocalDate.parse(startDate, formatter);

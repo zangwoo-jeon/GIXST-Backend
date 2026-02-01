@@ -288,6 +288,7 @@ public class KisIndexService {
         }
     }
 
+    @Cacheable(value = "indexStatus", key = "#marketCode")
     public IndexChartInfoDto getIndexStatus(String marketCode) {
         // 오늘 날짜 기준으로 API 호출하여 최신 상태 정보만 가져옴
         String today = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));

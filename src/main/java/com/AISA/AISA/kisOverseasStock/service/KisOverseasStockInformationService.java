@@ -21,6 +21,7 @@ import com.AISA.AISA.kisStock.Entity.stock.Stock;
 import com.AISA.AISA.kisStock.Entity.stock.StockMarketCap;
 import com.AISA.AISA.kisStock.config.KisApiProperties;
 import com.AISA.AISA.kisStock.exception.KisApiErrorCode;
+import com.AISA.AISA.global.util.StockCodeUtils;
 import com.AISA.AISA.kisStock.kisService.KisApiClient;
 import com.AISA.AISA.kisStock.repository.StockMarketCapRepository;
 import lombok.RequiredArgsConstructor;
@@ -113,7 +114,8 @@ public class KisOverseasStockInformationService {
                                                         .path(url)
                                                         .queryParam("AUTH", "")
                                                         .queryParam("EXCD", stock.getMarketName().getExchangeCode())
-                                                        .queryParam("SYMB", stock.getStockCode())
+                                                        .queryParam("SYMB",
+                                                                        StockCodeUtils.toKisCode(stock.getStockCode()))
                                                         .build();
                                 })
                                 .header("Authorization", token)
@@ -234,7 +236,8 @@ public class KisOverseasStockInformationService {
                                                         .path(url)
                                                         .queryParam("AUTH", "")
                                                         .queryParam("EXCD", stock.getMarketName().getExchangeCode())
-                                                        .queryParam("SYMB", stock.getStockCode())
+                                                        .queryParam("SYMB",
+                                                                        StockCodeUtils.toKisCode(stock.getStockCode()))
                                                         .build();
                                 })
                                 .header("Authorization", token)
@@ -298,7 +301,8 @@ public class KisOverseasStockInformationService {
                                                         .path(url)
                                                         .queryParam("AUTH", "")
                                                         .queryParam("EXCD", stock.getMarketName().getExchangeCode())
-                                                        .queryParam("SYMB", stock.getStockCode())
+                                                        .queryParam("SYMB",
+                                                                        StockCodeUtils.toKisCode(stock.getStockCode()))
                                                         .build();
                                 })
                                 .header("Authorization", token)
@@ -524,7 +528,9 @@ public class KisOverseasStockInformationService {
                                                         return uriBuilder
                                                                         .path(url)
                                                                         .queryParam("PRDT_TYPE_CD", prdtTypeCd)
-                                                                        .queryParam("PDNO", stockCode)
+                                                                        .queryParam("PDNO",
+                                                                                        StockCodeUtils.toKisCode(
+                                                                                                        stockCode))
                                                                         .build();
                                                 })
                                                 .header("Authorization", token)

@@ -40,6 +40,22 @@ public class OverseasStockFinancialScheduler {
         log.info("Completed all scheduled overseas financial data updates.");
     }
 
+    /**
+     * 매일 오전 7시에 해외 주식 지표(PEG Ratio, EV/EBITDA)를 업데이트합니다.
+     */
+    @Scheduled(cron = "0 0 7 * * *")
+    public void scheduledUpdateOverseasMetrics() {
+        log.info("Starting scheduled overseas stock metrics update (PEG, EV/EBITDA)...");
+
+        // 1. Yahoo Finance PEG Ratio
+        runPythonScript("fetch_yahoo_metrics.py", "PEG Ratio (Yahoo)");
+
+        // 2. Hankyung EV/EBITDA
+        runPythonScript("fetch_ev_ebitda_hankyung.py", "EV/EBITDA (Hankyung)");
+
+        log.info("Completed scheduled overseas stock metrics update.");
+    }
+
     private void runPythonScript(String scriptName, String taskLabel) {
         log.info("Starting {} update using {}...", taskLabel, scriptName);
         Path tempDir = null;

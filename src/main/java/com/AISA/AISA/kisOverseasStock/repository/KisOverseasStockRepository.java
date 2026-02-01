@@ -2,6 +2,7 @@ package com.AISA.AISA.kisOverseasStock.repository;
 
 import com.AISA.AISA.kisStock.Entity.stock.Stock;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -21,4 +22,8 @@ public interface KisOverseasStockRepository extends JpaRepository<Stock, Long> {
 
     @Query("SELECT s FROM Stock s WHERE s.stockType = 'US_STOCK' AND NOT EXISTS (SELECT 1 FROM OverseasStockDailyData d WHERE d.stock = s)")
     List<Stock> findStocksWithNoDailyData();
+
+    @Modifying
+    @Query(value = "UPDATE stock SET stock_code = :newCode WHERE stock_id = :stockId", nativeQuery = true)
+    void updateStockCode(@Param("stockId") Long stockId, @Param("newCode") String newCode);
 }

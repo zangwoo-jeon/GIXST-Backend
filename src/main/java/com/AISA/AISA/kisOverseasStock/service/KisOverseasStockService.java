@@ -11,6 +11,7 @@ import com.AISA.AISA.kisStock.dto.StockPrice.StockPriceDto;
 import com.AISA.AISA.kisStock.dto.StockSimpleSearchResponseDto;
 import com.AISA.AISA.kisStock.exception.KisApiErrorCode;
 import com.AISA.AISA.global.exception.BusinessException;
+import com.AISA.AISA.global.util.StockCodeUtils;
 import com.AISA.AISA.kisStock.kisService.KisApiClient;
 import com.AISA.AISA.kisOverseasStock.dto.KisOverseasChartApiResponse;
 import com.AISA.AISA.kisOverseasStock.dto.KisOverseasStockChartDto;
@@ -75,7 +76,7 @@ public class KisOverseasStockService {
                             .path(overseasApiProperties.getOverseaPriceUrl())
                             .queryParam("AUTH", "")
                             .queryParam("EXCD", stock.getMarketName().getExchangeCode())
-                            .queryParam("SYMB", stock.getStockCode())
+                            .queryParam("SYMB", StockCodeUtils.toKisCode(stock.getStockCode()))
                             .build())
                     .header("Authorization", token)
                     .header("appKey", kisApiProperties.getAppkey())
@@ -356,7 +357,7 @@ public class KisOverseasStockService {
                             .path(overseasApiProperties.getOverseaChartPriceUrl())
                             .queryParam("AUTH", "")
                             .queryParam("EXCD", stock.getMarketName().getExchangeCode())
-                            .queryParam("SYMB", stock.getStockCode())
+                            .queryParam("SYMB", StockCodeUtils.toKisCode(stock.getStockCode()))
                             .queryParam("GUBN", gubn)
                             .queryParam("BYMD", endDate)
                             .queryParam("MODP", "1")

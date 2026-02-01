@@ -26,4 +26,11 @@ public class KisOverseasStockMigrationController {
         return ResponseEntity.ok(new SuccessResponse<>(true,
                 "누락된 데이터 복구 프로세스 시작 (백그라운드)", null));
     }
+
+    @PostMapping("/normalize")
+    @Operation(summary = "해외 주식 코드 정규화", description = "종목 코드의 '/'를 '.'으로 변경합니다.")
+    public ResponseEntity<SuccessResponse<String>> normalizeStockCodes() {
+        migrationService.normalizeStockCodes();
+        return ResponseEntity.ok(new SuccessResponse<>(true, "종목 코드 정규화 완료 (/ -> .)", null));
+    }
 }

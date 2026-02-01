@@ -34,4 +34,6 @@ public interface StockDividendRepository extends JpaRepository<StockDividend, Lo
                         @Param("recordEnd") String recordEnd,
                         @Param("paymentStart") String paymentStart,
                         @Param("paymentEnd") String paymentEnd);
+
+        void deleteByIdBetween(Long startId, Long endId);
 }

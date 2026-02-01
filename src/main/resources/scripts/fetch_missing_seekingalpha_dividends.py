@@ -17,9 +17,9 @@ DB_CONFIG = {
 
 def to_seeking_alpha_ticker(ticker):
     """
-    내부 티커 형식(예: BRK/A)을 Seeking Alpha 형식(예: BRK.A)으로 변환합니다.
+    내부 티커 형식(예: BRK.A)을 Seeking Alpha 형식(예: brk.a)으로 변환합니다.
     """
-    return ticker.replace("/", ".").lower()
+    return ticker.lower()
 
 def get_missing_stocks(start_id=None, end_id=None):
     """

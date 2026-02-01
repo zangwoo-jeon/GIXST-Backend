@@ -11,6 +11,7 @@ import com.AISA.AISA.kisStock.Entity.stock.StockDividend;
 import com.AISA.AISA.kisStock.exception.KisApiErrorCode;
 import com.AISA.AISA.kisStock.repository.StockDividendRepository;
 import com.AISA.AISA.kisStock.dto.Dividend.StockDividendInfoDto;
+import com.AISA.AISA.global.util.StockCodeUtils;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -342,7 +343,8 @@ public class OverseasDividendService {
         sb.append("- 'dividendAmount': The dividend amount per share in USD as a string (e.g., '0.24').\n");
         sb.append("Stock list:\n");
         for (Stock stock : stocks) {
-            sb.append(String.format("- %s (%s)\n", stock.getStockName(), stock.getStockCode()));
+            sb.append(
+                    String.format("- %s (%s)\n", stock.getStockName(), StockCodeUtils.toKisCode(stock.getStockCode())));
         }
         sb.append("\nExample format: {\"AAPL\": [{\"recordDate\": \"20240209\", ...}], \"MSFT\": [...]} \n");
         sb.append(

@@ -161,8 +161,8 @@ def main():
         for stock_code in tqdm(stocks, desc="Processing"):
             try:
                 # URL 생성 (대부분 americas로 가정)
-                # handle special cases like 'BRK/A' -> 'brk.a' for Hankyung URL
-                formatted_code = stock_code.lower().replace('/', '.')
+                # handle special cases like 'BRK.A' -> 'brka' for Hankyung URL
+                formatted_code = stock_code.lower().replace('.', '')
                 url = f"https://www.hankyung.com/globalmarket/equities/americas/{formatted_code}"
                 
                 res = requests.get(url, headers=HEADERS, timeout=10)

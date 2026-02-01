@@ -66,10 +66,10 @@ def fetch_dividend_and_capital_change(stock_code):
     한경 글로벌마켓에서 해당 종목의 현금흐름표를 크롤링하여
     배당금 지급(cash_dividends_paid)과 자본금 변동(repurchase_of_capital_stock)을 추출
     """
-    # stock_code format: AAPL, TSLA, BRK/B etc.
+    # stock_code format: AAPL, TSLA, BRK.B etc.
     # URL format: https://www.hankyung.com/globalmarket/equities/americas/aapl
-    # BRK/B -> brkb
-    formatted_code = stock_code.lower().replace('/', '')
+    # BRK.B -> brkb
+    formatted_code = stock_code.lower().replace('.', '')
     url = f"https://www.hankyung.com/globalmarket/equities/americas/{formatted_code}"
     
     try:

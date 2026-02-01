@@ -104,6 +104,7 @@ public class SecurityConfig {
                                                                 "/api/analysis/valuation/*/static-report",
                                                                 "/api/stocks/financial/investor-trend/daily/*",
                                                                 "/api/stocks/investor/*/accumulated",
+                                                                "/api/stocks/investor/market/**",
                                                                 "/api/overseas/dividend/**",
                                                                 "/api/overseas-stocks/search",
                                                                 "/api/overseas-stocks/*/price",
@@ -113,6 +114,9 @@ public class SecurityConfig {
                                                                 "/api/overseas-stocks/information/shareholder-return/*",
                                                                 "/api/overseas-stocks/information/price-detail/*",
                                                                 "/api/overseas-stocks/information/financial-ratio/*",
+                                                                "/api/overseas-stocks/rank/**",
+                                                                "/api/stocks/growth/ranking",
+                                                                "/api/analysis/market/valuation",
                                                                 "/api/analysis/overseas/static-analysis/*")
                                                 .permitAll()
                                                 .anyRequest().authenticated())

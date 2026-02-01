@@ -1,5 +1,6 @@
 package com.AISA.AISA.analysis.dto;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.AISA.AISA.kisStock.enums.MarketType;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -119,7 +120,9 @@ public class MarketValuationDto {
         private String date;
         private BigDecimal cape;
         private BigDecimal yieldGap;
+        @JsonIgnore
         private BigDecimal lowerBound;
+        @JsonIgnore
         private BigDecimal upperBound;
     }
 }

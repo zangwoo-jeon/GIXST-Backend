@@ -79,6 +79,7 @@ public class DividendService {
                         return savedDividends.stream()
                                         .filter(entity -> entity.getDividendAmount().compareTo(BigDecimal.ZERO) > 0)
                                         .map(entity -> StockDividendInfoDto.builder()
+                                                        .id(entity.getId())
                                                         .stockCode(entity.getStock().getStockCode())
                                                         .stockName(entity.getStock().getStockName())
                                                         .recordDate(entity.getRecordDate())
@@ -524,6 +525,7 @@ public class DividendService {
                 // 3. DTO 변환
                 return dividends.stream()
                                 .map(entity -> StockDividendInfoDto.builder()
+                                                .id(entity.getId())
                                                 .stockCode(entity.getStock().getStockCode())
                                                 .stockName(entity.getStock().getStockName())
                                                 .recordDate(entity.getRecordDate())
@@ -583,6 +585,7 @@ public class DividendService {
                                                         .multiply(new BigDecimal(quantity));
 
                                         return StockDividendInfoDto.builder()
+                                                        .id(entity.getId())
                                                         .stockCode(entity.getStock().getStockCode())
                                                         .stockName(entity.getStock().getStockName())
                                                         .recordDate(entity.getRecordDate())

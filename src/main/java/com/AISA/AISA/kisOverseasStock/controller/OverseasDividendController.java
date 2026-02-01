@@ -74,4 +74,14 @@ public class OverseasDividendController {
         overseasDividendService.calculateMissingRates();
         return ResponseEntity.ok(new SuccessResponse<>(true, "Overseas dividend rates calculation triggered", null));
     }
+
+    @DeleteMapping("/range")
+    @Operation(summary = "해외 주식 배당 데이터 범위 삭제", description = "지정된 ID 범위의 배당 데이터를 삭제합니다. (중복 데이터 정리용)")
+    public ResponseEntity<SuccessResponse<String>> deleteDividendsInRange(
+            @RequestParam Long startId,
+            @RequestParam Long endId) {
+        overseasDividendService.deleteDividendsInRange(startId, endId);
+        return ResponseEntity
+                .ok(new SuccessResponse<>(true, "Deleted dividends in range " + startId + " ~ " + endId, null));
+    }
 }

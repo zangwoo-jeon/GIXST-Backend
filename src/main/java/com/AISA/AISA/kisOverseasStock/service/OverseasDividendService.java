@@ -58,6 +58,7 @@ public class OverseasDividendService {
 
         return savedDividends.stream()
                 .map(entity -> StockDividendInfoDto.builder()
+                        .id(entity.getId())
                         .stockCode(entity.getStock().getStockCode())
                         .stockName(entity.getStock().getStockName())
                         .recordDate(entity.getRecordDate())
@@ -66,6 +67,12 @@ public class OverseasDividendService {
                         .dividendRate(entity.getDividendRate())
                         .build())
                 .collect(Collectors.toList());
+    }
+
+    @Transactional
+    public void deleteDividendsInRange(Long startId, Long endId) {
+        log.info("Deleting dividends in range ID: {} ~ {}", startId, endId);
+        stockDividendRepository.deleteByIdBetween(startId, endId);
     }
 
     public void refreshAllOverseasDividends() {
@@ -344,7 +351,7 @@ public class OverseasDividendService {
         sb.append("Stock list:\n");
         for (Stock stock : stocks) {
             sb.append(
-                    String.format("- %s (%s)\n", stock.getStockName(), StockCodeUtils.toKisCode(stock.getStockCode())));
+                    String.format("- %s (%s)\n", stock.getStockName(), stock.getStockCode()));
         }
         sb.append("\nExample format: {\"AAPL\": [{\"recordDate\": \"20240209\", ...}], \"MSFT\": [...]} \n");
         sb.append(

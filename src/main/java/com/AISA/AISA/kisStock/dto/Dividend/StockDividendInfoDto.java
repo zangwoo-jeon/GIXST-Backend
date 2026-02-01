@@ -9,6 +9,7 @@ import java.math.BigDecimal;
 @AllArgsConstructor
 @NoArgsConstructor
 public class StockDividendInfoDto {
+    private Long id;
     private String stockCode;
     private String stockName;
     private String recordDate;

@@ -109,10 +109,20 @@ def fetch_dividend_and_capital_change(stock_code):
     
     for i, y in enumerate(raw_years):
         if "지난" not in y and "TTM" not in y:
-            # 연도만 추출 (e.g., "2023" or "2023/12") -> 보통 YYYY
-            # 한경은 "2023" 형태로 나옴
-            valid_indexes.append(i)
-            years.append(y.split("/")[0]) # "2024/09" -> "2024"
+            # 날짜 파싱 로직 개선
+            # y format examples: "2023", "2023/12", "2022-09-30"
+            clean_date = y.replace('/', '').replace('-', '').strip() # Remove delimiters
+            
+            # YYYYMM 형태로 변환
+            formatted_yymm = ""
+            if len(clean_date) >= 6:
+                formatted_yymm = clean_date[:6]
+            elif len(clean_date) == 4:
+                formatted_yymm = f"{clean_date}12" # 연도만 있으면 12월로 간주
+            
+            if formatted_yymm:
+                valid_indexes.append(i)
+                years.append(formatted_yymm)
 
     # 4️⃣ 배당금 지급 (Cash Dividends Paid)
     # tr class 이름이 div_cf 인지 확인 필요.
@@ -175,7 +185,7 @@ def fetch_dividend_and_capital_change(stock_code):
         dividend_paid_val = abs(div_values[i])
 
         result.append({
-            "stac_yymm": f"{year}12", # 연간 데이터로 가정 (보통 12월 결산) - 한경은 연도만 나오므로 12월로 고정
+            "stac_yymm": year, # 이미 YYYYMM 형식으로 변환됨
             "div_code": "0", # Annual
             "repurchase_of_capital_stock": repurchase_val,
             "cash_dividends_paid": dividend_paid_val

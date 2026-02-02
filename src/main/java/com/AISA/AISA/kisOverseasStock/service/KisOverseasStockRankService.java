@@ -1,18 +1,25 @@
 package com.AISA.AISA.kisOverseasStock.service;
 
+import com.AISA.AISA.global.util.OffsetBasedPageRequest;
 import com.AISA.AISA.kisOverseasStock.dto.FinancialRatioRankDto;
+import com.AISA.AISA.kisOverseasStock.dto.OverseasStockCashFlowDto;
 import com.AISA.AISA.kisOverseasStock.dto.OverseasStockRankDto;
+import com.AISA.AISA.kisOverseasStock.dto.ShareholderReturnRankDto;
 import com.AISA.AISA.kisOverseasStock.entity.OverseasStockDailyData;
 import com.AISA.AISA.kisOverseasStock.entity.OverseasStockDividendRank;
 import com.AISA.AISA.kisOverseasStock.entity.OverseasStockFinancialRatio;
+import com.AISA.AISA.kisOverseasStock.entity.OverseasStockShareholderReturnRank;
 import com.AISA.AISA.kisOverseasStock.repository.KisOverseasStockDailyDataRepository;
 import com.AISA.AISA.kisOverseasStock.repository.KisOverseasStockFinancialRatioRepository;
 import com.AISA.AISA.kisOverseasStock.repository.KisOverseasStockRepository;
 import com.AISA.AISA.kisOverseasStock.repository.OverseasStockDividendRankRepository;
+import com.AISA.AISA.kisOverseasStock.repository.OverseasStockShareholderReturnRankRepository;
 import com.AISA.AISA.kisStock.Entity.stock.Stock;
 import com.AISA.AISA.kisStock.Entity.stock.StockDividend;
 import com.AISA.AISA.kisStock.Entity.stock.StockMarketCap;
 import com.AISA.AISA.kisStock.dto.DividendRank.DividendRankDto;
+import com.AISA.AISA.kisStock.dto.StockPrice.StockPriceDto;
+import com.AISA.AISA.kisStock.enums.MarketType;
 import com.AISA.AISA.kisStock.repository.StockDividendRepository;
 import com.AISA.AISA.kisStock.repository.StockMarketCapRepository;
 import lombok.RequiredArgsConstructor;
@@ -24,6 +31,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
@@ -41,6 +49,8 @@ public class KisOverseasStockRankService {
     private final KisOverseasStockRepository overseasStockRepository;
     private final KisOverseasStockDailyDataRepository dailyDataRepository;
     private final KisOverseasStockFinancialRatioRepository financialRatioRepository;
+    private final OverseasStockShareholderReturnRankRepository overseasStockShareholderReturnRankRepository;
+    private final KisOverseasStockInformationService kisOverseasStockInformationService;
     private final KisOverseasStockService kisOverseasStockService;
 
     /**
@@ -88,8 +98,8 @@ public class KisOverseasStockRankService {
 
         DateTimeFormatter RECORD_DATE_FORMATTER = DateTimeFormatter
                 .ofPattern("yyyyMMdd");
-        String endDate = java.time.LocalDate.now().format(RECORD_DATE_FORMATTER);
-        String startDate = java.time.LocalDate.now().minusYears(1).format(RECORD_DATE_FORMATTER);
+        String endDate = LocalDate.now().format(RECORD_DATE_FORMATTER);
+        String startDate = LocalDate.now().minusYears(1).format(RECORD_DATE_FORMATTER);
 
         for (Stock stock : usStocks) {
             try {
@@ -187,14 +197,14 @@ public class KisOverseasStockRankService {
         long offset = start - 1;
 
         // Ranking by marketCap (KRW converted value stored in DB)
-        Pageable pageable = new com.AISA.AISA.global.util.OffsetBasedPageRequest(offset, limit);
+        Pageable pageable = new OffsetBasedPageRequest(offset, limit);
         List<StockMarketCap> marketCaps;
 
         // 거래소 필터링 (ALL인 경우 전체, 아니면 특정 거래소)
         if (exchangeCode != null && !exchangeCode.isEmpty() && !"ALL".equals(exchangeCode)) {
-            com.AISA.AISA.kisStock.enums.MarketType targetMarket = null;
+            MarketType targetMarket = null;
             try {
-                targetMarket = com.AISA.AISA.kisStock.enums.MarketType.valueOf(exchangeCode.toUpperCase());
+                targetMarket = MarketType.valueOf(exchangeCode.toUpperCase());
             } catch (IllegalArgumentException e) {
                 log.warn("Invalid exchange code requested: {}", exchangeCode);
             }
@@ -223,7 +233,7 @@ public class KisOverseasStockRankService {
 
             // Always fetch real-time price data from KIS API
             try {
-                com.AISA.AISA.kisStock.dto.StockPrice.StockPriceDto priceDto = kisOverseasStockService
+                StockPriceDto priceDto = kisOverseasStockService
                         .getOverseasStockPrice(stock.getStockCode());
                 if (priceDto != null) {
                     currentPrice = priceDto.getStockPrice();
@@ -359,5 +369,140 @@ public class KisOverseasStockRankService {
                 .totalPages(totalPages)
                 .currentPage(page)
                 .build();
+    }
+
+    /**
+     * 해외 주식 주주환원 순위 조회
+     */
+    public ShareholderReturnRankDto getShareholderReturnRank(int start, int end) {
+        if (start < 1)
+            start = 1;
+        if (end < start)
+            end = start;
+
+        int limit = end - start + 1;
+        long offset = start - 1;
+
+        Pageable pageable = new OffsetBasedPageRequest(offset, limit);
+        List<OverseasStockShareholderReturnRank> rankList = overseasStockShareholderReturnRankRepository
+                .findAllByOrderByRankAsc(pageable);
+
+        List<ShareholderReturnRankDto.RankItem> entries = rankList.stream()
+                .map(entity -> {
+                    String currentPrice = "0";
+                    String marketCapStr = "N/A";
+
+                    Optional<StockMarketCap> smc = stockMarketCapRepository
+                            .findByStock_StockCode(entity.getStockCode());
+                    if (smc.isPresent()) {
+                        if (smc.get().getCurrentPrice() != null) {
+                            currentPrice = smc.get().getCurrentPrice();
+                        }
+                        if (smc.get().getMarketCap() != null) {
+                            // Convert KRW Market Cap back to USD (approximate or use original if available)
+                            // Here we use the display format or keep it simple
+                            marketCapStr = String.format("%.2f",
+                                    smc.get().getMarketCap().divide(new BigDecimal("1000000000"), 2,
+                                            RoundingMode.HALF_UP));
+                        }
+                    }
+
+                    return ShareholderReturnRankDto.RankItem.builder()
+                            .rank(entity.getRank())
+                            .stockCode(entity.getStockCode())
+                            .stockName(entity.getStockName())
+                            .returnAmount(entity.getReturnAmount() != null ? entity.getReturnAmount().toString() : "0")
+                            .returnRate(entity.getReturnRate())
+                            .currentPrice(currentPrice)
+                            .marketCap(marketCapStr)
+                            .build();
+                })
+                .collect(Collectors.toList());
+
+        return ShareholderReturnRankDto.builder()
+                .rankings(entries)
+                .build();
+    }
+
+    /**
+     * 해외 주식 주주환원 순위 데이터 갱신
+     */
+    @Transactional
+    public void refreshShareholderReturnRank() {
+        log.info("Starting overseas shareholder return rank refresh...");
+
+        List<Stock> usStocks = overseasStockRepository.findAllByStockType(Stock.StockType.US_STOCK);
+        List<OverseasStockShareholderReturnRank> newRankList = new ArrayList<>();
+
+        for (Stock stock : usStocks) {
+            try {
+                // Latest annual cash flow
+                List<OverseasStockCashFlowDto> cashFlows = kisOverseasStockInformationService
+                        .getShareholderReturnInfo(stock.getStockCode());
+
+                if (cashFlows.isEmpty())
+                    continue;
+
+                OverseasStockCashFlowDto latest = cashFlows.get(0);
+                BigDecimal dividends = latest.getCashDividendsPaid() != null ? latest.getCashDividendsPaid()
+                        : BigDecimal.ZERO;
+                BigDecimal buybacks = latest.getRepurchaseOfCapitalStock() != null
+                        ? latest.getRepurchaseOfCapitalStock()
+                        : BigDecimal.ZERO;
+                BigDecimal totalReturn = dividends.add(buybacks);
+
+                if (totalReturn.compareTo(BigDecimal.ZERO) <= 0)
+                    continue;
+
+                // Get Market Cap (USD) from DB
+                BigDecimal marketCapUsd = BigDecimal.ZERO;
+                Optional<StockMarketCap> smcOpt = stockMarketCapRepository.findByStock(stock);
+                if (smcOpt.isPresent() && smcOpt.get().getMarketCapUsd() != null) {
+                    marketCapUsd = smcOpt.get().getMarketCapUsd();
+                }
+
+                if (marketCapUsd.compareTo(BigDecimal.ZERO) <= 0)
+                    continue;
+
+                double yield = totalReturn.divide(marketCapUsd, 4, RoundingMode.HALF_UP)
+                        .multiply(new BigDecimal(100)).doubleValue();
+
+                newRankList.add(OverseasStockShareholderReturnRank.builder()
+                        .stockCode(stock.getStockCode())
+                        .stockName(stock.getStockName())
+                        .returnAmount(totalReturn.setScale(2, RoundingMode.HALF_UP))
+                        .returnRate(String.format("%.2f", yield))
+                        .rank(0)
+                        .build());
+
+            } catch (Exception e) {
+                log.warn("Failed to calculate shareholder return rank for {}: {}", stock.getStockCode(),
+                        e.getMessage());
+            }
+        }
+
+        // Sort by yield desc
+        newRankList.sort((r1, r2) -> {
+            Double d1 = Double.parseDouble(r1.getReturnRate());
+            Double d2 = Double.parseDouble(r2.getReturnRate());
+            return d2.compareTo(d1);
+        });
+
+        // Assign ranks and save
+        overseasStockShareholderReturnRankRepository.deleteAll();
+        List<OverseasStockShareholderReturnRank> finalRanks = new ArrayList<>();
+        for (int i = 0; i < newRankList.size(); i++) {
+            OverseasStockShareholderReturnRank r = newRankList.get(i);
+            finalRanks.add(OverseasStockShareholderReturnRank.builder()
+                    .stockCode(r.getStockCode())
+                    .stockName(r.getStockName())
+                    .returnAmount(r.getReturnAmount())
+                    .returnRate(r.getReturnRate())
+                    .rank(i + 1)
+                    .build());
+        }
+        overseasStockShareholderReturnRankRepository.saveAll(finalRanks);
+
+        log.info("Completed overseas shareholder return rank refresh with {} items", newRankList.size());
     }
 }

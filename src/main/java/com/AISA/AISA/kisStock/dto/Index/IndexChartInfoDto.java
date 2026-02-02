@@ -5,7 +5,6 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-
 @Data
 @Builder
 @NoArgsConstructor
@@ -15,4 +14,5 @@ public class IndexChartInfoDto {
     private String currentIndices;
     private String priceChange;
     private String changeRate;
+    private String grade;
 }

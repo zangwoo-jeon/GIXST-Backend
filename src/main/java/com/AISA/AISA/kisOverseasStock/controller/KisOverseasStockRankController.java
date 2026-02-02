@@ -21,10 +21,13 @@ public class KisOverseasStockRankController {
     @GetMapping("/market-cap")
     @Operation(summary = "해외 주식 시가총액 순위 조회", description = "미국 시장(나스닥, 뉴욕, 아멕스)의 시가총액 순위를 조회합니다.")
     public ResponseEntity<SuccessResponse<OverseasStockRankDto>> getMarketCapRanking(
-            @Parameter(description = "거래소 코드 (NAS: 나스닥, NYS: 뉴욕, AMS: 아멕스)", example = "NAS") @RequestParam(defaultValue = "NAS") String exchangeCode) {
+            @Parameter(description = "거래소 코드 (NAS: 나스닥, NYS: 뉴욕, AMS: 아멕스, ALL: 전체)", example = "ALL") @RequestParam(defaultValue = "ALL") String exchangeCode,
+            @Parameter(description = "시작 순위", example = "1") @RequestParam(defaultValue = "1") int start,
+            @Parameter(description = "종료 순위", example = "20") @RequestParam(defaultValue = "20") int end) {
 
-        OverseasStockRankDto result = rankService.getMarketCapRanking(exchangeCode);
-        return ResponseEntity.ok(new SuccessResponse<>(true, "해외 주식 시가총액 순위 조회 성공", result));
+        OverseasStockRankDto result = rankService.getMarketCapRanking(exchangeCode, start, end);
+        return ResponseEntity
+                .ok(new SuccessResponse<>(true, "해외 주식 시가총액 순위 조회 성공 (" + start + "~" + end + ")", result));
     }
 
     @GetMapping("/dividend")

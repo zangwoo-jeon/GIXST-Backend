@@ -41,6 +41,7 @@ public class KisOverseasStockRankService {
     private final KisOverseasStockRepository overseasStockRepository;
     private final KisOverseasStockDailyDataRepository dailyDataRepository;
     private final KisOverseasStockFinancialRatioRepository financialRatioRepository;
+    private final KisOverseasStockService kisOverseasStockService;
 
     /**
      * 해외 주식 배당 수익률 순위 조회
@@ -173,35 +174,73 @@ public class KisOverseasStockRankService {
      * DB에 저장된 해외 주식 시가총액 순위를 조회합니다.
      * 
      * @param exchangeCode 거래소 코드 (NAS: 나스닥, NYS: 뉴욕, AMS: 아멕스, ALL: 전체)
+     * @param start        시작 순위 (1부터 시작)
+     * @param end          종료 순위
      */
-    public OverseasStockRankDto getMarketCapRanking(String exchangeCode) {
+    public OverseasStockRankDto getMarketCapRanking(String exchangeCode, int start, int end) {
+        if (start < 1)
+            start = 1;
+        if (end < start)
+            end = start;
+
+        int limit = end - start + 1;
+        long offset = start - 1;
+
         // Ranking by marketCap (KRW converted value stored in DB)
-        // Top 50 results
-        Pageable pageable = PageRequest.of(0, 50);
-        List<StockMarketCap> marketCaps = stockMarketCapRepository
-                .findByStockStockTypeOrderByMarketCapDesc(Stock.StockType.US_STOCK, pageable);
+        Pageable pageable = new com.AISA.AISA.global.util.OffsetBasedPageRequest(offset, limit);
+        List<StockMarketCap> marketCaps;
+
+        // 거래소 필터링 (ALL인 경우 전체, 아니면 특정 거래소)
+        if (exchangeCode != null && !exchangeCode.isEmpty() && !"ALL".equals(exchangeCode)) {
+            com.AISA.AISA.kisStock.enums.MarketType targetMarket = null;
+            try {
+                targetMarket = com.AISA.AISA.kisStock.enums.MarketType.valueOf(exchangeCode.toUpperCase());
+            } catch (IllegalArgumentException e) {
+                log.warn("Invalid exchange code requested: {}", exchangeCode);
+            }
+
+            if (targetMarket != null) {
+                marketCaps = stockMarketCapRepository
+                        .findByStockStockTypeAndStockMarketNameOrderByMarketCapDesc(Stock.StockType.US_STOCK,
+                                targetMarket, pageable);
+            } else {
+                marketCaps = new ArrayList<>();
+            }
+        } else {
+            marketCaps = stockMarketCapRepository
+                    .findByStockStockTypeOrderByMarketCapDesc(Stock.StockType.US_STOCK, pageable);
+        }
 
         List<OverseasStockRankDto.RankItem> rankings = new ArrayList<>();
-        int rank = 1;
+        int rankSequence = start;
 
         for (StockMarketCap smc : marketCaps) {
             Stock stock = smc.getStock();
 
-            // 거래소 필터링 (ALL인 경우 전체)
-            if (exchangeCode != null && !exchangeCode.isEmpty() && !"ALL".equals(exchangeCode)) {
-                if (!stock.getMarketName().getExchangeCode().equals(exchangeCode)) {
-                    continue;
+            String currentPrice = smc.getCurrentPrice();
+            String priceChange = smc.getPriceChange();
+            String changeRate = smc.getChangeRate();
+
+            // Always fetch real-time price data from KIS API
+            try {
+                com.AISA.AISA.kisStock.dto.StockPrice.StockPriceDto priceDto = kisOverseasStockService
+                        .getOverseasStockPrice(stock.getStockCode());
+                if (priceDto != null) {
+                    currentPrice = priceDto.getStockPrice();
+                    priceChange = priceDto.getPriceChange();
+                    changeRate = priceDto.getChangeRate();
                 }
+            } catch (Exception e) {
+                log.warn("Failed to fetch real-time price for {}: {}", stock.getStockCode(), e.getMessage());
             }
 
             rankings.add(OverseasStockRankDto.RankItem.builder()
-                    .rank(rank++)
+                    .rank(rankSequence++)
                     .stockCode(stock.getStockCode())
                     .stockName(stock.getStockName())
-                    .price(smc.getCurrentPrice())
-                    .priceChange(smc.getPriceChange())
-                    .changeRate(smc.getChangeRate())
-                    .changeSign(smc.getChangeSign())
+                    .price(currentPrice)
+                    .priceChange(priceChange)
+                    .changeRate(changeRate)
                     .marketCap(smc.getMarketCapUsd() != null ? smc.getMarketCapUsd().toString() : "0")
                     .marketCapKrw(smc.getMarketCap() != null ? smc.getMarketCap().toString() : "0")
                     .listedShares(smc.getListedShares() != null ? smc.getListedShares().toString() : "0")

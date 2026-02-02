@@ -143,6 +143,36 @@ public class KisOverseasStockInformationService {
 
                 // DB에 저장 또는 업데이트
                 try {
+                        String price = output.getPrice();
+                        String priceChange = output.getPriceChange();
+                        String changeRate = output.getChangeRate();
+                        String changeSign = output.getChangeSign();
+
+                        // API에서 null이 오면 수동으로 계산 (전일 종가 기준)
+                        if (priceChange == null || changeRate == null) {
+                                try {
+                                        if (price != null && output.getPrevClose() != null) {
+                                                double current = Double.parseDouble(price);
+                                                double base = Double.parseDouble(output.getPrevClose());
+                                                double change = current - base;
+                                                double rate = (change / base) * 100.0;
+
+                                                if (priceChange == null) {
+                                                        priceChange = String.format("%.4f", change);
+                                                }
+                                                if (changeRate == null) {
+                                                        changeRate = String.format("%.2f", rate);
+                                                }
+                                                if (changeSign == null) {
+                                                        changeSign = change > 0 ? "2" : (change < 0 ? "5" : "3");
+                                                }
+                                        }
+                                } catch (NumberFormatException e) {
+                                        log.warn("Failed to calculate price change for {}: {}", stockCode,
+                                                        e.getMessage());
+                                }
+                        }
+
                         BigDecimal mktCapUsd = output.getMarketCap() != null ? new BigDecimal(output.getMarketCap())
                                         : null;
                         BigDecimal mktCapKrwVal = new BigDecimal(marketCapKrw);
@@ -157,13 +187,13 @@ public class KisOverseasStockInformationService {
                                 log.info("Creating new market cap entity for {}", stockCode);
                                 marketCapEntity = StockMarketCap
                                                 .createOverseas(stock, mktCapKrwVal, mktCapUsd, listedShares,
-                                                                output.getPrice(), output.getPriceChange(),
-                                                                output.getChangeRate(), output.getChangeSign());
+                                                                price, priceChange,
+                                                                changeRate, changeSign);
                         } else {
                                 log.info("Updating existing market cap entity for {}", stockCode);
                                 marketCapEntity.updateOverseasInfo(mktCapKrwVal, mktCapUsd, listedShares,
-                                                output.getPrice(), output.getPriceChange(), output.getChangeRate(),
-                                                output.getChangeSign());
+                                                price, priceChange, changeRate,
+                                                changeSign);
                         }
                         stockMarketCapRepository.save(marketCapEntity);
                         log.info("Successfully persisted market cap for {}", stockCode);

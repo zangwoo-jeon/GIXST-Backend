@@ -55,4 +55,21 @@ public class KisOverseasStockRankController {
         return ResponseEntity.ok(new SuccessResponse<>(true, "해외 주식 재무 비율 순위 조회 성공",
                 rankService.getFinancialRatioRanking(sortType, direction, page, size)));
     }
+
+    @GetMapping("/shareholder-return")
+    @Operation(summary = "해외 주식 주주환원 순위 조회", description = "주주환원율(배당 + 자사주 매입)이 높은 순서대로 해외 주식을 조회합니다.")
+    public ResponseEntity<SuccessResponse<com.AISA.AISA.kisOverseasStock.dto.ShareholderReturnRankDto>> getShareholderReturnRank(
+            @Parameter(description = "시작 순위", example = "1") @RequestParam(defaultValue = "1") int start,
+            @Parameter(description = "종료 순위", example = "20") @RequestParam(defaultValue = "20") int end) {
+
+        return ResponseEntity.ok(new SuccessResponse<>(true, "해외 주식 주주환원 순위 조회 성공 (" + start + "~" + end + ")",
+                rankService.getShareholderReturnRank(start, end)));
+    }
+
+    @PostMapping("/shareholder-return/refresh")
+    @Operation(summary = "해외 주식 주주환원 순위 데이터 갱신", description = "DB에 저장된 캐시플로우 데이터를 기반으로 주주환원 순위를 재계산합니다.")
+    public ResponseEntity<SuccessResponse<Void>> refreshShareholderReturnRank() {
+        rankService.refreshShareholderReturnRank();
+        return ResponseEntity.ok(new SuccessResponse<>(true, "해외 주식 주주환원 순위 갱신 성공", null));
+    }
 }

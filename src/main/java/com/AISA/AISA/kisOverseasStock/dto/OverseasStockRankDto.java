@@ -19,7 +19,6 @@ public class OverseasStockRankDto {
         private String price;
         private String priceChange;
         private String changeRate;
-        private String changeSign;
         private String marketCap; // USD (Millions)
         private String marketCapKrw; // KRW
         private String listedShares; // Listed shares

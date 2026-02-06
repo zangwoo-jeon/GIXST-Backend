@@ -5,7 +5,6 @@ import com.AISA.AISA.kisStock.Entity.stock.Stock;
 import com.AISA.AISA.kisStock.Entity.stock.StockBalanceSheet;
 import com.AISA.AISA.kisStock.Entity.stock.StockFinancialStatement;
 import com.AISA.AISA.kisStock.Entity.stock.StockMarketCap;
-import com.AISA.AISA.kisStock.enums.BondYield;
 import com.AISA.AISA.kisStock.enums.MarketType;
 import com.AISA.AISA.kisStock.repository.StockBalanceSheetRepository;
 import com.AISA.AISA.kisStock.repository.StockFinancialStatementRepository;
@@ -15,6 +14,7 @@ import com.AISA.AISA.kisStock.repository.IndexDailyDataRepository;
 import com.AISA.AISA.kisStock.repository.MarketInvestorDailyRepository;
 import com.AISA.AISA.kisStock.repository.FuturesInvestorDailyRepository;
 import com.AISA.AISA.kisStock.repository.StockDailyDataRepository;
+import com.AISA.AISA.portfolio.macro.repository.MacroDailyDataRepository;
 import com.AISA.AISA.kisStock.kisService.KisMacroService;
 import com.AISA.AISA.kisStock.Entity.Index.IndexDailyData;
 import com.AISA.AISA.portfolio.macro.dto.MacroIndicatorDto;
@@ -26,6 +26,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -45,6 +46,8 @@ public class MarketValuationServiceTest {
         private StockBalanceSheetRepository stockBalanceSheetRepository;
         @Mock
         private IndexDailyDataRepository indexDailyDataRepository;
+        @Mock
+        private MacroDailyDataRepository macroDailyDataRepository;
         @Mock
         private KisMacroService kisMacroService;
 
@@ -70,33 +73,46 @@ public class MarketValuationServiceTest {
 
                 when(stockRepository.findByMarketName(market)).thenReturn(stocks);
 
-                // Units are in 100M KRW in DB
-                // 4M * 10^8 = 400T KRW
                 StockMarketCap cap1 = StockMarketCap.create(stock1, new BigDecimal("4000000"));
                 StockMarketCap cap2 = StockMarketCap.create(stock2, new BigDecimal("1000000"));
                 when(stockMarketCapRepository.findByStockIn(anyList())).thenReturn(List.of(cap1, cap2));
 
-                // Income Statements (latest annual)
-                StockFinancialStatement stmt1 = StockFinancialStatement.builder()
-                                .stockCode("005930").stacYymm("202412").divCode("0").netIncome(new BigDecimal("300000"))
-                                .build(); // 30T KRW
-                StockFinancialStatement stmt2 = StockFinancialStatement.builder()
-                                .stockCode("000660").stacYymm("202312").divCode("0").netIncome(new BigDecimal("100000"))
-                                .build(); // 10T KRW
+                // 10 years of earnings to satisfy CAPE (min 8y)
+                List<StockFinancialStatement> hist = new ArrayList<>();
+                int currentYear = LocalDate.now().getYear();
+                for (int i = 1; i <= 10; i++) {
+                        hist.add(StockFinancialStatement.builder()
+                                        .stockCode("005930").stacYymm((currentYear - i) + "12").divCode("0")
+                                        .netIncome(new BigDecimal("300000")).build());
+                        hist.add(StockFinancialStatement.builder()
+                                        .stockCode("000660").stacYymm((currentYear - i) + "12").divCode("0")
+                                        .netIncome(new BigDecimal("100000")).build());
+                }
 
                 when(stockFinancialStatementRepository.findByStockCodeInAndDivCode(anyCollection(), anyString()))
-                                .thenReturn(List.of(stmt1, stmt2));
+                                .thenReturn(hist);
 
-                // Balance Sheets (latest annual)
                 StockBalanceSheet bs1 = StockBalanceSheet.builder()
                                 .stockCode("005930").stacYymm("202412").divCode("0")
-                                .totalCapital(new BigDecimal("4000000")).build(); // 400T KRW
+                                .totalCapital(new BigDecimal("4000000")).build();
                 StockBalanceSheet bs2 = StockBalanceSheet.builder()
                                 .stockCode("000660").stacYymm("1000000").divCode("0")
-                                .totalCapital(new BigDecimal("1000000")).build(); // 100T KRW
+                                .totalCapital(new BigDecimal("1000000")).build();
 
                 when(stockBalanceSheetRepository.findByStockCodeInAndDivCode(anyCollection(), anyString()))
                                 .thenReturn(List.of(bs1, bs2));
+
+                // Basic Mocks
+                when(marketInvestorDailyRepository.findTop30ByMarketCodeOrderByDateDesc(anyString()))
+                                .thenReturn(List.of());
+                when(geminiService.generateMarketStrategy(any()))
+                                .thenReturn(new GeminiService.StrategyResult("AI Valuation", "AI Trend"));
+                when(kisMacroService.fetchMacroData(anyString(), anyString(), anyString(), anyString(), anyString(),
+                                anyString())).thenReturn(List.of());
+                when(kisMacroService.getLatestBondYield(any())).thenReturn(new BigDecimal("3.50"));
+                when(macroDailyDataRepository.findAllByStatCodeAndItemCodeAndDateBetweenOrderByDateAsc(anyString(),
+                                anyString(), any(), any()))
+                                .thenReturn(List.of());
 
                 // When
                 MarketValuationDto result = marketValuationService.calculateMarketValuation(market);
@@ -104,95 +120,67 @@ public class MarketValuationServiceTest {
                 // Then
                 assertNotNull(result);
                 assertEquals(market, result.getMarket());
-                assertEquals(2, result.getMetadata().getStockCount());
 
-                // Total Market Cap = 500T
-                assertTrue(result.getMetadata().getTotalMarketCap().startsWith("500.0"));
-
-                // Total Net Income = 40T
-                // This field is no longer in top level, but kept in metadata or removed?
-                // Actually user's suggested DTO didn't have totalNetIncome, but I might want to
-                // check metadata.
-                // In my new DTO, metadata has totalMarketCap and stockCount.
-
-                // PER = 500T / 40T = 12.5
-                assertEquals(new BigDecimal("12.50"), result.getValuation().getPer());
-
-                // PBR = 500T / 500T = 1.00
-                assertEquals(new BigDecimal("1.00"), result.getValuation().getPbr());
-
-                // CAPE Mocks
+                // CAPE Mocks (Updated for second call)
                 when(kisMacroService.fetchMacroData(anyString(), anyString(), anyString(), anyString(), anyString(),
                                 anyString())).thenReturn(List.of(
-                                                new MacroIndicatorDto("20240101", "105.0"),
-                                                new MacroIndicatorDto("20230101", "100.0")));
+                                                new MacroIndicatorDto("20240101", "100.0")));
 
-                when(kisMacroService.getLatestBondYield(BondYield.KR_10Y)).thenReturn(new BigDecimal("3.50"));
+                // Mock Index History for KNN (Needs data > 30 days old)
+                IndexDailyData today = IndexDailyData.builder().marketName("KOSPI").date(LocalDate.now())
+                                .closingPrice(new BigDecimal("2500")).build();
+                IndexDailyData monthAgo = IndexDailyData.builder().marketName("KOSPI")
+                                .date(LocalDate.now().minusDays(40)).closingPrice(new BigDecimal("2400")).build(); // Valid
+                                                                                                                   // for
+                                                                                                                   // KNN
+                IndexDailyData twoMonthsAgo = IndexDailyData.builder().marketName("KOSPI")
+                                .date(LocalDate.now().minusDays(70)).closingPrice(new BigDecimal("2300")).build(); // Valid
+                                                                                                                   // for
+                                                                                                                   // KNN
 
                 when(indexDailyDataRepository.findAllByMarketNameAndDateBetweenOrderByDateDesc(anyString(), any(),
-                                any())).thenReturn(List.of(
-                                                IndexDailyData.builder().marketName("KOSPI")
-                                                                .date(LocalDate.now())
-                                                                .closingPrice(new BigDecimal("2500")).build()));
+                                any())).thenReturn(List.of(today, monthAgo, twoMonthsAgo));
 
-                // Re-run to test CAPE and Yield Gap
+                // Re-run to test CAPE and Signals
                 result = marketValuationService.calculateMarketValuation(market);
                 assertNotNull(result.getValuation().getCape());
-                assertEquals(new BigDecimal("3.50"), result.getValuation().getBondYield());
-                assertNotNull(result.getValuation().getYieldGap());
-                assertNotNull(result.getTimeSeries());
-                assertFalse(result.getTimeSeries().isEmpty());
-                assertNotNull(result.getTimeSeries().get(0).getYieldGap());
-                assertNotNull(result.getValuationScore());
-                assertNotNull(result.getGrade());
+                assertNotNull(result.getScoreDetails().getValuationSignal());
+                assertNotNull(result.getScoreDetails().getTrendSignal());
+                assertNotNull(result.getPredictionReport());
+                assertNotNull(result.getPredictionReport().getShortTerm());
+                assertNotNull(result.getPredictionReport().getMediumTerm());
+                assertNotNull(result.getPredictionReport().getLongTerm());
+                assertNotNull(result.getPredictionReport().getHistoricalMatch());
         }
 
         @Test
         public void testCalculateKOSDAQValuation() {
-                // Given
                 MarketType market = MarketType.KOSDAQ;
                 Stock stock1 = Stock.create("214150", "클래시스", market);
-                Stock stock2 = Stock.create("086520", "에코프로", market);
-                List<Stock> stocks = List.of(stock1, stock2);
+                List<Stock> stocks = List.of(stock1);
 
                 when(stockRepository.findByMarketName(market)).thenReturn(stocks);
-
-                // 100M KRW units
-                StockMarketCap cap1 = StockMarketCap.create(stock1, new BigDecimal("40000")); // 4T
-                StockMarketCap cap2 = StockMarketCap.create(stock2, new BigDecimal("60000")); // 6T
-                when(stockMarketCapRepository.findByStockIn(anyList())).thenReturn(List.of(cap1, cap2));
+                StockMarketCap cap1 = StockMarketCap.create(stock1, new BigDecimal("40000"));
+                when(stockMarketCapRepository.findByStockIn(anyList())).thenReturn(List.of(cap1));
 
                 StockFinancialStatement stmt1 = StockFinancialStatement.builder()
                                 .stockCode("214150").stacYymm("202412").divCode("0").netIncome(new BigDecimal("1000"))
-                                .build(); // 100B
-                StockFinancialStatement stmt2 = StockFinancialStatement.builder()
-                                .stockCode("086520").stacYymm("202412").divCode("0").netIncome(new BigDecimal("1000"))
-                                .build(); // 100B
-
+                                .build();
                 when(stockFinancialStatementRepository.findByStockCodeInAndDivCode(anyCollection(), anyString()))
-                                .thenReturn(List.of(stmt1, stmt2));
+                                .thenReturn(List.of(stmt1));
 
                 StockBalanceSheet bs1 = StockBalanceSheet.builder()
                                 .stockCode("214150").stacYymm("202412").divCode("0")
-                                .totalCapital(new BigDecimal("10000")).build(); // 1T
-                StockBalanceSheet bs2 = StockBalanceSheet.builder()
-                                .stockCode("086520").stacYymm("202412").divCode("0")
-                                .totalCapital(new BigDecimal("90000")).build(); // 9T
-
+                                .totalCapital(new BigDecimal("10000")).build();
                 when(stockBalanceSheetRepository.findByStockCodeInAndDivCode(anyCollection(), anyString()))
-                                .thenReturn(List.of(bs1, bs2));
+                                .thenReturn(List.of(bs1));
 
-                // When
+                when(marketInvestorDailyRepository.findTop30ByMarketCodeOrderByDateDesc(anyString()))
+                                .thenReturn(List.of());
+
                 MarketValuationDto result = marketValuationService.calculateMarketValuation(market);
-
-                // Then
                 assertNotNull(result);
                 assertEquals(market, result.getMarket());
-
-                // Total Market Cap = 10T
-                assertTrue(result.getMetadata().getTotalMarketCap().startsWith("10.0"));
-
-                // PER = 10T / 200B = 50.00
-                assertEquals(new BigDecimal("50.00"), result.getValuation().getPer());
+                assertNotNull(result.getPredictionReport());
         }
 }

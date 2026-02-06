@@ -10,7 +10,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -68,7 +67,6 @@ public class GeminiService {
     }
 
     public String generateAdvice(String context) {
-        // ... (existing generateAdvice code remains same)
         try {
             return generateResponseWithRetry(context);
         } catch (Exception e) {
@@ -78,7 +76,6 @@ public class GeminiService {
     }
 
     private String generateResponseWithRetry(String context) throws Exception {
-        // ... (existing generateResponseWithRetry code remains same)
         List<String> keys = geminiProperties.getApiKeys();
         if (keys == null || keys.isEmpty()) {
             if (geminiProperties.getApiKey() == null) {
@@ -110,28 +107,23 @@ public class GeminiService {
     }
 
     private String callGeminiApi(String context, String apiKey) {
-        // ... (existing callGeminiApi code remains same)
         WebClient webClient = WebClient.create();
-
-        Map<String, Object> requestBody = Map.of(
-                "contents", Collections.singletonList(
-                        Map.of("parts", Collections.singletonList(
-                                Map.of("text", context)))),
-                "generationConfig", Map.of(
-                        "temperature", 0.7,
-                        "maxOutputTokens", 800)); // Increased for dual response
 
         return webClient.post()
                 .uri(geminiProperties.getUrl() + "?key={key}", apiKey)
                 .contentType(MediaType.APPLICATION_JSON)
-                .bodyValue(requestBody)
+                .bodyValue(Map.<String, Object>of(
+                        "contents", List.of(Map.of(
+                                "parts", List.of(Map.of("text", context)))),
+                        "generationConfig", Map.of(
+                                "temperature", 0.7,
+                                "maxOutputTokens", 800))) // Increased for dual response
                 .retrieve()
                 .bodyToMono(String.class)
                 .block();
     }
 
     private String parseGeminiResponse(String jsonResponse) {
-        // ... (existing parseGeminiResponse code remains same)
         try {
             JsonNode root = objectMapper.readTree(jsonResponse);
             JsonNode candidates = root.path("candidates");
@@ -166,24 +158,31 @@ public class GeminiService {
         sb.append("- Trend Score: ").append(dto.getTrendScore()).append("/100 (Description: ")
                 .append(dto.getTrendDescription()).append(")\n");
 
-        sb.append("- CAPE: ").append(dto.getValuation().getCape()).append(" (Range: ")
-                .append(dto.getScoreDetails().getCapeRangePosition()).append("%)\n");
-        sb.append("- Yield Gap: ").append(dto.getValuation().getYieldGap()).append("% (Inversion: ")
-                .append(dto.getScoreDetails().getYieldGapInversion()).append(")\n");
-        sb.append("- Sentiment: ").append(dto.getScoreDetails().getSentimentSignal()).append("\n");
+        if (dto.getValuation() != null) {
+            sb.append("- CAPE: ").append(dto.getValuation().getCape()).append(" (Range: ")
+                    .append(dto.getScoreDetails().getCapeRangePosition()).append("%)\n");
+            sb.append("- Yield Gap: ").append(dto.getValuation().getYieldGap()).append("% (Inversion: ")
+                    .append(dto.getScoreDetails().getYieldGapInversion()).append(")\n");
+        }
+        sb.append("- Valuation Signal: ").append(dto.getScoreDetails().getValuationSignal()).append("\n");
+        sb.append("- Trend Signal: ").append(dto.getScoreDetails().getTrendSignal()).append("\n");
 
-        sb.append("- Common Stock Breadth: Rising=").append(dto.getInvestorTrend().getCommonRisingStockCount())
-                .append(", Falling=").append(dto.getInvestorTrend().getCommonFallingStockCount())
-                .append(" (Index: ").append(dto.getInvestorTrend().getCommonMarketBreadthIndex()).append(")\n");
-        sb.append("- Breadth Avg (5d/20d): ").append(dto.getInvestorTrend().getBreadth5dAvg()).append(" / ")
-                .append(dto.getInvestorTrend().getBreadth20dAvg()).append("\n");
+        if (dto.getInvestorTrend() != null) {
+            sb.append("- Common Stock Breadth: Rising=").append(dto.getInvestorTrend().getCommonRisingStockCount())
+                    .append(", Falling=").append(dto.getInvestorTrend().getCommonFallingStockCount())
+                    .append(" (Index: ").append(dto.getInvestorTrend().getCommonMarketBreadthIndex()).append(")\n");
+            sb.append("- Breadth Avg (5d/20d): ").append(dto.getInvestorTrend().getBreadth5dAvg()).append(" / ")
+                    .append(dto.getInvestorTrend().getBreadth20dAvg()).append("\n");
 
-        sb.append("- Investor Trend (Spot): Foreign=").append(dto.getInvestorTrend().getForeignTrend())
-                .append(", Individual=").append(dto.getInvestorTrend().getIndividualTrend()).append("\n");
-        sb.append("- Investor Trend (Futures): ForeignSum=").append(dto.getInvestorTrend().getFuturesForeignNet5d())
-                .append(", IndividualSum=").append(dto.getInvestorTrend().getFuturesIndividualNet5d()).append("\n");
-        if (dto.getInvestorTrend().getVkospi() != null) {
-            sb.append("- VKOSPI: ").append(dto.getInvestorTrend().getVkospi()).append("\n");
+            sb.append("- Investor Trend (Spot): Foreign=").append(dto.getInvestorTrend().getForeignTrend())
+                    .append(", Individual=").append(dto.getInvestorTrend().getIndividualTrend()).append("\n");
+            sb.append("- Investor Trend (Futures): ForeignSum=").append(dto.getInvestorTrend().getFuturesForeignNet5d())
+                    .append(", IndividualSum=").append(dto.getInvestorTrend().getFuturesIndividualNet5d()).append("\n");
+            if (dto.getInvestorTrend().getVkospi() != null) {
+                sb.append("- VKOSPI: ").append(dto.getInvestorTrend().getVkospi()).append("\n");
+            }
+        } else {
+            sb.append("- Investor Trend: Not available\n");
         }
 
         sb.append("\nOutput (Korean):");

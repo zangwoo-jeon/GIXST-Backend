@@ -31,6 +31,7 @@ public class MarketValuationDto {
     private InvestorTrendInfo investorTrend;
     private MetadataInfo metadata;
     private List<TimeSeriesPoint> timeSeries;
+    private PredictionReport predictionReport;
 
     @Getter
     @Builder
@@ -55,7 +56,8 @@ public class MarketValuationDto {
         private BigDecimal deviationScore; // 20 max
         private Boolean yieldGapInversion; // Flag for negative yield gap
         private Boolean dataDistortionWarning; // Flag for structural change
-        private SentimentSignal sentimentSignal;
+        private ValuationSignal valuationSignal;
+        private TrendSignal trendSignal;
     }
 
     @Getter
@@ -97,12 +99,20 @@ public class MarketValuationDto {
         NEUTRAL
     }
 
-    public enum SentimentSignal {
-        INDIVIDUAL_FOMO,
-        SMART_MONEY_INFLOW,
-        HEALTHY_BULL,
-        SHORT_COVERING_SUSPECTED,
-        STAGNANT,
+    public enum ValuationSignal {
+        UNDERVALUED_BUY, // Low Score + Buying
+        OVERVALUED_CAUTION, // High Score + Major Exit
+        VALUE_TRAP, // Low Score but persistent selling
+        FAIR_VALUE, // Near median
+        NEUTRAL
+    }
+
+    public enum TrendSignal {
+        HEALTHY_BULL, // Price up + Breadth up + Foreigner buying
+        BULL_TRAP, // Price up but Breadth/Volume diverging
+        OVERSOLD_REBOUND, // Extreme low breadth + turning up
+        PANIC_SELLING, // Sharp breadth drop + major exit
+        STAGNANT, // Low volatility/sideways
         NEUTRAL
     }
 
@@ -142,5 +152,38 @@ public class MarketValuationDto {
         private BigDecimal lowerBound;
         @JsonIgnore
         private BigDecimal upperBound;
+    }
+
+    @Getter
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class PredictionReport {
+        private ProbabilityInfo shortTerm; // 1 week
+        private ProbabilityInfo mediumTerm; // 1 month
+        private ProbabilityInfo longTerm; // 3 months
+        private HistoricalMatch historicalMatch;
+    }
+
+    @Getter
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class ProbabilityInfo {
+        private double upProbability;
+        private double downProbability;
+        private String primaryReason;
+    }
+
+    @Getter
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class HistoricalMatch {
+        private int totalMatches; // Total similar periods found
+        private int positiveOutcomes; // Count of positive returns after period
+        private int negativeOutcomes; // Count of negative returns
+        private double winRate; // % of positive outcomes
+        private double averageReturn; // Avg return after period
     }
 }

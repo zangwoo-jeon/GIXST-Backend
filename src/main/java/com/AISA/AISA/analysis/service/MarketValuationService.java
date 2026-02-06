@@ -49,6 +49,23 @@ public class MarketValuationService {
     private final StockDailyDataRepository stockDailyDataRepository;
     private final GeminiService geminiService;
 
+    // Inner record for KNN calculation
+    private static class KnnCandidate {
+        String date;
+        double distance;
+        double forwardReturn;
+        double weight;
+
+        KnnCandidate(String date, double distance, double forwardReturn) {
+            this.date = date;
+            this.distance = distance;
+            this.forwardReturn = forwardReturn;
+            // Adaptive Weight: closer distance -> higher weight
+            // standard epsilon for numerical stability
+            this.weight = 1.0 / (distance + 1e-4);
+        }
+    }
+
     private static final String STAT_CODE_CPI = "901Y001";
     private static final String ITEM_CODE_CPI = "0";
     private static final String STAT_CODE_BOND_YIELD = "KIS_BOND_YIELD";
@@ -214,15 +231,18 @@ public class MarketValuationService {
             valuationScore = valuationScore.min(new BigDecimal("100.0")).setScale(1, RoundingMode.HALF_UP);
 
             InvestorTrendInfo trend = calculateInvestorTrend(market);
-            SentimentSignal sentiment = (trend != null) ? determineHysteresisSentiment(market, valuationScore, trend)
-                    : SentimentSignal.NEUTRAL;
-
-            scoreDetails = scoreDetails.toBuilder()
-                    .sentimentSignal(sentiment)
-                    .build();
-
             TrendScoreResult trendResult = (trend != null) ? calculateTrendScore(market, trend)
                     : new TrendScoreResult(BigDecimal.ZERO, "수급 분석 불가");
+
+            ValuationSignal vSignal = (trend != null) ? determineValuationSignal(valuationScore, trend)
+                    : ValuationSignal.NEUTRAL;
+            TrendSignal tSignal = (trend != null) ? determineTrendSignal(trendResult.score, trend)
+                    : TrendSignal.NEUTRAL;
+
+            scoreDetails = scoreDetails.toBuilder()
+                    .valuationSignal(vSignal)
+                    .trendSignal(tSignal)
+                    .build();
 
             BigDecimal coverage = rawTotalMarketCapUnits.compareTo(BigDecimal.ZERO) > 0
                     ? marketCaps.stream().filter(mc -> stocksWithHistory.contains(mc.getStock().getStockCode()))
@@ -241,8 +261,11 @@ public class MarketValuationService {
                             .per(per).pbr(pbr).cape(currentCape).yieldGap(yieldGap).bondYield(bondYield).build())
                     .scoreDetails(scoreDetails)
                     .investorTrend(trend)
+                    .predictionReport(
+                            calculateTrendProbability(currentCape, yieldGap, valuationScore, trendResult.score,
+                                    trend, timeSeries, market))
                     .metadata(MarketValuationDto.MetadataInfo.builder()
-                            .stockCount(validStockCodes.size())
+                            .stockCount(marketCaps.size())
                             .totalMarketCap(formatLargeNumber(totalMarketCapValue))
                             .dataCoverage(coverage)
                             .updatedAt(java.time.OffsetDateTime.now().toString())
@@ -256,11 +279,13 @@ public class MarketValuationService {
             // 9. AI Strategy (Split)
             GeminiService.StrategyResult aiRes = geminiService.generateMarketStrategy(dto);
             String fallbackV = determineStrategy(valuationScore)
-                    + (sentiment != SentimentSignal.NEUTRAL ? " " + getSentimentContext(sentiment, trend) : "");
+                    + " " + getValuationSentimentContext(vSignal)
+                    + " " + getTrendSentimentContext(tSignal);
 
             return dto.toBuilder()
-                    .valuationStrategy(aiRes.valuationStrategy() != null ? aiRes.valuationStrategy() : fallbackV)
-                    .trendStrategy(aiRes.trendStrategy())
+                    .valuationStrategy(
+                            aiRes != null && aiRes.valuationStrategy() != null ? aiRes.valuationStrategy() : fallbackV)
+                    .trendStrategy(aiRes != null ? aiRes.trendStrategy() : null)
                     .build();
 
         } catch (Exception e) {
@@ -280,6 +305,9 @@ public class MarketValuationService {
         try {
             List<MacroIndicatorDto> cpiList = kisMacroService.fetchMacroData(STAT_CODE_CPI, ITEM_CODE_CPI, "X", "CPI",
                     start.format(fmt), end.format(fmt));
+
+            if (cpiList == null)
+                return Collections.emptyMap();
 
             Map<Integer, List<BigDecimal>> annualValues = new HashMap<>();
             for (MacroIndicatorDto dto : cpiList) {
@@ -326,18 +354,23 @@ public class MarketValuationService {
 
         Map<String, IndexDailyData> monthlySamples = new TreeMap<>();
         for (IndexDailyData d : indexData) {
-            String key = d.getDate().format(monthFmt);
-            monthlySamples.putIfAbsent(key, d);
+            DateTimeFormatter yyyyMM = DateTimeFormatter.ofPattern("yyyy-MM");
+            String key = d.getDate().format(yyyyMM);
+            monthlySamples.putIfAbsent(key, d); // TreeMap ensures sorted by key (yyyy-MM)
         }
 
         for (Map.Entry<String, IndexDailyData> entry : monthlySamples.entrySet()) {
-            BigDecimal indexPrice = entry.getValue().getClosingPrice();
+            IndexDailyData d = entry.getValue();
+            String fullDate = d.getDate().toString(); // Use full date logic
+            String monthKey = entry.getKey();
+
+            BigDecimal indexPrice = d.getClosingPrice();
             BigDecimal historicalCape = indexPrice.multiply(currentCape).divide(currentIndexPrice, 2,
                     RoundingMode.HALF_UP);
             BigDecimal historicalYieldGap = null;
 
             if (historicalCape.compareTo(BigDecimal.ZERO) > 0) {
-                BigDecimal monthBondYield = monthlyBondYields.getOrDefault(entry.getKey(), currentBondYield);
+                BigDecimal monthBondYield = monthlyBondYields.getOrDefault(monthKey, currentBondYield);
                 if (monthBondYield != null) {
                     BigDecimal earningsYield = BigDecimal.ONE.divide(historicalCape, 4, RoundingMode.HALF_UP)
                             .multiply(new BigDecimal(100));
@@ -346,7 +379,7 @@ public class MarketValuationService {
             }
 
             points.add(MarketValuationDto.TimeSeriesPoint.builder()
-                    .date(entry.getKey())
+                    .date(fullDate)
                     .cape(historicalCape)
                     .yieldGap(historicalYieldGap)
                     .build());
@@ -447,19 +480,37 @@ public class MarketValuationService {
         return "과매도: 비중 확대 고려";
     }
 
-    private String getSentimentContext(SentimentSignal signal, InvestorTrendInfo trend) {
-        if (signal == SentimentSignal.NEUTRAL)
+    private String getValuationSentimentContext(ValuationSignal signal) {
+        if (signal == null || signal == ValuationSignal.NEUTRAL)
             return "";
-        String individualFlow = trend != null
-                ? formatLargeNumber(new BigDecimal(trend.getIndividualNet5d()).multiply(new BigDecimal("1000000")))
-                : "N/A";
         switch (signal) {
-            case INDIVIDUAL_FOMO:
-                return "개인 투자자의 추격 매수세(" + individualFlow + ")가 강해 변동성에 유의하십시오.";
-            case SMART_MONEY_INFLOW:
-                return "저평가 구간에서 기관/외국인의 선제적 자금 유입이 포착됩니다.";
+            case UNDERVALUED_BUY:
+                return "[저평가 매수] 스마트 머니 유입 신호";
+            case OVERVALUED_CAUTION:
+                return "[고평가 경계] 메이저 자금 이탈 관찰";
+            case VALUE_TRAP:
+                return "[가치 함정] 저평가에도 불구하고 수급 부재";
+            case FAIR_VALUE:
+                return "[적정 가치] 시장 균형 상태";
+            default:
+                return "";
+        }
+    }
+
+    private String getTrendSentimentContext(TrendSignal signal) {
+        if (signal == null || signal == TrendSignal.NEUTRAL)
+            return "";
+        switch (signal) {
             case HEALTHY_BULL:
-                return "실적 성장을 바탕으로 한 건강한 상승 추세가 유지되고 있습니다.";
+                return "[건강한 상승] 추세적 매수세 확인";
+            case BULL_TRAP:
+                return "[불 트랩] 모멘텀 둔화 및 이탈 징후";
+            case OVERSOLD_REBOUND:
+                return "[과매도 반등] 기술적 반등 가능성";
+            case PANIC_SELLING:
+                return "[투매 발생] 공포 섞인 이탈 가속";
+            case STAGNANT:
+                return "[정체] 뚜렷한 방향성 부재";
             default:
                 return "";
         }
@@ -679,33 +730,53 @@ public class MarketValuationService {
         return TrendDirection.NEUTRAL;
     }
 
-    private SentimentSignal determineHysteresisSentiment(MarketType market, BigDecimal score,
-            InvestorTrendInfo currentTrend) {
-        SentimentSignal sig0 = determineRawSentiment(score, currentTrend);
-        String marketCode = market == MarketType.KOSPI ? "0001" : "1001";
-        List<MarketInvestorDaily> history = marketInvestorDailyRepository
-                .findTop30ByMarketCodeOrderByDateDesc(marketCode);
-        if (history.size() < 22)
-            return sig0;
-
-        SentimentSignal sig1 = determineRawSentiment(score, processTrend(market, history.subList(1, 21)));
-        SentimentSignal sig2 = determineRawSentiment(score, processTrend(market, history.subList(2, 22)));
-
-        if (sig0 == sig1 || sig0 == sig2 || (sig0 == SentimentSignal.INDIVIDUAL_FOMO && score.doubleValue() >= 90))
-            return sig0;
-        return sig1;
+    private ValuationSignal determineValuationSignal(BigDecimal valuationScore, InvestorTrendInfo trend) {
+        double score = valuationScore.doubleValue();
+        if (score < 40) {
+            // Low score (Fear/Value)
+            if (trend.getForeignNet5d() > 0 || trend.getInstitutionalNet5d() > 0) {
+                return ValuationSignal.UNDERVALUED_BUY;
+            } else if (trend.getCommonMarketBreadthIndex().doubleValue() < -20) {
+                return ValuationSignal.VALUE_TRAP;
+            }
+        } else if (score > 80) {
+            // High score (Greed/Overvalued)
+            if (trend.getForeignNet5d() < 0 && trend.getInstitutionalNet5d() < 0) {
+                return ValuationSignal.OVERVALUED_CAUTION;
+            }
+        } else if (score >= 45 && score <= 55) {
+            return ValuationSignal.FAIR_VALUE;
+        }
+        return ValuationSignal.NEUTRAL;
     }
 
-    private SentimentSignal determineRawSentiment(BigDecimal totalScore, InvestorTrendInfo trend) {
-        double score = totalScore.doubleValue();
-        if (score > 80 && trend.getIndividualTrend() == TrendDirection.BUYING_ACCELERATED
-                && trend.getForeignNet5d() < 0)
-            return SentimentSignal.INDIVIDUAL_FOMO;
-        if (score < 40 && (trend.getForeignNet5d() > 0 || trend.getInstitutionalNet5d() > 0))
-            return SentimentSignal.SMART_MONEY_INFLOW;
-        if (score > 60 && trend.getForeignRelativeStrength() > 1.2)
-            return SentimentSignal.HEALTHY_BULL;
-        return SentimentSignal.NEUTRAL;
+    private TrendSignal determineTrendSignal(BigDecimal trendScore, InvestorTrendInfo trend) {
+        double score = trendScore.doubleValue();
+        double breadth = trend.getCommonMarketBreadthIndex().doubleValue();
+
+        if (score > 70) {
+            if (trend.getForeignNet5d() > 0 && breadth > trend.getBreadth5dAvg().doubleValue()) {
+                return TrendSignal.HEALTHY_BULL;
+            }
+        } else if (score < 30) {
+            if (breadth < -40 && trend.getForeignNet5d() < -500000) {
+                return TrendSignal.PANIC_SELLING;
+            }
+            if (breadth < trend.getBreadth60dAvg().doubleValue() - 20) {
+                return TrendSignal.OVERSOLD_REBOUND; // Potential for rebound if extreme
+            }
+        }
+
+        // Divergence Check for Bull Trap
+        if (score > 50 && breadth < trend.getBreadth5dAvg().doubleValue() - 15) {
+            return TrendSignal.BULL_TRAP;
+        }
+
+        if (Math.abs(breadth) < 5 && Math.abs(trend.getBreadth5dAvg().doubleValue()) < 5) {
+            return TrendSignal.STAGNANT;
+        }
+
+        return TrendSignal.NEUTRAL;
     }
 
     private String formatLargeNumber(BigDecimal value) {
@@ -741,6 +812,209 @@ public class MarketValuationService {
         TrendScoreResult(BigDecimal s, String d) {
             this.score = s;
             this.description = d;
+        }
+    }
+
+    private PredictionReport calculateTrendProbability(BigDecimal currentCape, BigDecimal currentYieldGap,
+            BigDecimal valuationScore, BigDecimal trendScore, InvestorTrendInfo trendInfo,
+            List<MarketValuationDto.TimeSeriesPoint> timeSeries, MarketType market) {
+
+        try {
+            // 1. Backtesting (Historical Similarity - Weighted KNN)
+            int matches = 0;
+            double weightedWinRate = 50.0;
+            double weightedAvgReturn = 0.0;
+
+            // KNN parameters
+            final int K = 30;
+            final int FORWARD_DAYS = 20; // 1 month approx
+
+            if (timeSeries != null && indexDailyDataRepository != null && currentCape != null
+                    && currentYieldGap != null) {
+                // Fetch index history for return calculation (reuse repository)
+                LocalDate end = LocalDate.now();
+                LocalDate start = end.minusYears(10);
+                List<IndexDailyData> indexData = indexDailyDataRepository
+                        .findAllByMarketNameAndDateBetweenOrderByDateDesc(market.name(), start, end);
+
+                if (indexData != null) {
+                    Map<String, BigDecimal> priceMap = indexData.stream()
+                            .filter(d -> d.getDate() != null && d.getClosingPrice() != null)
+                            .collect(Collectors.toMap(d -> d.getDate().toString(), IndexDailyData::getClosingPrice,
+                                    (a, b) -> a));
+
+                    // 1-1. Filter Valid Historical Points & Calculate Stats for Normalization
+                    List<MarketValuationDto.TimeSeriesPoint> validPoints = new ArrayList<>();
+                    // Exclude recent points where forward return cannot be calculated
+                    LocalDate latestPossibleDate = LocalDate.now().minusDays(30);
+
+                    List<Double> capes = new ArrayList<>();
+                    List<Double> yieldGaps = new ArrayList<>();
+
+                    for (MarketValuationDto.TimeSeriesPoint p : timeSeries) {
+                        if (p == null || p.getCape() == null || p.getYieldGap() == null || p.getDate() == null)
+                            continue;
+
+                        try {
+                            LocalDate pDate = LocalDate.parse(p.getDate(), DateTimeFormatter.ofPattern("yyyy-MM-dd"));
+                            if (pDate.isAfter(latestPossibleDate))
+                                continue; // Skip recent data
+
+                            validPoints.add(p);
+                            capes.add(p.getCape().doubleValue());
+                            yieldGaps.add(p.getYieldGap().doubleValue());
+                        } catch (Exception ignored) {
+                        }
+                    }
+
+                    if (!validPoints.isEmpty()) {
+                        // Calculate Mean & StdDev
+                        double meanCape = capes.stream().mapToDouble(d -> d).average().orElse(0.0);
+                        double stdCape = Math
+                                .sqrt(capes.stream().mapToDouble(d -> Math.pow(d - meanCape, 2)).average().orElse(1.0));
+                        if (stdCape == 0)
+                            stdCape = 1.0;
+
+                        double meanYg = yieldGaps.stream().mapToDouble(d -> d).average().orElse(0.0);
+                        double stdYg = Math.sqrt(
+                                yieldGaps.stream().mapToDouble(d -> Math.pow(d - meanYg, 2)).average().orElse(1.0));
+                        if (stdYg == 0)
+                            stdYg = 1.0;
+
+                        // Normalize Current State
+                        double zCapeCurr = (currentCape.doubleValue() - meanCape) / stdCape;
+                        double zYgCurr = (currentYieldGap.doubleValue() - meanYg) / stdYg;
+
+                        // 1-2. Calculate Distances (KNN)
+                        List<KnnCandidate> candidates = new ArrayList<>();
+
+                        for (MarketValuationDto.TimeSeriesPoint p : validPoints) {
+                            double zCape = (p.getCape().doubleValue() - meanCape) / stdCape;
+                            double zYg = (p.getYieldGap().doubleValue() - meanYg) / stdYg;
+
+                            double distance = Math.sqrt(Math.pow(zCape - zCapeCurr, 2) + Math.pow(zYg - zYgCurr, 2));
+
+                            // Calculate Future Return
+                            LocalDate pDate = LocalDate.parse(p.getDate(), DateTimeFormatter.ofPattern("yyyy-MM-dd"));
+                            LocalDate targetDate = pDate.plusDays(30); // Calendar days approx
+
+                            // Find closest future price
+                            String targetDateStr = indexData.stream()
+                                    .filter(d -> d.getDate() != null && !d.getDate().isBefore(targetDate))
+                                    .min(Comparator.comparing(IndexDailyData::getDate))
+                                    .map(d -> d.getDate().toString())
+                                    .orElse(null);
+
+                            if (targetDateStr != null && priceMap.containsKey(p.getDate())
+                                    && priceMap.containsKey(targetDateStr)) {
+                                double startPrice = priceMap.get(p.getDate()).doubleValue();
+                                double endPrice = priceMap.get(targetDateStr).doubleValue();
+                                double ret = (endPrice - startPrice) / startPrice;
+
+                                candidates.add(new KnnCandidate(p.getDate(), distance, ret));
+                            }
+                        }
+
+                        // 1-3. Select Selection & Aggregation
+                        candidates.sort(Comparator.comparingDouble(c -> c.distance));
+                        List<KnnCandidate> neighbors = candidates.stream().limit(K).collect(Collectors.toList());
+                        matches = neighbors.size();
+
+                        if (matches > 0) {
+                            double sumWeights = neighbors.stream().mapToDouble(c -> c.weight).sum();
+                            double sumWeightedPositive = neighbors.stream()
+                                    .filter(c -> c.forwardReturn > 0)
+                                    .mapToDouble(c -> c.weight)
+                                    .sum();
+                            double sumWeightedReturn = neighbors.stream()
+                                    .mapToDouble(c -> c.forwardReturn * c.weight)
+                                    .sum();
+
+                            weightedWinRate = (sumWeights > 0) ? (sumWeightedPositive / sumWeights) * 100.0 : 50.0;
+                            weightedAvgReturn = (sumWeights > 0) ? (sumWeightedReturn / sumWeights) * 100.0 : 0.0;
+                        }
+                    }
+                }
+            }
+
+            HistoricalMatch historicalMatch = HistoricalMatch.builder()
+                    .totalMatches(matches)
+                    .positiveOutcomes((int) (matches * (weightedWinRate / 100.0))) // Approx for display
+                    .negativeOutcomes(matches - (int) (matches * (weightedWinRate / 100.0)))
+                    .winRate(weightedWinRate)
+                    .averageReturn(weightedAvgReturn)
+                    .build();
+
+            // 2. Energy Score (Pup)
+            // Feature Normalization
+            double normTrend = (trendScore != null) ? trendScore.doubleValue() / 100.0 : 0.0; // 0~1
+            double normForeign = 0.5;
+            if (trendInfo != null) {
+                Long fNet = trendInfo.getForeignNet5d();
+                Long fFutNet = trendInfo.getFuturesForeignNet5d();
+                long net = (fNet != null ? fNet : 0L) + (fFutNet != null ? fFutNet : 0L);
+                normForeign = (net > 0) ? 0.8 : 0.2; // Simplified directional
+            }
+
+            double normBreadth = 0.5;
+            if (trendInfo != null && trendInfo.getCommonMarketBreadthIndex() != null) {
+                // -100 ~ 100 -> 0 ~ 1
+                normBreadth = (trendInfo.getCommonMarketBreadthIndex().doubleValue() + 100.0) / 200.0;
+                normBreadth = Math.max(0.0, Math.min(1.0, normBreadth));
+            }
+
+            // Weighted Sum: W1(0.4) + W2(0.3) + W3(0.3)
+            double energyScore = (0.4 * normTrend) + (0.3 * normForeign) + (0.3 * normBreadth);
+
+            // 3. V-KOSPI Adjustment
+            if (trendInfo != null && trendInfo.getVkospi() != null && trendInfo.getVkospi().doubleValue() > 30) {
+                if (valuationScore != null && valuationScore.doubleValue() > 60) {
+                    energyScore *= 0.7; // 30% penalty
+                } else if (valuationScore != null && valuationScore.doubleValue() < 30) {
+                    energyScore *= 1.2; // 20% bonus (mean reversion)
+                }
+            }
+
+            energyScore = Math.max(0.0, Math.min(1.0, energyScore));
+
+            // 4. Combine for Time Horizons
+            // Short-term (1w): Heavily dependent on Energy
+            double pShort = energyScore * 100.0;
+
+            // Medium-term (1m): Blend of Energy and Backtesting (Weighted KNN)
+            double pMedium = (energyScore * 0.4 + (weightedWinRate / 100.0) * 0.6) * 100.0;
+
+            // Long-term (3m): Fundamental (Valuation) dominant
+            // If YieldGap > 5% -> Bullish, < 1% -> Bearish
+            double yieldGapVal = currentYieldGap != null ? currentYieldGap.doubleValue() : 3.0;
+            double pLong = Math.min(100.0, Math.max(0.0, (yieldGapVal + 2.0) * 10.0)); // Simple linear model: -2% => 0,
+                                                                                       // 8% => 100
+
+            return PredictionReport.builder()
+                    .shortTerm(ProbabilityInfo.builder()
+                            .upProbability(pShort).downProbability(100 - pShort)
+                            .primaryReason(pShort > 50 ? "모멘텀 및 수급 양호" : "수급 악화 및 하락 에너지 우세").build())
+                    .mediumTerm(ProbabilityInfo.builder()
+                            .upProbability(pMedium).downProbability(100 - pMedium)
+                            .primaryReason(matches > 5 ? "역사적 유사 국면 (" + matches + "회) 반영" : "밸류에이션 및 추세 혼합").build())
+                    .longTerm(ProbabilityInfo.builder()
+                            .upProbability(pLong).downProbability(100 - pLong)
+                            .primaryReason("Yield Gap 및 펀더멘털 매력도 기반").build())
+                    .historicalMatch(historicalMatch)
+                    .build();
+
+        } catch (Exception e) {
+            log.error("Error calculating trend probability: {}", e.getMessage(), e);
+            e.printStackTrace(); // Keep this for test output visibility
+            return PredictionReport.builder()
+                    .shortTerm(ProbabilityInfo.builder().upProbability(50).downProbability(50).primaryReason("N/A")
+                            .build())
+                    .mediumTerm(ProbabilityInfo.builder().upProbability(50).downProbability(50).primaryReason("N/A")
+                            .build())
+                    .longTerm(ProbabilityInfo.builder().upProbability(50).downProbability(50).primaryReason("N/A")
+                            .build())
+                    .historicalMatch(HistoricalMatch.builder().build())
+                    .build();
         }
     }
 }

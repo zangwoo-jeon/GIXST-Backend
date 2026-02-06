@@ -22,6 +22,9 @@ public class MarketValuationDto {
     private String grade;
     private String strategy;
 
+    private BigDecimal trendScore;
+    private String trendDescription;
+
     private ValuationInfo valuation;
     private ScoreDetails scoreDetails;
     private InvestorTrendInfo investorTrend;
@@ -69,6 +72,17 @@ public class MarketValuationDto {
         private TrendDirection foreignTrend;
         private TrendDirection individualTrend;
         private TrendDirection institutionalTrend;
+
+        private Long risingStockCount;
+        private Long fallingStockCount;
+        private BigDecimal marketBreadthIndex;
+        private String breadthDate;
+
+        // VKOSPI & Futures
+        private BigDecimal vkospi;
+        private Long futuresForeignNet5d;
+        private Long futuresIndividualNet5d;
+        private Long futuresInstitutionalNet5d;
     }
 
     public enum TrendDirection {

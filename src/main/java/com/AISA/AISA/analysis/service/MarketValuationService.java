@@ -1,16 +1,13 @@
 package com.AISA.AISA.analysis.service;
 
 import com.AISA.AISA.analysis.dto.MarketValuationDto;
+import com.AISA.AISA.kisStock.Entity.stock.FuturesInvestorDaily;
 import com.AISA.AISA.kisStock.Entity.stock.Stock;
 import com.AISA.AISA.kisStock.Entity.stock.StockBalanceSheet;
 import com.AISA.AISA.kisStock.Entity.stock.StockFinancialStatement;
 import com.AISA.AISA.kisStock.Entity.stock.StockMarketCap;
 import com.AISA.AISA.kisStock.enums.MarketType;
-import com.AISA.AISA.kisStock.repository.StockBalanceSheetRepository;
-import com.AISA.AISA.kisStock.repository.StockFinancialStatementRepository;
-import com.AISA.AISA.kisStock.repository.StockMarketCapRepository;
-import com.AISA.AISA.kisStock.repository.StockRepository;
-import com.AISA.AISA.kisStock.repository.IndexDailyDataRepository;
+import com.AISA.AISA.kisStock.repository.*;
 import com.AISA.AISA.kisStock.kisService.KisMacroService;
 import com.AISA.AISA.portfolio.macro.repository.MacroDailyDataRepository;
 import com.AISA.AISA.portfolio.macro.Entity.MacroDailyData;
@@ -18,7 +15,7 @@ import com.AISA.AISA.portfolio.macro.dto.MacroIndicatorDto;
 import com.AISA.AISA.kisStock.Entity.Index.IndexDailyData;
 import com.AISA.AISA.kisStock.Entity.stock.MarketInvestorDaily;
 import com.AISA.AISA.kisStock.enums.BondYield;
-import com.AISA.AISA.kisStock.repository.MarketInvestorDailyRepository;
+import com.AISA.AISA.kisStock.enums.FuturesMarketType;
 import com.AISA.AISA.analysis.dto.MarketValuationDto.*;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.cache.annotation.CacheEvict;
@@ -45,7 +42,9 @@ public class MarketValuationService {
     private final IndexDailyDataRepository indexDailyDataRepository;
     private final MacroDailyDataRepository macroDailyDataRepository;
     private final MarketInvestorDailyRepository marketInvestorDailyRepository;
+    private final FuturesInvestorDailyRepository futuresInvestorDailyRepository;
     private final KisMacroService kisMacroService;
+    private final StockDailyDataRepository stockDailyDataRepository;
     private final GeminiService geminiService;
 
     private static final String STAT_CODE_CPI = "901Y001";
@@ -347,6 +346,15 @@ public class MarketValuationService {
                             }
                         }
 
+                        // NEW: Calculate Trend Score (Momentum)
+                        BigDecimal trendScore = BigDecimal.ZERO;
+                        String trendDescription = "판단 불가";
+                        if (investorTrend != null) {
+                            TrendScoreResult trendResult = calculateTrendScore(market, investorTrend);
+                            trendScore = trendResult.score;
+                            trendDescription = trendResult.description;
+                        }
+
                         // Set bounds in time series
                         for (MarketValuationDto.TimeSeriesPoint p : timeSeries) {
                             p.setLowerBound(low);
@@ -357,6 +365,8 @@ public class MarketValuationService {
                                 .market(market)
                                 .marketDescription(market.getDescription())
                                 .totalScore(totalScore)
+                                .trendScore(trendScore)
+                                .trendDescription(trendDescription)
                                 .grade(grade)
                                 .strategy(strategyText)
                                 .valuation(MarketValuationDto.ValuationInfo.builder()
@@ -387,7 +397,9 @@ public class MarketValuationService {
                     }
                 }
             }
-        } catch (Exception e) {
+        } catch (
+
+        Exception e) {
             log.error("Error calculating market valuation for {}: {}", market, e.getMessage(), e);
         }
 
@@ -405,10 +417,10 @@ public class MarketValuationService {
         if (history.size() < 20)
             return null;
 
-        return processTrend(history.subList(0, 20));
+        return processTrend(market, history.subList(0, 20));
     }
 
-    private InvestorTrendInfo processTrend(List<MarketInvestorDaily> subHistory) {
+    private InvestorTrendInfo processTrend(MarketType market, List<MarketInvestorDaily> subHistory) {
         long individual5d = 0, foreign5d = 0, institutional5d = 0;
         long foreign20d = 0, institutional20d = 0;
 
@@ -433,6 +445,43 @@ public class MarketValuationService {
         List<Long> institutionalDays = subHistory.stream().map(m -> m.getInstitutionNetBuy().longValue())
                 .collect(Collectors.toList());
 
+        // Market Breadth Calculation
+        LocalDate latestDate = subHistory.get(0).getDate();
+        BreadthResult breadth = calculateMarketBreadth(market, latestDate);
+
+        // VKOSPI Integration
+        BigDecimal vkospi = null;
+        Optional<IndexDailyData> vkospiData = indexDailyDataRepository.findFirstByMarketNameOrderByDateDesc("VKOSPI");
+        if (vkospiData.isPresent()) {
+            vkospi = vkospiData.get().getClosingPrice();
+        }
+
+        // Futures Integration
+        long futForeignNet5d = 0, futIndividualNet5d = 0, futInstitutionalNet5d = 0;
+        try {
+            FuturesMarketType futMarket = (market == MarketType.KOSPI)
+                    ? FuturesMarketType.KOSPI200
+                    : FuturesMarketType.KOSDAQ150;
+
+            List<FuturesInvestorDaily> futHistory = futuresInvestorDailyRepository
+                    .findAllByMarketTypeAndDateBetweenOrderByDateAsc(futMarket, latestDate.minusDays(10), latestDate);
+
+            // Get last 5 available trading days
+            List<FuturesInvestorDaily> last5Fut = futHistory.stream()
+                    .sorted(Comparator.comparing(FuturesInvestorDaily::getDate)
+                            .reversed())
+                    .limit(5)
+                    .collect(Collectors.toList());
+
+            for (FuturesInvestorDaily f : last5Fut) {
+                futIndividualNet5d += f.getPersonalNetBuyAmount().longValue();
+                futForeignNet5d += f.getForeignerNetBuyAmount().longValue();
+                futInstitutionalNet5d += f.getInstitutionNetBuyAmount().longValue();
+            }
+        } catch (Exception e) {
+            log.warn("Failed to fetch futures trend: {}", e.getMessage());
+        }
+
         return InvestorTrendInfo.builder()
                 .individualNet5d(individual5d)
                 .foreignNet5d(foreign5d)
@@ -443,7 +492,174 @@ public class MarketValuationService {
                 .individualTrend(calculateDirection(individualDays))
                 .foreignTrend(calculateDirection(foreignDays))
                 .institutionalTrend(calculateDirection(institutionalDays))
+                .risingStockCount(breadth.rising)
+                .fallingStockCount(breadth.falling)
+                .marketBreadthIndex(breadth.index)
+                .breadthDate(breadth.date)
+                .vkospi(vkospi)
+                .futuresForeignNet5d(futForeignNet5d)
+                .futuresIndividualNet5d(futIndividualNet5d)
+                .futuresInstitutionalNet5d(futInstitutionalNet5d)
                 .build();
+    }
+
+    private static class BreadthResult {
+        long rising;
+        long falling;
+        BigDecimal index;
+        String date;
+
+        BreadthResult(long r, long f, BigDecimal i, String d) {
+            this.rising = r;
+            this.falling = f;
+            this.index = i;
+            this.date = d;
+        }
+    }
+
+    private BreadthResult calculateMarketBreadth(MarketType market, LocalDate date) {
+        try {
+            LocalDate effectiveDate = date;
+            long rising = 0;
+            long falling = 0;
+            long total = 0;
+            boolean sourceFound = false;
+
+            // 1. Try fetching from IndexDailyData (API Source)
+            Optional<IndexDailyData> indexData = indexDailyDataRepository.findByMarketNameAndDate(market.name(), date);
+            if (indexData.isPresent() && indexData.get().getRisingStockCount() != null
+                    && indexData.get().getRisingStockCount() > 0) {
+                rising = indexData.get().getRisingStockCount();
+                falling = indexData.get().getFallingStockCount() != null ? indexData.get().getFallingStockCount() : 0;
+                total = rising + falling + (indexData.get().getVolume() != null ? 0 : 0); // Approx total
+                // Note: Total from index data breadth is strict (rising+falling+steady). Steady
+                // isn't stored yet.
+                // So we might still want to count total from StockDailyData for denominator
+                // accuracy,
+                // or just use rising+falling as proxy if steady is small/unavailable.
+                // Let's use StockDailyData for total to be safe, or fetch steady count if we
+                // add it later.
+                // For now, let's use the DB count for total to ensure accuracy of the ratio.
+                total = stockDailyDataRepository.countByDateAndStock_MarketName(date, market);
+                sourceFound = true;
+            }
+
+            // 2. Fallback to StockDailyData aggregation (DB Source)
+            if (!sourceFound) {
+                total = stockDailyDataRepository.countByDateAndStock_MarketName(date, market);
+
+                // Fallback to latest available date if no data for the requested date
+                if (total == 0) {
+                    Optional<LocalDate> maxDate = stockDailyDataRepository.findMaxDateByMarketName(market);
+                    if (maxDate.isPresent()) {
+                        effectiveDate = maxDate.get();
+                        total = stockDailyDataRepository.countByDateAndStock_MarketName(effectiveDate, market);
+
+                        // Retry checking IndexDailyData for effectiveDate
+                        indexData = indexDailyDataRepository.findByMarketNameAndDate(market.name(), effectiveDate);
+                        if (indexData.isPresent() && indexData.get().getRisingStockCount() != null
+                                && indexData.get().getRisingStockCount() > 0) {
+                            rising = indexData.get().getRisingStockCount();
+                            falling = indexData.get().getFallingStockCount();
+                            sourceFound = true;
+                        }
+                    }
+                }
+            }
+
+            if (!sourceFound) {
+                rising = stockDailyDataRepository.countByDateAndStock_MarketNameAndChangeRateGreaterThan(effectiveDate,
+                        market, 0.0);
+                falling = stockDailyDataRepository.countByDateAndStock_MarketNameAndChangeRateLessThan(effectiveDate,
+                        market, 0.0);
+            }
+
+            // Recalculate total if we found a new effective date and didn't have it
+            if (total == 0) {
+                total = stockDailyDataRepository.countByDateAndStock_MarketName(effectiveDate, market);
+            }
+
+            BigDecimal breadthIndex = BigDecimal.ZERO;
+            if (total > 0) {
+                breadthIndex = new BigDecimal(rising - falling)
+                        .divide(new BigDecimal(total), 4, RoundingMode.HALF_UP)
+                        .multiply(new BigDecimal("100"));
+            }
+            return new BreadthResult(rising, falling, breadthIndex, effectiveDate.toString());
+        } catch (Exception e) {
+            log.warn("Failed to calculate market breadth: {}", e.getMessage());
+            return new BreadthResult(0, 0, BigDecimal.ZERO, "N/A");
+        }
+    }
+
+    private static class TrendScoreResult {
+        BigDecimal score;
+        String description;
+
+        TrendScoreResult(BigDecimal s, String d) {
+            this.score = s;
+            this.description = d;
+        }
+    }
+
+    private TrendScoreResult calculateTrendScore(MarketType market, InvestorTrendInfo trend) {
+        BigDecimal score = BigDecimal.ZERO;
+
+        // 1. Spot Foreigner Score (25 pts)
+        long foreignTarget = (market == MarketType.KOSPI) ? 500000 : 100000;
+        double foreignRatio = (double) trend.getForeignNet5d() / foreignTarget;
+        double foreignScoreRaw = (Math.max(-1.0, Math.min(1.0, foreignRatio)) + 1.0) / 2.0 * 25.0;
+        score = score.add(new BigDecimal(foreignScoreRaw));
+
+        // 2. Spot Institutional Score (15 pts)
+        long instTarget = (market == MarketType.KOSPI) ? 250000 : 50000;
+        double instRatio = (double) trend.getInstitutionalNet5d() / instTarget;
+        double instScoreRaw = (Math.max(-1.0, Math.min(1.0, instRatio)) + 1.0) / 2.0 * 15.0;
+        score = score.add(new BigDecimal(instScoreRaw));
+
+        // 3. Market Breadth Score (30 pts)
+        double breadthVal = trend.getMarketBreadthIndex().doubleValue();
+        double breadthRatio = breadthVal / 20.0;
+        double breadthScoreRaw = (Math.max(-1.0, Math.min(1.0, breadthRatio)) + 1.0) / 2.0 * 30.0;
+        score = score.add(new BigDecimal(breadthScoreRaw));
+
+        // 4. Futures Foreigner Score (20 pts)
+        long futuresTarget = (market == MarketType.KOSPI) ? 200000 : 40000; // Million KRW
+        double futuresRatio = (double) trend.getFuturesForeignNet5d() / futuresTarget;
+        double futuresScoreRaw = (Math.max(-1.0, Math.min(1.0, futuresRatio)) + 1.0) / 2.0 * 20.0;
+        score = score.add(new BigDecimal(futuresScoreRaw));
+
+        // 5. VKOSPI Stability Score (10 pts)
+        // High VKOSPI (> 25) = Panic/Risk (0 pts), Low VKOSPI (< 15) = Stability (10
+        // pts)
+        double vkospiScoreRaw = 5.0; // Default Neutral
+        if (trend.getVkospi() != null) {
+            double vkospiVal = trend.getVkospi().doubleValue();
+            if (vkospiVal <= 15.0) {
+                vkospiScoreRaw = 10.0;
+            } else if (vkospiVal >= 25.0) {
+                vkospiScoreRaw = 0.0;
+            } else {
+                vkospiScoreRaw = 10.0 - (vkospiVal - 15.0); // Linear decline 10 -> 0
+            }
+        }
+        score = score.add(new BigDecimal(vkospiScoreRaw));
+
+        score = score.setScale(1, RoundingMode.HALF_UP);
+        return new TrendScoreResult(score, determineTrendDescription(score));
+    }
+
+    private String determineTrendDescription(BigDecimal score) {
+        double s = score.doubleValue();
+        if (s >= 80)
+            return "강력한 상승장 (메이저 수급 집중)";
+        if (s >= 60)
+            return "상승 우위 (매수세 유입)";
+        if (s >= 40)
+            return "중립 (방향성 모색 횡보)";
+        if (s >= 20)
+            return "하락 우위 (매물 출회)";
+        return "강력한 하락장 (투매 발생)";
     }
 
     private TrendDirection calculateDirection(List<Long> values) {
@@ -472,10 +688,13 @@ public class MarketValuationService {
         if (history.size() < 22)
             return sig0;
 
-        InvestorTrendInfo trend1 = processTrend(history.subList(1, 21));
+        if (history.size() < 22)
+            return sig0;
+
+        InvestorTrendInfo trend1 = processTrend(market, history.subList(1, 21));
         SentimentSignal sig1 = determineRawSentiment(score, trend1);
 
-        InvestorTrendInfo trend2 = processTrend(history.subList(2, 22));
+        InvestorTrendInfo trend2 = processTrend(market, history.subList(2, 22));
         SentimentSignal sig2 = determineRawSentiment(score, trend2);
 
         // 3-day hysteresis: only confirm if sig0 matches at least one previous day

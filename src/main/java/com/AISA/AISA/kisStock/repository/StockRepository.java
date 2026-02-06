@@ -8,6 +8,8 @@ import org.springframework.data.repository.query.Param;
 
 // import com.AISA.AISA.kisStock.enums.Industry; // Removed
 // import com.AISA.AISA.kisStock.enums.SubIndustry; // Removed
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Page;
@@ -19,6 +21,12 @@ public interface StockRepository extends JpaRepository<Stock, Long> {
         List<Stock> findByStockType(Stock.StockType stockType);
 
         List<Stock> findByMarketName(MarketType marketName);
+
+        @Transactional
+        @Modifying
+        @Query("UPDATE Stock s SET s.isCommon = :isCommon WHERE s.stockType = :stockType")
+        void updateIsCommonByStockType(@Param("stockType") Stock.StockType stockType,
+                        @Param("isCommon") boolean isCommon);
 
         List<Stock> findAllByStockIdBetween(Long startId, Long endId);
 

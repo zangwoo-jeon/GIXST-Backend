@@ -27,6 +27,8 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.Map;
 import com.AISA.AISA.kisStock.repository.StockRepository;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.CacheEvict;
@@ -513,9 +515,9 @@ public class KisInformationService {
                     .header("tr_id", "FHKST01010100"), String.class);
 
             if (responseBody != null) {
-                com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-                com.fasterxml.jackson.databind.JsonNode root = mapper.readTree(responseBody);
-                com.fasterxml.jackson.databind.JsonNode output = root.path("output");
+                ObjectMapper mapper = new ObjectMapper();
+                JsonNode root = mapper.readTree(responseBody);
+                JsonNode output = root.path("output");
 
                 String priceStr = output.path("stck_prpr").asText();
                 String statusCode = output.path("iscd_stat_cls_code").asText(); // 종목상태구분코드

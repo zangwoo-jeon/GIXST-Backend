@@ -54,8 +54,8 @@ public class StockScheduler {
     public void updateAllStockData() {
         log.info("Starting scheduled stock data update...");
 
-        // Fetch data for the last 3 years (approx 1000 days)
-        LocalDate targetStartDate = LocalDate.now().minusYears(3);
+        // Fetch data for the last 1 week to ensure recent data is captured
+        LocalDate targetStartDate = LocalDate.now().minusWeeks(1);
         String targetStartDateStr = targetStartDate.format(DateTimeFormatter.ofPattern("yyyyMMdd"));
 
         kisStockService.fetchAllStocksHistoricalData(targetStartDateStr);

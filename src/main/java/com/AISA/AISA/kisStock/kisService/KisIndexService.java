@@ -26,7 +26,10 @@ import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import com.AISA.AISA.portfolio.macro.dto.MacroIndicatorDto;
+
+import java.time.temporal.WeekFields;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.Map;
 import java.math.RoundingMode;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -166,8 +169,7 @@ public class KisIndexService {
                     .lowPrice(new BigDecimal(priceDto.getLowPrice()))
                     .priceChange(BigDecimal.ZERO) // DTO에 없으면 0 또는 계산
                     .changeRate(0.0) // DTO에 없으면 0 또는 계산
-                    .volume(BigDecimal.ZERO) // DTO에 volume이 없다면 0 처리, 있다면 new
-                    // BigDecimal(priceDto.getVolume())
+                    .volume(BigDecimal.ZERO) // DTO에 volume이 없다면 0 처리, 있다면 new BigDecimal(priceDto.getVolume())
                     .build();
 
             indexDailyDataRepository.save(entity);
@@ -332,6 +334,7 @@ public class KisIndexService {
         String fidInputIscd = switch (marketCode.toUpperCase()) {
             case "KOSPI" -> "0001";
             case "KOSDAQ" -> "1001";
+            case "VKOSPI" -> "0503";
             default -> throw new BusinessException(KisApiErrorCode.INVALID_MARKET_CODE);
         };
 
@@ -364,6 +367,8 @@ public class KisIndexService {
                 .currentIndices(apiResponse.getTodayInfo().getCurrentIndices())
                 .priceChange(apiResponse.getTodayInfo().getPriceChange())
                 .changeRate(apiResponse.getTodayInfo().getChangeRate())
+                .risingStockCount(apiResponse.getTodayInfo().getRisingStockCount())
+                .fallingStockCount(apiResponse.getTodayInfo().getFallingStockCount())
                 .build();
 
         List<IndexChartPriceDto> chartPriceList = apiResponse.getDateInfoList().stream()
@@ -613,13 +618,13 @@ public class KisIndexService {
     }
 
     private Set<String> getCoveredPeriods(List<IndexChartPriceDto> dtoList, String dateType) {
-        Set<String> periods = new java.util.HashSet<>();
+        Set<String> periods = new HashSet<>();
         if (dtoList == null || dtoList.isEmpty()) {
             return periods;
         }
 
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
-        java.time.temporal.WeekFields weekFields = java.time.temporal.WeekFields.ISO;
+        WeekFields weekFields = WeekFields.ISO;
 
         for (IndexChartPriceDto dto : dtoList) {
             LocalDate date = LocalDate.parse(dto.getDate(), formatter);
@@ -669,7 +674,7 @@ public class KisIndexService {
 
         // 주별(W) 처리
         if ("W".equalsIgnoreCase(dateType)) {
-            java.time.temporal.WeekFields weekFields = java.time.temporal.WeekFields.ISO;
+            WeekFields weekFields = WeekFields.ISO;
             String lastWeek = null;
 
             for (IndexDailyData data : dataList) {

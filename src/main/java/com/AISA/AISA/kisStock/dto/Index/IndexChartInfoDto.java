@@ -15,4 +15,6 @@ public class IndexChartInfoDto {
     private String priceChange;
     private String changeRate;
     private String grade;
+    private String risingStockCount;
+    private String fallingStockCount;
 }

@@ -18,7 +18,9 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.Period;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -40,7 +42,7 @@ public class StockGrowthAnalysisService {
                 .collect(Collectors.toList());
 
         // Fetch recent 5 years of data to be safe for 3Y CAGR and YoY
-        String minDate = LocalDate.now().minusYears(5).format(java.time.format.DateTimeFormatter.ofPattern("yyyy"))
+        String minDate = LocalDate.now().minusYears(5).format(DateTimeFormatter.ofPattern("yyyy"))
                 + "01";
 
         List<StockFinancialStatement> allStatements = statementRepository
@@ -126,7 +128,7 @@ public class StockGrowthAnalysisService {
     }
 
     private BigDecimal calculateYoY(List<StockFinancialStatement> stmts, String latestYymm,
-            java.util.function.Function<StockFinancialStatement, BigDecimal> fieldExtractor) {
+            Function<StockFinancialStatement, BigDecimal> fieldExtractor) {
         String prevYymm = getPreviousYearYymm(latestYymm);
         BigDecimal current = fieldExtractor.apply(stmts.get(stmts.size() - 1));
 
@@ -144,7 +146,7 @@ public class StockGrowthAnalysisService {
     }
 
     private BigDecimal calculateYoYRatio(List<StockFinancialRatio> ratios, String latestYymm,
-            java.util.function.Function<StockFinancialRatio, BigDecimal> fieldExtractor) {
+            Function<StockFinancialRatio, BigDecimal> fieldExtractor) {
         String prevYymm = getPreviousYearYymm(latestYymm);
         if (ratios.isEmpty())
             return null;
@@ -164,7 +166,7 @@ public class StockGrowthAnalysisService {
     }
 
     private BigDecimal calculateCAGR(List<StockFinancialStatement> stmts, String latestYymm,
-            java.util.function.Function<StockFinancialStatement, BigDecimal> fieldExtractor) {
+            Function<StockFinancialStatement, BigDecimal> fieldExtractor) {
         String threeYearsAgoYymm = getThreeYearsAgoYymm(latestYymm);
         BigDecimal current = fieldExtractor.apply(stmts.get(stmts.size() - 1));
 
@@ -184,7 +186,7 @@ public class StockGrowthAnalysisService {
     }
 
     private BigDecimal calculateCAGRRatio(List<StockFinancialRatio> ratios, String latestYymm,
-            java.util.function.Function<StockFinancialRatio, BigDecimal> fieldExtractor) {
+            Function<StockFinancialRatio, BigDecimal> fieldExtractor) {
         String threeYearsAgoYymm = getThreeYearsAgoYymm(latestYymm);
         if (ratios.isEmpty())
             return null;

@@ -15,6 +15,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 
 @RestController
@@ -57,9 +59,9 @@ public class DividendController {
 
         if (startDate == null || endDate == null) {
             // Default to last 1 year
-            endDate = java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd"));
-            startDate = java.time.LocalDate.now().minusYears(1)
-                    .format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd"));
+            endDate = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
+            startDate = LocalDate.now().minusYears(1)
+                    .format(DateTimeFormatter.ofPattern("yyyyMMdd"));
         }
 
         dividendService.refreshAllDividends(startDate, endDate);
@@ -75,9 +77,9 @@ public class DividendController {
 
         if (startDate == null || endDate == null) {
             // Default to last 1 year
-            endDate = java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd"));
-            startDate = java.time.LocalDate.now().minusYears(1)
-                    .format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd"));
+            endDate = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
+            startDate = LocalDate.now().minusYears(1)
+                    .format(DateTimeFormatter.ofPattern("yyyyMMdd"));
         }
 
         dividendService.refreshStockDividend(stockCode, startDate, endDate);
@@ -92,9 +94,9 @@ public class DividendController {
             @RequestParam(required = false) String endDate) {
 
         if (startDate == null || endDate == null) {
-            endDate = java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd"));
-            startDate = java.time.LocalDate.now().minusYears(1)
-                    .format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd"));
+            endDate = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
+            startDate = LocalDate.now().minusYears(1)
+                    .format(DateTimeFormatter.ofPattern("yyyyMMdd"));
         }
 
         List<StockDividendInfoDto> result = dividendService.refreshStockDividend(stockCode, startDate, endDate);

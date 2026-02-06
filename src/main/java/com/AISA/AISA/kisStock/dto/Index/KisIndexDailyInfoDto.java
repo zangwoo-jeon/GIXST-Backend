@@ -15,4 +15,10 @@ public class KisIndexDailyInfoDto {
 
     @JsonProperty("bstp_nmix_prdy_ctrt")
     private String changeRate;
+
+    @JsonProperty("ascn_issu_cnt")
+    private String risingStockCount;
+
+    @JsonProperty("down_issu_cnt")
+    private String fallingStockCount;
 }

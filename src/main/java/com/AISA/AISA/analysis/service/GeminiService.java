@@ -132,6 +132,9 @@ public class GeminiService {
         sb.append("- Yield Gap: ").append(dto.getValuation().getYieldGap()).append("% (Inversion: ")
                 .append(dto.getScoreDetails().getYieldGapInversion()).append(")\n");
         sb.append("- Sentiment: ").append(dto.getScoreDetails().getSentimentSignal()).append("\n");
+        sb.append("- Common Stock Breadth: Rising=").append(dto.getInvestorTrend().getCommonRisingStockCount())
+                .append(", Falling=").append(dto.getInvestorTrend().getCommonFallingStockCount())
+                .append(" (Index: ").append(dto.getInvestorTrend().getCommonMarketBreadthIndex()).append(")\n");
         sb.append("- Investor Trend (Spot): Foreign=").append(dto.getInvestorTrend().getForeignTrend())
                 .append(", Individual=").append(dto.getInvestorTrend().getIndividualTrend()).append("\n");
         sb.append("- Investor Trend (Futures): ForeignSum=").append(dto.getInvestorTrend().getFuturesForeignNet5d())

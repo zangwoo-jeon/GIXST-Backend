@@ -17,6 +17,8 @@ import com.AISA.AISA.kisStock.Entity.stock.MarketInvestorDaily;
 import com.AISA.AISA.kisStock.enums.BondYield;
 import com.AISA.AISA.kisStock.enums.FuturesMarketType;
 import com.AISA.AISA.analysis.dto.MarketValuationDto.*;
+import com.AISA.AISA.kisStock.dto.Index.BreadthHistoryDto;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.cache.annotation.CacheEvict;
 import lombok.RequiredArgsConstructor;
@@ -492,9 +494,12 @@ public class MarketValuationService {
                 .individualTrend(calculateDirection(individualDays))
                 .foreignTrend(calculateDirection(foreignDays))
                 .institutionalTrend(calculateDirection(institutionalDays))
-                .risingStockCount(breadth.rising)
-                .fallingStockCount(breadth.falling)
-                .marketBreadthIndex(breadth.index)
+                .commonRisingStockCount(breadth.rising)
+                .commonFallingStockCount(breadth.falling)
+                .commonMarketBreadthIndex(breadth.index)
+                .breadth5dAvg(breadth.avg5d)
+                .breadth20dAvg(breadth.avg20d)
+                .breadth60dAvg(breadth.avg60d)
                 .breadthDate(breadth.date)
                 .vkospi(vkospi)
                 .futuresForeignNet5d(futForeignNet5d)
@@ -507,89 +512,68 @@ public class MarketValuationService {
         long rising;
         long falling;
         BigDecimal index;
+        BigDecimal avg5d;
+        BigDecimal avg20d;
+        BigDecimal avg60d;
         String date;
 
-        BreadthResult(long r, long f, BigDecimal i, String d) {
+        BreadthResult(long r, long f, BigDecimal i, BigDecimal a5, BigDecimal a20, BigDecimal a60, String d) {
             this.rising = r;
             this.falling = f;
             this.index = i;
+            this.avg5d = a5;
+            this.avg20d = a20;
+            this.avg60d = a60;
             this.date = d;
         }
     }
 
     private BreadthResult calculateMarketBreadth(MarketType market, LocalDate date) {
         try {
-            LocalDate effectiveDate = date;
-            long rising = 0;
-            long falling = 0;
-            long total = 0;
-            boolean sourceFound = false;
-
-            // 1. Try fetching from IndexDailyData (API Source)
-            Optional<IndexDailyData> indexData = indexDailyDataRepository.findByMarketNameAndDate(market.name(), date);
-            if (indexData.isPresent() && indexData.get().getRisingStockCount() != null
-                    && indexData.get().getRisingStockCount() > 0) {
-                rising = indexData.get().getRisingStockCount();
-                falling = indexData.get().getFallingStockCount() != null ? indexData.get().getFallingStockCount() : 0;
-                total = rising + falling + (indexData.get().getVolume() != null ? 0 : 0); // Approx total
-                // Note: Total from index data breadth is strict (rising+falling+steady). Steady
-                // isn't stored yet.
-                // So we might still want to count total from StockDailyData for denominator
-                // accuracy,
-                // or just use rising+falling as proxy if steady is small/unavailable.
-                // Let's use StockDailyData for total to be safe, or fetch steady count if we
-                // add it later.
-                // For now, let's use the DB count for total to ensure accuracy of the ratio.
-                total = stockDailyDataRepository.countByDateAndStock_MarketName(date, market);
-                sourceFound = true;
+            List<LocalDate> recentDates = stockDailyDataRepository.findDistinctDatesByMarketName(market,
+                    PageRequest.of(0, 60));
+            if (recentDates.isEmpty()) {
+                return new BreadthResult(0, 0, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO,
+                        "N/A");
             }
 
-            // 2. Fallback to StockDailyData aggregation (DB Source)
-            if (!sourceFound) {
-                total = stockDailyDataRepository.countByDateAndStock_MarketName(date, market);
-
-                // Fallback to latest available date if no data for the requested date
-                if (total == 0) {
-                    Optional<LocalDate> maxDate = stockDailyDataRepository.findMaxDateByMarketName(market);
-                    if (maxDate.isPresent()) {
-                        effectiveDate = maxDate.get();
-                        total = stockDailyDataRepository.countByDateAndStock_MarketName(effectiveDate, market);
-
-                        // Retry checking IndexDailyData for effectiveDate
-                        indexData = indexDailyDataRepository.findByMarketNameAndDate(market.name(), effectiveDate);
-                        if (indexData.isPresent() && indexData.get().getRisingStockCount() != null
-                                && indexData.get().getRisingStockCount() > 0) {
-                            rising = indexData.get().getRisingStockCount();
-                            falling = indexData.get().getFallingStockCount();
-                            sourceFound = true;
-                        }
-                    }
-                }
+            List<BreadthHistoryDto> history = stockDailyDataRepository.findBreadthHistoryByDates(market, recentDates);
+            if (history.isEmpty()) {
+                return new BreadthResult(0, 0, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO,
+                        "N/A");
             }
 
-            if (!sourceFound) {
-                rising = stockDailyDataRepository.countByDateAndStock_MarketNameAndChangeRateGreaterThan(effectiveDate,
-                        market, 0.0);
-                falling = stockDailyDataRepository.countByDateAndStock_MarketNameAndChangeRateLessThan(effectiveDate,
-                        market, 0.0);
-            }
+            BreadthHistoryDto latest = history.get(0);
 
-            // Recalculate total if we found a new effective date and didn't have it
-            if (total == 0) {
-                total = stockDailyDataRepository.countByDateAndStock_MarketName(effectiveDate, market);
-            }
+            // Calculate Moving Averages
+            BigDecimal avg5d = calculateAvg(history, 5);
+            BigDecimal avg20d = calculateAvg(history, 20);
+            BigDecimal avg60d = calculateAvg(history, 60);
 
-            BigDecimal breadthIndex = BigDecimal.ZERO;
-            if (total > 0) {
-                breadthIndex = new BigDecimal(rising - falling)
-                        .divide(new BigDecimal(total), 4, RoundingMode.HALF_UP)
-                        .multiply(new BigDecimal("100"));
-            }
-            return new BreadthResult(rising, falling, breadthIndex, effectiveDate.toString());
+            return new BreadthResult(
+                    latest.getRisingCount(),
+                    latest.getFallingCount(),
+                    BigDecimal.valueOf(latest.getBreadthIndex()).setScale(2, RoundingMode.HALF_UP),
+                    avg5d,
+                    avg20d,
+                    avg60d,
+                    latest.getDate().toString());
         } catch (Exception e) {
             log.warn("Failed to calculate market breadth: {}", e.getMessage());
-            return new BreadthResult(0, 0, BigDecimal.ZERO, "N/A");
+            return new BreadthResult(0, 0, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, "N/A");
         }
+    }
+
+    private BigDecimal calculateAvg(List<BreadthHistoryDto> history, int days) {
+        int count = Math.min(history.size(), days);
+        if (count == 0)
+            return BigDecimal.ZERO;
+
+        double sum = 0;
+        for (int i = 0; i < count; i++) {
+            sum += history.get(i).getBreadthIndex();
+        }
+        return BigDecimal.valueOf(sum / count).setScale(2, RoundingMode.HALF_UP);
     }
 
     private static class TrendScoreResult {
@@ -618,10 +602,42 @@ public class MarketValuationService {
         score = score.add(new BigDecimal(instScoreRaw));
 
         // 3. Market Breadth Score (30 pts)
-        double breadthVal = trend.getMarketBreadthIndex().doubleValue();
-        double breadthRatio = breadthVal / 20.0;
-        double breadthScoreRaw = (Math.max(-1.0, Math.min(1.0, breadthRatio)) + 1.0) / 2.0 * 30.0;
-        score = score.add(new BigDecimal(breadthScoreRaw));
+        // Refined: Weighted Multi-term Breadth (Current 10, 5d 10, 20d 10)
+        double currentBreadth = trend.getCommonMarketBreadthIndex().doubleValue();
+        double avg5dBreadth = trend.getBreadth5dAvg().doubleValue();
+        double avg20dBreadth = trend.getBreadth20dAvg().doubleValue();
+        double avg60dBreadth = trend.getBreadth60dAvg().doubleValue();
+
+        // Alignment Bonus (Golden Cross / Bullish Alignment)
+        double alignmentScore = 0;
+        if (avg5dBreadth > avg20dBreadth)
+            alignmentScore += 5;
+        if (avg20dBreadth > avg60dBreadth)
+            alignmentScore += 5;
+
+        // Momentum Score (Current vs 5d)
+        double momentumScore = (Math.max(-20.0, Math.min(20.0, currentBreadth)) + 20.0) / 40.0 * 10.0;
+
+        // Trend Stability (20d position)
+        double stabilityScore = (Math.max(-20.0, Math.min(20.0, avg20dBreadth)) + 20.0) / 40.0 * 10.0;
+
+        score = score.add(new BigDecimal(alignmentScore + momentumScore + stabilityScore));
+
+        // NEW: Divergence Detection (Penalty if divergence found)
+        try {
+            Optional<IndexDailyData> latestIndex = indexDailyDataRepository
+                    .findFirstByMarketNameOrderByDateDesc(market.name());
+            if (latestIndex.isPresent()) {
+                double indexChange = latestIndex.get().getChangeRate() != null ? latestIndex.get().getChangeRate()
+                        : 0.0;
+                // If Index is up (>0.5%) but Breadth is significantly down (Current < 5d - 5)
+                if (indexChange > 0.5 && currentBreadth < (avg5dBreadth - 5)) {
+                    score = score.subtract(new BigDecimal("10.0")); // Divergence Penalty
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Divergence check failed: {}", e.getMessage());
+        }
 
         // 4. Futures Foreigner Score (20 pts)
         long futuresTarget = (market == MarketType.KOSPI) ? 200000 : 40000; // Million KRW
@@ -646,20 +662,32 @@ public class MarketValuationService {
         score = score.add(new BigDecimal(vkospiScoreRaw));
 
         score = score.setScale(1, RoundingMode.HALF_UP);
-        return new TrendScoreResult(score, determineTrendDescription(score));
+        return new TrendScoreResult(score, determineTrendDescription(score, trend));
     }
 
-    private String determineTrendDescription(BigDecimal score) {
+    private String determineTrendDescription(BigDecimal score, InvestorTrendInfo trend) {
         double s = score.doubleValue();
+        String base = "";
         if (s >= 80)
-            return "강력한 상승장 (메이저 수급 집중)";
-        if (s >= 60)
-            return "상승 우위 (매수세 유입)";
-        if (s >= 40)
-            return "중립 (방향성 모색 횡보)";
-        if (s >= 20)
-            return "하락 우위 (매물 출회)";
-        return "강력한 하락장 (투매 발생)";
+            base = "강력한 상승장 (메이저 수급 집중)";
+        else if (s >= 60)
+            base = "상승 우위 (매수세 유입)";
+        else if (s >= 40)
+            base = "중립 (방향성 모색 횡보)";
+        else if (s >= 20)
+            base = "하락 우위 (매물 출회)";
+        else
+            base = "강력한 하락장 (투매 발생)";
+
+        // Breadth Context
+        double currentB = trend.getCommonMarketBreadthIndex().doubleValue();
+        double avg5B = trend.getBreadth5dAvg().doubleValue();
+        if (currentB > avg5B + 10)
+            base += " [상승세 가속] 종목별 순환매가 활발하게 일어나고 있습니다.";
+        else if (currentB < avg5B - 10)
+            base += " [추세 약화] 상승 종목수가 급격히 줄어들며 시장 내부가 위축되고 있습니다.";
+
+        return base;
     }
 
     private TrendDirection calculateDirection(List<Long> values) {

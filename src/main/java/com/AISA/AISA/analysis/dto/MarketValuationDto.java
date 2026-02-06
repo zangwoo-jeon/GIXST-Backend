@@ -73,9 +73,12 @@ public class MarketValuationDto {
         private TrendDirection individualTrend;
         private TrendDirection institutionalTrend;
 
-        private Long risingStockCount;
-        private Long fallingStockCount;
-        private BigDecimal marketBreadthIndex;
+        private Long commonRisingStockCount;
+        private Long commonFallingStockCount;
+        private BigDecimal commonMarketBreadthIndex;
+        private BigDecimal breadth5dAvg;
+        private BigDecimal breadth20dAvg;
+        private BigDecimal breadth60dAvg;
         private String breadthDate;
 
         // VKOSPI & Futures

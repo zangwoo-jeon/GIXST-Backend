@@ -11,10 +11,8 @@ import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicInteger;
 
 @Service
 @RequiredArgsConstructor
@@ -28,17 +26,49 @@ public class GeminiService {
      * Generates a context-aware market strategy based on the valuation data.
      * Returns null if generation fails (to allow fallback to static strategy).
      */
-    public String generateMarketStrategy(com.AISA.AISA.analysis.dto.MarketValuationDto dto) {
+    public static record StrategyResult(String valuationStrategy, String trendStrategy) {
+    }
+
+    /**
+     * Generates context-aware market strategies based on the valuation and trend
+     * data.
+     * Returns a default/fallback if generation fails.
+     */
+    public StrategyResult generateMarketStrategy(com.AISA.AISA.analysis.dto.MarketValuationDto dto) {
         try {
             String prompt = buildStrategyPrompt(dto);
-            return generateResponseWithRetry(prompt);
+            String response = generateResponseWithRetry(prompt);
+            return parseSplitResponse(response);
         } catch (Exception e) {
             log.warn("Failed to generate AI strategy: {}", e.getMessage());
-            return null; // Fallback to static
+            return new StrategyResult(null, null); // Fallback to static
         }
     }
 
+    private StrategyResult parseSplitResponse(String response) {
+        String valuation = "";
+        String trend = "";
+
+        try {
+            if (response.contains("[VALUATION_STRATEGY]")) {
+                String[] parts = response.split("\\[TREND_STRATEGY\\]");
+                valuation = parts[0].replace("[VALUATION_STRATEGY]", "").trim();
+                if (parts.length > 1) {
+                    trend = parts[1].trim();
+                }
+            } else {
+                valuation = response; // Fallback if no tags
+            }
+        } catch (Exception e) {
+            log.warn("Failed to parse split response, returning whole as valuation: {}", e.getMessage());
+            valuation = response;
+        }
+
+        return new StrategyResult(valuation, trend);
+    }
+
     public String generateAdvice(String context) {
+        // ... (existing generateAdvice code remains same)
         try {
             return generateResponseWithRetry(context);
         } catch (Exception e) {
@@ -48,6 +78,7 @@ public class GeminiService {
     }
 
     private String generateResponseWithRetry(String context) throws Exception {
+        // ... (existing generateResponseWithRetry code remains same)
         List<String> keys = geminiProperties.getApiKeys();
         if (keys == null || keys.isEmpty()) {
             if (geminiProperties.getApiKey() == null) {
@@ -79,6 +110,7 @@ public class GeminiService {
     }
 
     private String callGeminiApi(String context, String apiKey) {
+        // ... (existing callGeminiApi code remains same)
         WebClient webClient = WebClient.create();
 
         Map<String, Object> requestBody = Map.of(
@@ -87,7 +119,7 @@ public class GeminiService {
                                 Map.of("text", context)))),
                 "generationConfig", Map.of(
                         "temperature", 0.7,
-                        "maxOutputTokens", 500));
+                        "maxOutputTokens", 800)); // Increased for dual response
 
         return webClient.post()
                 .uri(geminiProperties.getUrl() + "?key={key}", apiKey)
@@ -99,6 +131,7 @@ public class GeminiService {
     }
 
     private String parseGeminiResponse(String jsonResponse) {
+        // ... (existing parseGeminiResponse code remains same)
         try {
             JsonNode root = objectMapper.readTree(jsonResponse);
             JsonNode candidates = root.path("candidates");
@@ -121,17 +154,30 @@ public class GeminiService {
     private String buildStrategyPrompt(com.AISA.AISA.analysis.dto.MarketValuationDto dto) {
         StringBuilder sb = new StringBuilder();
         sb.append("Role: Professional Market Analyst (Quant-based)\n");
-        sb.append("Task: Write a concise market strategy (Korean, 3~4 sentences) based on the input data.\n");
-        sb.append("Constraint: Focus on the conflict or alignment between Valuation, Sentiment, and Yield Gap.\n");
+        sb.append("Task: Write two concise market analysis sections (Korean, 2~3 sentences each).\n");
+        sb.append("1. [VALUATION_STRATEGY]: Focus on Valuation (Score, CAPE, Yield Gap).\n");
+        sb.append("2. [TREND_STRATEGY]: Focus on Market Trend (Trend Score, 수급, Breadth, VKOSPI).\n");
+        sb.append("Constraint: Use the exact tags [VALUATION_STRATEGY] and [TREND_STRATEGY] to separate sections.\n\n");
+
         sb.append("Input Data:\n");
         sb.append("- Market: ").append(dto.getMarket()).append("\n");
-        sb.append("- Total Score: ").append(dto.getTotalScore()).append("/100 (Grade: ").append(dto.getGrade())
+        sb.append("- Valuation Score: ").append(dto.getValuationScore()).append("/100 (Grade: ").append(dto.getGrade())
                 .append(")\n");
+        sb.append("- Trend Score: ").append(dto.getTrendScore()).append("/100 (Description: ")
+                .append(dto.getTrendDescription()).append(")\n");
+
         sb.append("- CAPE: ").append(dto.getValuation().getCape()).append(" (Range: ")
                 .append(dto.getScoreDetails().getCapeRangePosition()).append("%)\n");
         sb.append("- Yield Gap: ").append(dto.getValuation().getYieldGap()).append("% (Inversion: ")
                 .append(dto.getScoreDetails().getYieldGapInversion()).append(")\n");
         sb.append("- Sentiment: ").append(dto.getScoreDetails().getSentimentSignal()).append("\n");
+
+        sb.append("- Common Stock Breadth: Rising=").append(dto.getInvestorTrend().getCommonRisingStockCount())
+                .append(", Falling=").append(dto.getInvestorTrend().getCommonFallingStockCount())
+                .append(" (Index: ").append(dto.getInvestorTrend().getCommonMarketBreadthIndex()).append(")\n");
+        sb.append("- Breadth Avg (5d/20d): ").append(dto.getInvestorTrend().getBreadth5dAvg()).append(" / ")
+                .append(dto.getInvestorTrend().getBreadth20dAvg()).append("\n");
+
         sb.append("- Investor Trend (Spot): Foreign=").append(dto.getInvestorTrend().getForeignTrend())
                 .append(", Individual=").append(dto.getInvestorTrend().getIndividualTrend()).append("\n");
         sb.append("- Investor Trend (Futures): ForeignSum=").append(dto.getInvestorTrend().getFuturesForeignNet5d())

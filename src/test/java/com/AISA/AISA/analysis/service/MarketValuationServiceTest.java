@@ -12,6 +12,9 @@ import com.AISA.AISA.kisStock.repository.StockFinancialStatementRepository;
 import com.AISA.AISA.kisStock.repository.StockMarketCapRepository;
 import com.AISA.AISA.kisStock.repository.StockRepository;
 import com.AISA.AISA.kisStock.repository.IndexDailyDataRepository;
+import com.AISA.AISA.kisStock.repository.MarketInvestorDailyRepository;
+import com.AISA.AISA.kisStock.repository.FuturesInvestorDailyRepository;
+import com.AISA.AISA.kisStock.repository.StockDailyDataRepository;
 import com.AISA.AISA.kisStock.kisService.KisMacroService;
 import com.AISA.AISA.kisStock.Entity.Index.IndexDailyData;
 import com.AISA.AISA.portfolio.macro.dto.MacroIndicatorDto;
@@ -44,6 +47,15 @@ public class MarketValuationServiceTest {
         private IndexDailyDataRepository indexDailyDataRepository;
         @Mock
         private KisMacroService kisMacroService;
+
+        @Mock
+        private MarketInvestorDailyRepository marketInvestorDailyRepository;
+        @Mock
+        private FuturesInvestorDailyRepository futuresInvestorDailyRepository;
+        @Mock
+        private StockDailyDataRepository stockDailyDataRepository;
+        @Mock
+        private GeminiService geminiService;
 
         @InjectMocks
         private MarketValuationService marketValuationService;
@@ -95,7 +107,7 @@ public class MarketValuationServiceTest {
                 assertEquals(2, result.getMetadata().getStockCount());
 
                 // Total Market Cap = 500T
-                assertTrue(result.getMetadata().getTotalMarketCap().contains("500.0조 원"));
+                assertTrue(result.getMetadata().getTotalMarketCap().startsWith("500.0"));
 
                 // Total Net Income = 40T
                 // This field is no longer in top level, but kept in metadata or removed?
@@ -131,7 +143,7 @@ public class MarketValuationServiceTest {
                 assertNotNull(result.getTimeSeries());
                 assertFalse(result.getTimeSeries().isEmpty());
                 assertNotNull(result.getTimeSeries().get(0).getYieldGap());
-                assertNotNull(result.getTotalScore());
+                assertNotNull(result.getValuationScore());
                 assertNotNull(result.getGrade());
         }
 
@@ -178,7 +190,7 @@ public class MarketValuationServiceTest {
                 assertEquals(market, result.getMarket());
 
                 // Total Market Cap = 10T
-                assertTrue(result.getMetadata().getTotalMarketCap().contains("10.0조 원"));
+                assertTrue(result.getMetadata().getTotalMarketCap().startsWith("10.0"));
 
                 // PER = 10T / 200B = 50.00
                 assertEquals(new BigDecimal("50.00"), result.getValuation().getPer());

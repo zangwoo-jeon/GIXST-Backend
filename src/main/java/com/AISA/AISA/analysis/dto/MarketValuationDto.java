@@ -18,9 +18,10 @@ import java.util.List;
 public class MarketValuationDto {
     private MarketType market;
     private String marketDescription;
-    private BigDecimal totalScore;
+    private BigDecimal valuationScore;
     private String grade;
-    private String strategy;
+    private String valuationStrategy;
+    private String trendStrategy;
 
     private BigDecimal trendScore;
     private String trendDescription;
@@ -44,7 +45,7 @@ public class MarketValuationDto {
     }
 
     @Getter
-    @Builder
+    @Builder(toBuilder = true)
     @NoArgsConstructor
     @AllArgsConstructor
     public static class ScoreDetails {

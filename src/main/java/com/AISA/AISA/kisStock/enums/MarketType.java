@@ -9,6 +9,7 @@ public enum MarketType {
     KOSPI("J", "KS", "KRW", "대한민국 코스피"),
     KOSDAQ("Q", "KQ", "KRW", "대한민국 코스닥"),
     KONEX("N", "KN", "KRW", "대한민국 코넥스"),
+    VKOSPI("V", "KS", "KRW", "코스피 200 변동성 지수"),
     NAS("NAS", "NAS", "USD", "나스닥"),
     NYS("NYS", "NYS", "USD", "뉴욕 거래소"),
     AMS("AMS", "AMS", "USD", "아멕스");

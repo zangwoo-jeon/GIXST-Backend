@@ -132,8 +132,13 @@ public class GeminiService {
         sb.append("- Yield Gap: ").append(dto.getValuation().getYieldGap()).append("% (Inversion: ")
                 .append(dto.getScoreDetails().getYieldGapInversion()).append(")\n");
         sb.append("- Sentiment: ").append(dto.getScoreDetails().getSentimentSignal()).append("\n");
-        sb.append("- Investor Trend: Foreign=").append(dto.getInvestorTrend().getForeignTrend())
+        sb.append("- Investor Trend (Spot): Foreign=").append(dto.getInvestorTrend().getForeignTrend())
                 .append(", Individual=").append(dto.getInvestorTrend().getIndividualTrend()).append("\n");
+        sb.append("- Investor Trend (Futures): ForeignSum=").append(dto.getInvestorTrend().getFuturesForeignNet5d())
+                .append(", IndividualSum=").append(dto.getInvestorTrend().getFuturesIndividualNet5d()).append("\n");
+        if (dto.getInvestorTrend().getVkospi() != null) {
+            sb.append("- VKOSPI: ").append(dto.getInvestorTrend().getVkospi()).append("\n");
+        }
 
         sb.append("\nOutput (Korean):");
         return sb.toString();

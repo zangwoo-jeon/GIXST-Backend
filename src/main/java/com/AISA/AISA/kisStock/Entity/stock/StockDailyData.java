@@ -60,4 +60,23 @@ public class StockDailyData {
         this.priceChange = priceChange;
         this.changeRate = changeRate;
     }
+
+    public void updateChangeInfo(BigDecimal priceChange, Double changeRate) {
+        this.priceChange = priceChange;
+        this.changeRate = changeRate;
+    }
+
+    // This method is added to allow updating all relevant fields of an existing
+    // StockDailyData record.
+    public void updateAllFields(BigDecimal closingPrice, BigDecimal openingPrice,
+            BigDecimal highPrice, BigDecimal lowPrice, BigDecimal volume,
+            BigDecimal priceChange, Double changeRate) {
+        this.closingPrice = closingPrice;
+        this.openingPrice = openingPrice;
+        this.highPrice = highPrice;
+        this.lowPrice = lowPrice;
+        this.volume = volume;
+        this.priceChange = priceChange;
+        this.changeRate = changeRate;
+    }
 }

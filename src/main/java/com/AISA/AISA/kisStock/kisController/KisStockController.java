@@ -5,6 +5,7 @@ import com.AISA.AISA.global.response.SuccessResponse;
 import com.AISA.AISA.kisStock.dto.StockPrice.StockPriceDto;
 import com.AISA.AISA.kisStock.dto.StockSimpleSearchResponseDto; // Simplified DTO
 import com.AISA.AISA.kisStock.dto.VolumeRank.VolumeRankDto;
+import com.AISA.AISA.kisStock.kisService.CommonStockClassificationService;
 import com.AISA.AISA.kisStock.kisService.Auth.KisAuthService;
 import com.AISA.AISA.kisStock.kisService.KisStockService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -24,6 +25,7 @@ import static org.springframework.http.MediaType.APPLICATION_JSON;
 public class KisStockController {
     private final KisStockService kisStockService;
     private final KisAuthService kisAuthService;
+    private final CommonStockClassificationService commonStockClassificationService;
 
     @GetMapping("/token")
     @Operation(summary = "Access Token 조회", description = "현재 유효한 KIS Access Token을 조회합니다.")
@@ -111,5 +113,12 @@ public class KisStockController {
         List<StockSimpleSearchResponseDto> result = kisStockService
                 .searchStocks(keyword);
         return ResponseEntity.ok(new SuccessResponse<>(true, "주식 검색 성공", result));
+    }
+
+    @PostMapping("/classify-common")
+    @Operation(summary = "보통주 분류 및 데이터 저장", description = "국내 주식들을 분석하여 보통주 여부(isCommon)를 판단하고 DB에 저장합니다.")
+    public ResponseEntity<SuccessResponse<String>> classifyCommonStocks() {
+        new Thread(commonStockClassificationService::classifyAllDomesticStocks).start();
+        return ResponseEntity.ok(new SuccessResponse<>(true, "보통주 분류 작업 시작 (백그라운드 실행)", "Started"));
     }
 }

@@ -1,5 +1,7 @@
 package com.AISA.AISA.kisStock.kisService;
 
+import com.AISA.AISA.kisStock.Entity.stock.StockFinancialRatio;
+import com.AISA.AISA.kisStock.dto.KisOtherMajorRatiosResponse;
 import com.AISA.AISA.kisStock.enums.MarketType;
 import com.AISA.AISA.global.exception.BusinessException;
 
@@ -32,6 +34,7 @@ import com.AISA.AISA.analysis.repository.StockStaticAnalysisRepository; // New f
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.CacheManager;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -44,11 +47,7 @@ import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.WeekFields;
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -252,26 +251,7 @@ public class KisStockService {
                                         dateType);
 
                         if (apiResponse.getPriceList() != null && !apiResponse.getPriceList().isEmpty()) {
-                                for (StockChartPriceDto priceDto : apiResponse.getPriceList()) {
-                                        LocalDate parsedDate = LocalDate.parse(priceDto.getDate(), formatter);
-                                        if (stockDailyDataRepository.findByStockAndDate(stock, parsedDate)
-                                                        .isPresent()) {
-                                                continue;
-                                        }
-
-                                        StockDailyData entity = StockDailyData.builder()
-                                                        .stock(stock)
-                                                        .date(parsedDate)
-                                                        .closingPrice(new BigDecimal(priceDto.getClosePrice()))
-                                                        .openingPrice(new BigDecimal(priceDto.getOpenPrice()))
-                                                        .highPrice(new BigDecimal(priceDto.getHighPrice()))
-                                                        .lowPrice(new BigDecimal(priceDto.getLowPrice()))
-                                                        .volume(new BigDecimal(priceDto.getVolume()))
-                                                        .priceChange(null)
-                                                        .changeRate(null)
-                                                        .build();
-                                        stockDailyDataRepository.save(entity);
-                                }
+                                saveDailyDataWithCalculation(stock, apiResponse.getPriceList());
                         }
 
                         List<StockChartPriceDto> filteredApiList = new ArrayList<>();
@@ -344,6 +324,67 @@ public class KisStockService {
                 } catch (Exception e) {
                         log.error("JSON Serialization Failed for Past Chart", e);
                         return "[]";
+                }
+        }
+
+        private void saveDailyDataWithCalculation(Stock stock, List<StockChartPriceDto> priceList) {
+                if (priceList == null || priceList.isEmpty()) {
+                        return;
+                }
+
+                // 1. Sort by Date Descending (Newest first)
+                DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
+                priceList.sort((o1, o2) -> o2.getDate().compareTo(o1.getDate()));
+
+                for (int i = 0; i < priceList.size(); i++) {
+                        StockChartPriceDto priceDto = priceList.get(i);
+                        LocalDate parsedDate = LocalDate.parse(priceDto.getDate(), formatter);
+
+                        BigDecimal closePrice = new BigDecimal(priceDto.getClosePrice());
+                        BigDecimal prevClosePrice = null;
+
+                        // 2. Find Previous Close Price
+                        if (i + 1 < priceList.size()) {
+                                prevClosePrice = new BigDecimal(priceList.get(i + 1).getClosePrice());
+                        } else {
+                                StockDailyData prevData = stockDailyDataRepository
+                                                .findTop1ByStockAndDateLessThanOrderByDateDesc(stock, parsedDate);
+                                if (prevData != null) {
+                                        prevClosePrice = prevData.getClosingPrice();
+                                }
+                        }
+
+                        // 3. Calculate Change
+                        BigDecimal priceChange = null;
+                        Double changeRate = null;
+
+                        if (prevClosePrice != null && prevClosePrice.compareTo(BigDecimal.ZERO) > 0) {
+                                priceChange = closePrice.subtract(prevClosePrice);
+                                changeRate = priceChange.divide(prevClosePrice, 6, RoundingMode.HALF_UP)
+                                                .multiply(BigDecimal.valueOf(100)).doubleValue();
+                        }
+
+                        // 4. Save or Update
+                        Optional<StockDailyData> existingOpt = stockDailyDataRepository.findByStockAndDate(stock,
+                                        parsedDate);
+                        if (existingOpt.isPresent()) {
+                                StockDailyData existing = existingOpt.get();
+                                existing.updateChangeInfo(priceChange, changeRate);
+                                stockDailyDataRepository.save(existing);
+                        } else {
+                                StockDailyData entity = StockDailyData.builder()
+                                                .stock(stock)
+                                                .date(parsedDate)
+                                                .closingPrice(closePrice)
+                                                .openingPrice(new BigDecimal(priceDto.getOpenPrice()))
+                                                .highPrice(new BigDecimal(priceDto.getHighPrice()))
+                                                .lowPrice(new BigDecimal(priceDto.getLowPrice()))
+                                                .volume(new BigDecimal(priceDto.getVolume()))
+                                                .priceChange(priceChange)
+                                                .changeRate(changeRate)
+                                                .build();
+                                stockDailyDataRepository.save(entity);
+                        }
                 }
         }
 
@@ -446,23 +487,7 @@ public class KisStockService {
 
                                 consecutiveFailures = 0;
 
-                                for (StockChartPriceDto priceDto : response.getPriceList()) {
-                                        LocalDate parsedDate = LocalDate.parse(priceDto.getDate(), formatter);
-                                        if (stockDailyDataRepository.findByStockAndDate(stock, parsedDate)
-                                                        .isPresent()) {
-                                                continue;
-                                        }
-                                        StockDailyData entity = StockDailyData.builder()
-                                                        .stock(stock)
-                                                        .date(parsedDate)
-                                                        .closingPrice(new BigDecimal(priceDto.getClosePrice()))
-                                                        .openingPrice(new BigDecimal(priceDto.getOpenPrice()))
-                                                        .highPrice(new BigDecimal(priceDto.getHighPrice()))
-                                                        .lowPrice(new BigDecimal(priceDto.getLowPrice()))
-                                                        .volume(new BigDecimal(priceDto.getVolume()))
-                                                        .build();
-                                        stockDailyDataRepository.save(entity);
-                                }
+                                saveDailyDataWithCalculation(stock, response.getPriceList());
 
                                 String oldestDateStr = response.getPriceList().get(response.getPriceList().size() - 1)
                                                 .getDate();
@@ -492,7 +517,7 @@ public class KisStockService {
 
         public void fetchAllStocksHistoricalData(String startDateStr) {
                 log.info("Starting batch historical stock data fetch from {}", startDateStr);
-                List<Stock> allStocks = stockRepository.findAll();
+                List<Stock> allStocks = stockRepository.findByStockType(Stock.StockType.DOMESTIC);
 
                 for (Stock stock : allStocks) {
                         try {
@@ -665,8 +690,9 @@ public class KisStockService {
         }
 
         public void refreshTopMarketCapPrices() {
-                List<StockMarketCap> top100 = stockMarketCapRepository.findTop100ByOrderByMarketCapDesc();
-                log.info("Warming up prices for Top {} Market Cap stocks...", top100.size());
+                List<StockMarketCap> top100 = stockMarketCapRepository.findByStockStockTypeOrderByMarketCapDesc(
+                                Stock.StockType.DOMESTIC, org.springframework.data.domain.PageRequest.of(0, 100));
+                log.info("Warming up prices for Top {} Domestic Market Cap stocks...", top100.size());
 
                 for (StockMarketCap smc : top100) {
                         try {
@@ -1214,7 +1240,7 @@ public class KisStockService {
         }
 
         @Transactional
-        @org.springframework.cache.annotation.CacheEvict(value = "investorTrend", key = "#stockCode")
+        @CacheEvict(value = "investorTrend", key = "#stockCode")
         public void evictInvestorTrendCache(String stockCode) {
                 log.info("Evicting investor trend cache for {}", stockCode);
         }
@@ -1298,7 +1324,7 @@ public class KisStockService {
 
         private void updateOtherMajorRatiosByDivCode(String stockCode, String divCode) {
                 try {
-                        com.AISA.AISA.kisStock.dto.KisOtherMajorRatiosResponse response = kisApiClient.fetch(
+                        KisOtherMajorRatiosResponse response = kisApiClient.fetch(
                                         token -> webClient.get()
                                                         .uri(uriBuilder -> uriBuilder
                                                                         .path(kisApiProperties.getOtherMajorRatiosUrl())
@@ -1311,10 +1337,10 @@ public class KisStockService {
                                                         .header("appsecret", kisApiProperties.getAppsecret())
                                                         .header("tr_id", "FHKST66430500")
                                                         .header("custtype", "P"),
-                                        com.AISA.AISA.kisStock.dto.KisOtherMajorRatiosResponse.class);
+                                        KisOtherMajorRatiosResponse.class);
 
                         if (response != null && response.getOutput() != null) {
-                                for (com.AISA.AISA.kisStock.dto.KisOtherMajorRatiosResponse.Output out : response
+                                for (KisOtherMajorRatiosResponse.Output out : response
                                                 .getOutput()) {
                                         String yymm = out.getStacYymm();
                                         BigDecimal evEbitda = parseBigDecimalSafe(out.getEvEbitda());
@@ -1324,13 +1350,13 @@ public class KisStockService {
                                                 continue;
 
                                         // Find matching entity
-                                        com.AISA.AISA.kisStock.Entity.stock.StockFinancialRatio target = stockFinancialRatioRepository
+                                        StockFinancialRatio target = stockFinancialRatioRepository
                                                         .findByStockCodeAndStacYymmAndDivCode(stockCode, yymm, divCode)
                                                         .orElse(null);
 
                                         if (target != null) {
                                                 // Use Builder to update (toBuilder=true assumed on Entity)
-                                                com.AISA.AISA.kisStock.Entity.stock.StockFinancialRatio updated = target
+                                                StockFinancialRatio updated = target
                                                                 .toBuilder()
                                                                 .evEbitda(evEbitda) // Update new fields
                                                                 .ebitda(ebitda)

@@ -122,6 +122,7 @@ jobs:
               -e KIS_OTHER_MAJOR_RATIOS_URL="/uapi/domestic-stock/v1/finance/other-major-ratios" \
               -e KIS_INVESTOR_TREND_MARKET_URL="/uapi/domestic-stock/v1/quotations/inquire-investor-daily-by-market" \
               -e KIS_SEARCH_STOCK_INFO_URL="/uapi/domestic-stock/v1/quotations/search-stock-info" \
+              -e KIS_ETF_PRICE_URL: "/uapi/etfetn/v1/quotations/inquire-price" \
               \
               -e JWT_SECRET="${{ secrets.JWT_SECRET }}" \
               -e JWT_ACCESS_TOKEN_EXPIRATION_TIME="21600000" \

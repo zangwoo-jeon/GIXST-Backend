@@ -48,9 +48,16 @@ public class IndexDailyData {
     @Column(name = "volume", precision = 20, scale = 0)
     private BigDecimal volume;
 
+    @Column(name = "rising_stock_count")
+    private Long risingStockCount;
+
+    @Column(name = "falling_stock_count")
+    private Long fallingStockCount;
+
     @Builder
     public IndexDailyData(String marketName, LocalDate date, BigDecimal openingPrice, BigDecimal closingPrice,
-            BigDecimal highPrice, BigDecimal lowPrice, BigDecimal priceChange, Double changeRate, BigDecimal volume) {
+            BigDecimal highPrice, BigDecimal lowPrice, BigDecimal priceChange, Double changeRate, BigDecimal volume,
+            Long risingStockCount, Long fallingStockCount) {
         this.marketName = marketName;
         this.date = date;
         this.openingPrice = openingPrice;
@@ -60,6 +67,8 @@ public class IndexDailyData {
         this.priceChange = priceChange;
         this.changeRate = changeRate;
         this.volume = volume;
+        this.risingStockCount = risingStockCount;
+        this.fallingStockCount = fallingStockCount;
     }
 
     public void updateInfo(BigDecimal closingPrice, BigDecimal openingPrice, BigDecimal highPrice, BigDecimal lowPrice,
@@ -71,5 +80,10 @@ public class IndexDailyData {
         this.priceChange = priceChange;
         this.changeRate = changeRate;
         this.volume = volume;
+    }
+
+    public void updateBreadth(Long risingStockCount, Long fallingStockCount) {
+        this.risingStockCount = risingStockCount;
+        this.fallingStockCount = fallingStockCount;
     }
 }

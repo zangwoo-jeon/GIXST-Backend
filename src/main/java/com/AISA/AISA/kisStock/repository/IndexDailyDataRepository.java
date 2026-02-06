@@ -16,4 +16,6 @@ public interface IndexDailyDataRepository extends JpaRepository<IndexDailyData, 
 
     List<IndexDailyData> findAllByMarketNameAndDateBetweenOrderByDateDesc(String marketName, LocalDate startDate,
             LocalDate endDate);
+
+    Optional<IndexDailyData> findFirstByMarketNameOrderByDateDesc(String marketName);
 }

@@ -41,6 +41,9 @@ public class Stock {
     @Column(nullable = false)
     private boolean isSuspended = false;
 
+    @Column(name = "is_common", nullable = false)
+    private boolean isCommon = true; // 보통주 여부
+
     @Column
     private LocalDate listingDate;
 
@@ -96,5 +99,9 @@ public class Stock {
 
     public void updateListingDate(LocalDate listingDate) {
         this.listingDate = listingDate;
+    }
+
+    public void updateIsCommon(boolean isCommon) {
+        this.isCommon = isCommon;
     }
 }

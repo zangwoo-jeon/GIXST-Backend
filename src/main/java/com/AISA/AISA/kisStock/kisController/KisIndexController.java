@@ -1,14 +1,22 @@
 package com.AISA.AISA.kisStock.kisController;
 
 import com.AISA.AISA.global.response.SuccessResponse;
+import com.AISA.AISA.kisStock.Entity.Index.MarketStatusHistory;
 import com.AISA.AISA.kisStock.dto.Index.IndexChartInfoDto;
 import com.AISA.AISA.kisStock.dto.Index.IndexChartResponseDto;
+import com.AISA.AISA.kisStock.enums.MarketType;
 import com.AISA.AISA.kisStock.kisService.KisIndexService;
 import com.AISA.AISA.kisStock.dto.Index.OverseasIndexStatusDto;
 
 import com.AISA.AISA.kisStock.enums.OverseasIndex;
 import com.AISA.AISA.kisStock.dto.Index.IndexChartPriceDto; // [NEW] added
+
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
+
+import com.AISA.AISA.kisStock.kisService.MarketStatusHistoryService;
+import com.AISA.AISA.portfolio.macro.service.MacroService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -21,7 +29,8 @@ import org.springframework.web.bind.annotation.*;
 @Tag(name = "지수 API", description = "지수 관련 API")
 public class KisIndexController {
     private final KisIndexService kisIndexService;
-    private final com.AISA.AISA.portfolio.macro.service.MacroService macroService;
+    private final MacroService macroService;
+    private final MarketStatusHistoryService marketStatusHistoryService;
 
     @GetMapping("/{marketCode}/status")
     @Operation(summary = "지수 현재 상태 조회", description = "코스피(kospi) / 코스닥(kosdaq)의 실시간 지수 정보를 조회합니다.")
@@ -117,6 +126,46 @@ public class KisIndexController {
             @RequestParam String endDate) {
         List<IndexChartPriceDto> ratioList = kisIndexService.getKosdaqUsdRatio(startDate, endDate);
         return ResponseEntity.ok(new SuccessResponse<>(true, "달러 환산 코스닥 조회 성공", ratioList));
+    }
+
+    @GetMapping("/status/history")
+    @Operation(summary = "시장 등락 종목 수 히스토리 조회", description = "DB에 저장된 날짜별 코스피/코스닥 상승/하락 종목 수를 조회합니다.")
+    public ResponseEntity<SuccessResponse<List<MarketStatusHistory>>> getMarketStatusHistory(
+            @RequestParam String marketCode,
+            @RequestParam String startDate,
+            @RequestParam String endDate) {
+
+        MarketType marketType = MarketType
+                .valueOf(marketCode.toUpperCase());
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
+        LocalDate start = LocalDate.parse(startDate, formatter);
+        LocalDate end = LocalDate.parse(endDate, formatter);
+
+        List<MarketStatusHistory> history = marketStatusHistoryService
+                .getHistory(marketType, start, end);
+
+        return ResponseEntity.ok(new SuccessResponse<>(true, "시장 등락 히스토리 조회 성공", history));
+    }
+
+    @PostMapping("/status/history/generate")
+    @Operation(summary = "시장 등락 종목 수 히스토리 생성", description = "특정 기간의 주식 데이터를 기반으로 상승/하락 종목 수를 계산하여 DB에 저장합니다.")
+    public ResponseEntity<SuccessResponse<Void>> generateMarketStatusHistory(
+            @RequestParam String startDate,
+            @RequestParam String endDate,
+            @RequestParam(required = false) String marketCode) {
+
+        MarketType marketType = null;
+        if (marketCode != null && !marketCode.isEmpty()) {
+            marketType = MarketType.valueOf(marketCode.toUpperCase());
+        }
+
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
+        LocalDate start = LocalDate.parse(startDate, formatter);
+        LocalDate end = LocalDate.parse(endDate, formatter);
+
+        marketStatusHistoryService.generateHistory(start, end, marketType);
+
+        return ResponseEntity.ok(new SuccessResponse<>(true, "시장 등락 히스토리 생성 완료", null));
     }
 
 }

@@ -67,6 +67,8 @@ public class DomesticValuationDto {
         @JsonIgnore
         private PriceModel priceModel;
         private QualityMetrics qualityMetrics;
+        private TechnicalIndicators technicalIndicators;
+        private ValuationContext valuationContext;
 
         private PeerComparison peerComparison;
         private InvestorTrendDto investorTrend;
@@ -88,6 +90,42 @@ public class DomesticValuationDto {
         @Builder
         public static class QualityMetrics {
             private String evEbitda;
+        }
+
+        @Getter
+        @Setter
+        @NoArgsConstructor
+        @AllArgsConstructor
+        @Builder
+        public static class TechnicalIndicators {
+            private double rsi;
+            private List<String> movingAverages; // "20: 70,000", "60: 72,000" 등
+            private Double relativeStrengthIndex; // 지수 대비 강도 (Alpha)
+            private String priceLocation; // "GOLDEN_CROSS", "SUPPORT_LINE" 등
+        }
+
+        @Getter
+        @Setter
+        @NoArgsConstructor
+        @AllArgsConstructor
+        @Builder
+        public static class ValuationContext {
+            private Double beta;
+            private Double costOfEquity;
+            private HistoricalValuationRange historicalPerRange;
+            private HistoricalValuationRange historicalPbrRange;
+        }
+
+        @Getter
+        @Setter
+        @NoArgsConstructor
+        @AllArgsConstructor
+        @Builder
+        public static class HistoricalValuationRange {
+            private String min;
+            private String max;
+            private String median;
+            private String current;
         }
     }
 

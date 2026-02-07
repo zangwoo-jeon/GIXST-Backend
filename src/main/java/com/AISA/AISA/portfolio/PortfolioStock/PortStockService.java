@@ -1,8 +1,10 @@
 package com.AISA.AISA.portfolio.PortfolioStock;
 
 import com.AISA.AISA.global.exception.BusinessException;
+import com.AISA.AISA.kisOverseasStock.service.KisOverseasStockService;
 import com.AISA.AISA.kisStock.Entity.stock.Stock;
 import com.AISA.AISA.kisStock.dto.StockPrice.StockPriceDto;
+import com.AISA.AISA.kisStock.kisService.KisMacroService;
 import com.AISA.AISA.kisStock.kisService.KisStockService;
 import com.AISA.AISA.kisStock.repository.StockRepository;
 import com.AISA.AISA.portfolio.PortfolioGroup.Portfolio;
@@ -30,6 +32,8 @@ public class PortStockService {
     private final PortfolioRepository portfolioRepository;
     private final StockRepository stockRepository;
     private final KisStockService kisStockService;
+    private final KisOverseasStockService kisOverseasStockService;
+    private final KisMacroService kisMacroService;
 
     @Transactional
     public PortStock addStock(UUID portId, PortStockAddRequest request) {
@@ -136,15 +140,30 @@ public class PortStockService {
 
         List<PortStock> portStocks = portStockRepository.findByPortfolio_PortIdOrderBySequenceAsc(portId);
 
+        // 최신 환율 정보 가져오기
+        Double latestRate = kisMacroService.getLatestExchangeRate();
+        BigDecimal exchangeRate = (latestRate != null) ? BigDecimal.valueOf(latestRate) : BigDecimal.valueOf(1350.0); // 기본값
+
         List<PortStockResponse> enrichedStocks = portStocks.stream()
                 .map(portStock -> {
                     BigDecimal currentPrice = BigDecimal.ZERO;
                     BigDecimal dailyProfit = BigDecimal.ZERO;
                     BigDecimal dailyChangeRate = BigDecimal.ZERO;
+                    BigDecimal applicableExchangeRate = BigDecimal.ONE;
+
+                    Stock stock = portStock.getStock();
+                    boolean isOverseas = stock.getStockType() == Stock.StockType.US_STOCK;
 
                     try {
-                        StockPriceDto stockPriceDto = kisStockService
-                                .getStockPrice(portStock.getStock().getStockCode());
+                        StockPriceDto stockPriceDto;
+                        if (isOverseas) {
+                            stockPriceDto = kisOverseasStockService.getOverseasStockPrice(stock.getStockCode());
+                            applicableExchangeRate = exchangeRate;
+                        } else {
+                            stockPriceDto = kisStockService.getStockPrice(stock.getStockCode());
+                            applicableExchangeRate = BigDecimal.ONE;
+                        }
+
                         if (stockPriceDto != null && stockPriceDto.getStockPrice() != null) {
                             currentPrice = new BigDecimal(stockPriceDto.getStockPrice());
 
@@ -161,7 +180,8 @@ public class PortStockService {
                         // API 호출 실패 시 0으로 처리, 로그 필요 시 추가
                         log.error("Error fetching price for stock {}: ", portStock.getStock().getStockCode(), e);
                     }
-                    return new PortStockResponse(portStock, currentPrice, dailyProfit, dailyChangeRate);
+                    return new PortStockResponse(portStock, currentPrice, dailyProfit, dailyChangeRate,
+                            applicableExchangeRate);
                 })
                 .sorted((a, b) -> a.getSequence().compareTo(b.getSequence()))
                 .collect(toList());

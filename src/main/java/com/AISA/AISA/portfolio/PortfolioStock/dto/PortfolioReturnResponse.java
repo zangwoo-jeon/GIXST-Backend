@@ -20,6 +20,16 @@ public class PortfolioReturnResponse {
     private BigDecimal totalReturnRate; // 총 수익률
     private BigDecimal totalDailyProfit; // 일간 총 평가손익
     private BigDecimal totalDailyReturnRate; // 일간 총 수익률
+
+    // 국내 주식 소계 (원화)
+    private BigDecimal domesticTotalValue;
+    private BigDecimal domesticTotalProfit;
+
+    // 해외 주식 소계 (USD)
+    private BigDecimal overseasTotalValue;
+    private BigDecimal overseasTotalProfit;
+    private BigDecimal overseasTotalProfitKrw;
+
     private List<PortStockResponse> portStocks;
 
     public PortfolioReturnResponse(Portfolio portfolio, List<PortStockResponse> portStocks) {
@@ -28,18 +38,50 @@ public class PortfolioReturnResponse {
         this.portStocks = portStocks;
 
         this.totalValue = portStocks.stream()
-                .map(stock -> stock.getTotalValue() != null ? stock.getTotalValue() : BigDecimal.ZERO)
+                .map(stock -> stock.getTotalValueKrw() != null ? stock.getTotalValueKrw() : BigDecimal.ZERO)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         this.totalInvestmentAmount = portStocks.stream()
-                .map(stock -> stock.getAveragePrice().multiply(BigDecimal.valueOf(stock.getQuantity())))
+                .map(stock -> {
+                    BigDecimal investmentNative = stock.getAveragePrice()
+                            .multiply(BigDecimal.valueOf(stock.getQuantity()));
+                    BigDecimal rate = (stock.getExchangeRate() != null) ? stock.getExchangeRate() : BigDecimal.ONE;
+                    return investmentNative.multiply(rate);
+                })
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         this.totalDailyProfit = portStocks.stream()
-                .map(stock -> stock.getDailyProfit() != null ? stock.getDailyProfit() : BigDecimal.ZERO)
+                .map(stock -> stock.getDailyProfitKrw() != null ? stock.getDailyProfitKrw() : BigDecimal.ZERO)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         this.totalProfitOrLoss = this.totalValue.subtract(this.totalInvestmentAmount);
+
+        // 국내 소계 (KRW)
+        this.domesticTotalValue = portStocks.stream()
+                .filter(s -> "KRW".equals(s.getCurrency()))
+                .map(s -> s.getTotalValue() != null ? s.getTotalValue() : BigDecimal.ZERO)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        this.domesticTotalProfit = portStocks.stream()
+                .filter(s -> "KRW".equals(s.getCurrency()))
+                .map(s -> s.getProfit() != null ? s.getProfit() : BigDecimal.ZERO)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        // 해외 소계 (USD)
+        this.overseasTotalValue = portStocks.stream()
+                .filter(s -> "USD".equals(s.getCurrency()))
+                .map(s -> s.getTotalValue() != null ? s.getTotalValue() : BigDecimal.ZERO)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        this.overseasTotalProfit = portStocks.stream()
+                .filter(s -> "USD".equals(s.getCurrency()))
+                .map(s -> s.getProfit() != null ? s.getProfit() : BigDecimal.ZERO)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        this.overseasTotalProfitKrw = portStocks.stream()
+                .filter(s -> "USD".equals(s.getCurrency()))
+                .map(s -> s.getProfitKrw() != null ? s.getProfitKrw() : BigDecimal.ZERO)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         if (this.totalInvestmentAmount.compareTo(BigDecimal.ZERO) == 0) {
             this.totalReturnRate = BigDecimal.ZERO;

@@ -1,44 +1,77 @@
 package com.AISA.AISA.analysis.service;
 
-import com.AISA.AISA.analysis.dto.ValuationBaseDto;
-import com.AISA.AISA.analysis.dto.ValuationBaseDto.*;
-import com.AISA.AISA.analysis.dto.ValuationBaseDto.Summary.*;
-import com.AISA.AISA.analysis.dto.DomesticValuationDto;
-import com.AISA.AISA.analysis.dto.DomesticValuationDto.*;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.TreeMap;
+import java.util.stream.Collectors;
+
+import org.apache.commons.math3.stat.correlation.PearsonsCorrelation;
+import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics;
+import org.springframework.stereotype.Service;
+
+import com.AISA.AISA.analysis.dto.DomesticValuationDto.AnalysisDetails;
+import com.AISA.AISA.analysis.dto.DomesticValuationDto.AnalysisDetails.HistoricalValuationRange;
+import com.AISA.AISA.analysis.dto.DomesticValuationDto.AnalysisDetails.TechnicalIndicators;
+import com.AISA.AISA.analysis.dto.DomesticValuationDto.AnalysisDetails.ValuationContext;
+import com.AISA.AISA.analysis.dto.DomesticValuationDto.PeerComparison;
+import com.AISA.AISA.analysis.dto.DomesticValuationDto.PeerInfo;
+import com.AISA.AISA.analysis.dto.DomesticValuationDto.Request;
+import com.AISA.AISA.analysis.dto.DomesticValuationDto.Response;
+import com.AISA.AISA.analysis.dto.ValuationBaseDto.Summary;
+import com.AISA.AISA.analysis.dto.ValuationBaseDto.ValuationBand;
+import com.AISA.AISA.analysis.dto.ValuationBaseDto.ValuationResult;
+import com.AISA.AISA.analysis.dto.ValuationBaseDto.Stance;
+import com.AISA.AISA.analysis.dto.ValuationBaseDto.RiskLevel;
+import com.AISA.AISA.analysis.dto.ValuationBaseDto.Timing;
+import com.AISA.AISA.analysis.dto.ValuationBaseDto.DiscountRateInfo;
 import com.AISA.AISA.analysis.entity.StockAiSummary;
 import com.AISA.AISA.analysis.entity.StockStaticAnalysis;
 import com.AISA.AISA.analysis.repository.StockAiSummaryRepository;
 import com.AISA.AISA.analysis.repository.StockStaticAnalysisRepository;
+import com.AISA.AISA.kisStock.Entity.Index.IndexDailyData;
 import com.AISA.AISA.kisStock.Entity.stock.Stock;
-import com.AISA.AISA.kisStock.Entity.stock.StockBalanceSheet;
+import com.AISA.AISA.kisStock.Entity.stock.StockDailyData;
 import com.AISA.AISA.kisStock.Entity.stock.StockFinancialRatio;
+import com.AISA.AISA.kisStock.Entity.stock.StockBalanceSheet;
 import com.AISA.AISA.kisStock.Entity.stock.StockFinancialStatement;
-import com.AISA.AISA.kisStock.kisService.CompetitorAnalysisService;
-import com.AISA.AISA.kisStock.kisService.KisStockService;
-import com.AISA.AISA.kisStock.dto.StockPrice.StockPriceDto;
+import com.AISA.AISA.kisStock.enums.BondYield;
 import com.AISA.AISA.kisStock.dto.InvestorTrend.InvestorTrendDto;
+import com.AISA.AISA.kisStock.dto.StockPrice.StockPriceDto;
+import com.AISA.AISA.kisStock.repository.IndexDailyDataRepository;
+import com.AISA.AISA.kisStock.repository.StockDailyDataRepository;
 import com.AISA.AISA.kisStock.repository.StockFinancialRatioRepository;
 import com.AISA.AISA.kisStock.repository.StockFinancialStatementRepository;
 import com.AISA.AISA.kisStock.repository.StockRepository;
+import com.AISA.AISA.kisStock.kisService.CompetitorAnalysisService;
+import com.AISA.AISA.kisStock.kisService.KisStockService;
+import com.AISA.AISA.kisStock.kisService.KisIndexService;
+import com.AISA.AISA.kisStock.kisService.KisMacroService;
+import com.AISA.AISA.analysis.service.GeminiService;
+import com.AISA.AISA.analysis.dto.ValuationBaseDto.UserPropensity;
+import com.AISA.AISA.portfolio.macro.Entity.MacroDailyData;
+import com.AISA.AISA.portfolio.macro.repository.MacroDailyDataRepository;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+
+import lombok.AllArgsConstructor;
+import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cache.annotation.Cacheable;
-import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
-import java.math.RoundingMode;
-import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
+import static com.AISA.AISA.analysis.dto.ValuationBaseDto.Summary.AiVerdict.builder;
 
 @Slf4j
 @Service
@@ -52,6 +85,11 @@ public class ValuationService {
     private final StockAiSummaryRepository stockAiSummaryRepository;
     private final StockStaticAnalysisRepository stockStaticAnalysisRepository;
     private final CompetitorAnalysisService competitorAnalysisService;
+    private final IndexDailyDataRepository indexDailyDataRepository;
+    private final MacroDailyDataRepository macroDailyDataRepository;
+    private final KisIndexService kisIndexService;
+    private final KisMacroService kisMacroService;
+    private final StockDailyDataRepository stockDailyDataRepository;
 
     @Autowired
     public ValuationService(StockRepository stockRepository,
@@ -61,7 +99,12 @@ public class ValuationService {
             GeminiService geminiService,
             StockAiSummaryRepository stockAiSummaryRepository,
             StockStaticAnalysisRepository stockStaticAnalysisRepository,
-            CompetitorAnalysisService competitorAnalysisService) {
+            CompetitorAnalysisService competitorAnalysisService,
+            IndexDailyDataRepository indexDailyDataRepository,
+            MacroDailyDataRepository macroDailyDataRepository,
+            KisIndexService kisIndexService,
+            KisMacroService kisMacroService,
+            StockDailyDataRepository stockDailyDataRepository) {
         this.stockRepository = stockRepository;
         this.stockFinancialRatioRepository = stockFinancialRatioRepository;
         this.stockFinancialStatementRepository = stockFinancialStatementRepository;
@@ -70,6 +113,11 @@ public class ValuationService {
         this.stockAiSummaryRepository = stockAiSummaryRepository;
         this.stockStaticAnalysisRepository = stockStaticAnalysisRepository;
         this.competitorAnalysisService = competitorAnalysisService;
+        this.indexDailyDataRepository = indexDailyDataRepository;
+        this.macroDailyDataRepository = macroDailyDataRepository;
+        this.kisIndexService = kisIndexService;
+        this.kisMacroService = kisMacroService;
+        this.stockDailyDataRepository = stockDailyDataRepository;
     }
 
     @Transactional
@@ -767,6 +815,22 @@ public class ValuationService {
         return response.toBuilder().summary(newSummary).analysisDetails(details).build();
     }
 
+    private static class KnnCandidate {
+        String date;
+        double distance;
+        BigDecimal per;
+        BigDecimal pbr;
+        double weight;
+
+        KnnCandidate(String date, double distance, BigDecimal per, BigDecimal pbr) {
+            this.date = date;
+            this.distance = distance;
+            this.per = per;
+            this.pbr = pbr;
+            this.weight = 1.0 / (distance + 1e-4);
+        }
+    }
+
     private PeerComparison calculatePeerComparison(String stockCode) {
         List<Stock> competitors = competitorAnalysisService.findCompetitors(stockCode);
         List<PeerInfo> peerInfos = new ArrayList<>();
@@ -791,11 +855,178 @@ public class ValuationService {
 
         String sectorAvgPer = count > 0 ? sumPer.divide(new BigDecimal(count), 2, RoundingMode.HALF_UP).toString()
                 : "N/A";
-        return PeerComparison.builder()
-                .sectorAvgPer(sectorAvgPer)
-                .peers(peerInfos)
-                .status("COMPLETED")
+        return PeerComparison.builder().sectorAvgPer(sectorAvgPer).peers(peerInfos).status("COMPLETED").build();
+    }
+
+    private ValuationContext calculateValuationContext(String stockCode, BigDecimal currentRoe,
+            BigDecimal currentMargin, String marketName) {
+        List<StockFinancialRatio> history = stockFinancialRatioRepository.findByDivCodeAndStacYymmGreaterThanEqual("0",
+                LocalDate.now().minusYears(10)
+                        .format(DateTimeFormatter.ofPattern("yyyyMM")));
+
+        List<StockFinancialRatio> stockHistory = history.stream()
+                .filter(r -> r.getStockCode().equals(stockCode))
+                .collect(Collectors.toList());
+
+        HistoricalValuationRange perRange = calculateHistoricalRange(stockHistory, currentRoe,
+                currentMargin, "PER");
+        HistoricalValuationRange pbrRange = calculateHistoricalRange(stockHistory, currentRoe,
+                currentMargin, "PBR");
+
+        double beta = 1.0;
+        double riskFreeRate = 0.035;
+        try {
+            beta = calculateBeta(stockCode, marketName);
+            String bondSymbol = marketName.startsWith("KOS") ? BondYield.KR_10Y.getSymbol()
+                    : BondYield.US_10Y.getSymbol();
+            Optional<MacroDailyData> latestBond = macroDailyDataRepository
+                    .findTopByStatCodeAndItemCodeOrderByDateDesc("021Y002", bondSymbol);
+            if (latestBond.isPresent()) {
+                riskFreeRate = latestBond.get().getValue().doubleValue() / 100.0;
+            }
+        } catch (Exception e) {
+            log.warn("Failed to calculate beta or fetch risk free rate: {}", e.getMessage());
+        }
+
+        double erp = 0.05;
+        double coe = riskFreeRate + (beta * erp);
+
+        return ValuationContext.builder()
+                .beta(beta)
+                .costOfEquity(coe)
+                .historicalPerRange(perRange)
+                .historicalPbrRange(pbrRange)
                 .build();
+    }
+
+    private HistoricalValuationRange calculateHistoricalRange(
+            List<StockFinancialRatio> history, BigDecimal targetRoe, BigDecimal targetMargin, String metric) {
+        if (history == null || history.isEmpty())
+            return null;
+        double tRoe = targetRoe != null ? targetRoe.doubleValue() : 0.0;
+        List<KnnCandidate> candidates = new ArrayList<>();
+        for (StockFinancialRatio r : history) {
+            BigDecimal rRoe = r.getRoe();
+            double dist = Math.sqrt(Math.pow(tRoe - (rRoe != null ? rRoe.doubleValue() : 0.0), 2));
+            BigDecimal val = "PER".equals(metric) ? r.getPer() : r.getPbr();
+            if (val != null && val.compareTo(BigDecimal.ZERO) > 0) {
+                candidates.add(new KnnCandidate(r.getStacYymm(), dist, r.getPer(), r.getPbr()));
+            }
+        }
+        if (candidates.isEmpty())
+            return null;
+        List<KnnCandidate> neighbors = candidates.stream()
+                .sorted(java.util.Comparator.comparingDouble(c -> c.distance))
+                .limit(5).collect(Collectors.toList());
+        List<BigDecimal> values = neighbors.stream()
+                .map(c -> "PER".equals(metric) ? c.per : c.pbr)
+                .sorted().collect(Collectors.toList());
+        BigDecimal min = values.get(0), max = values.get(values.size() - 1), median = values.get(values.size() / 2);
+        return HistoricalValuationRange.builder()
+                .min(min.setScale(2, RoundingMode.HALF_UP).toString())
+                .max(max.setScale(2, RoundingMode.HALF_UP).toString())
+                .median(median.setScale(2, RoundingMode.HALF_UP).toString())
+                .build();
+    }
+
+    private double calculateBeta(String stockCode, String marketName) {
+        LocalDate start = LocalDate.now().minusYears(1);
+        LocalDate end = LocalDate.now();
+
+        List<StockDailyData> stockData = stockDailyDataRepository
+                .findByStock_StockCodeAndDateBetweenOrderByDateAsc(stockCode, start, end);
+        List<IndexDailyData> indexData = indexDailyDataRepository
+                .findAllByMarketNameAndDateBetweenOrderByDateDesc(marketName, start, end);
+        if (stockData.size() < 30 || indexData.isEmpty())
+            return 1.0;
+        Map<LocalDate, Double> stockSeries = stockData.stream().collect(Collectors
+                .toMap(d -> d.getDate(), d -> d.getClosingPrice().doubleValue(), (v1, v2) -> v1));
+        Map<LocalDate, Double> indexSeries = indexData.stream().collect(Collectors
+                .toMap(d -> d.getDate(), d -> d.getClosingPrice().doubleValue(), (v1, v2) -> v1));
+
+        List<LocalDate> commonDates = stockSeries.keySet().stream().filter(indexSeries::containsKey).sorted()
+                .collect(Collectors.toList());
+        if (commonDates.size() < 30)
+            return 1.0;
+
+        double[] rP = new double[commonDates.size() - 1];
+        double[] rI = new double[commonDates.size() - 1];
+        for (int i = 0; i < commonDates.size() - 1; i++) {
+            rP[i] = Math.log(stockSeries.get(commonDates.get(i + 1)) / stockSeries.get(commonDates.get(i)));
+            rI[i] = Math.log(indexSeries.get(commonDates.get(i + 1)) / indexSeries.get(commonDates.get(i)));
+        }
+        PearsonsCorrelation pc = new PearsonsCorrelation();
+        double correlation = pc.correlation(rP, rI);
+        double volP = new DescriptiveStatistics(rP).getStandardDeviation();
+        double volI = new DescriptiveStatistics(rI).getStandardDeviation();
+        return volI == 0 ? 1.0 : correlation * (volP / volI);
+    }
+
+    private TechnicalIndicators calculateTechnicalIndicators(String stockCode,
+            String marketName) {
+        LocalDate end = LocalDate.now();
+        LocalDate start = end.minusDays(200);
+        List<StockDailyData> stockData = stockDailyDataRepository
+                .findByStock_StockCodeAndDateBetweenOrderByDateAsc(stockCode, start, end);
+        if (stockData.size() < 20)
+            return null;
+
+        List<BigDecimal> prices = stockData.stream().map(d -> d.getClosingPrice())
+                .collect(Collectors.toList());
+        double currentPrice = prices.get(prices.size() - 1).doubleValue();
+        double rsi = calculateRsi(prices, 14);
+
+        List<String> maList = new ArrayList<>();
+        double ma20 = calculateMA(prices, 20);
+        double ma60 = calculateMA(prices, 60);
+        double ma120 = calculateMA(prices, 120);
+        maList.add("20일: " + String.format("%,.0f원", ma20));
+        maList.add("60일: " + String.format("%,.0f원", ma60));
+        maList.add("120일: " + String.format("%,.0f원", ma120));
+
+        // Relative Strength (vs Index)
+        double rs = 0.0;
+        try {
+            List<IndexDailyData> indexData = indexDailyDataRepository
+                    .findAllByMarketNameAndDateBetweenOrderByDateDesc(marketName, start, end);
+            if (indexData.size() >= 20) {
+                double stockReturn = (currentPrice / prices.get(prices.size() - 20).doubleValue()) - 1.0;
+                double indexEnd = indexData.get(indexData.size() - 1).getClosingPrice().doubleValue();
+                double indexStart = indexData.get(indexData.size() - 20).getClosingPrice().doubleValue();
+                double indexReturn = (indexEnd / indexStart) - 1.0;
+                rs = (stockReturn - indexReturn) * 100.0; // Alpha in %
+            }
+        } catch (Exception e) {
+        }
+
+        String location = currentPrice > ma20 ? (ma20 > ma60 ? "정배열 상단" : "단기 반등") : "역배열 하단";
+
+        return TechnicalIndicators.builder()
+                .rsi(rsi).movingAverages(maList).relativeStrengthIndex(rs).priceLocation(location).build();
+    }
+
+    private double calculateRsi(List<BigDecimal> prices, int period) {
+        if (prices.size() <= period)
+            return 50.0;
+        double gain = 0, loss = 0;
+        for (int i = prices.size() - period; i < prices.size(); i++) {
+            double diff = prices.get(i).doubleValue() - prices.get(i - 1).doubleValue();
+            if (diff > 0)
+                gain += diff;
+            else
+                loss -= diff;
+        }
+        if (loss == 0)
+            return 100.0;
+        double rs = (gain / period) / (loss / period);
+        return 100.0 - (100.0 / (1.0 + rs));
+    }
+
+    private double calculateMA(List<BigDecimal> prices, int period) {
+        if (prices.size() < period)
+            return 0.0;
+        return prices.subList(prices.size() - period, prices.size()).stream().mapToDouble(BigDecimal::doubleValue)
+                .average().orElse(0.0);
     }
 
     private String generateFallbackSupplyAdvice(double score) {
@@ -823,8 +1054,8 @@ public class ValuationService {
     @NoArgsConstructor
     private static class AiResponseJson {
         private String keyInsight;
-        private AiVerdict aiVerdict;
-        private BeginnerVerdict beginnerVerdict;
+        private Summary.AiVerdict aiVerdict;
+        private Summary.BeginnerVerdict beginnerVerdict;
         private List<String> catalysts;
         private List<String> risks;
         private Map<String, Double> suggestedWeights;
@@ -837,17 +1068,14 @@ public class ValuationService {
         BigDecimal theoreticalMax = new BigDecimal(response.getBand().getMaxPrice().replace(",", ""));
         BigDecimal currentPrice = new BigDecimal(response.getCurrentPrice().replace(",", ""));
 
-        // [Phase 4] 목표가(Target) 계산 혁신: 현재가와 적정가 중 큰 값을 기저로 사용
         BigDecimal baseForTarget = theoreticalMax.max(currentPrice);
 
-        // 동적 프리미엄 산출
-        BigDecimal multiplier = new BigDecimal("1.05"); // 기본 5% 프리미엄
+        BigDecimal multiplier = new BigDecimal("1.05");
         if (peg != null && peg.compareTo(BigDecimal.ONE) < 0)
-            multiplier = multiplier.add(new BigDecimal("0.02")); // PEG < 1: +2%
+            multiplier = multiplier.add(new BigDecimal("0.02"));
 
         BigDecimal targetPrice = baseForTarget.multiply(multiplier).setScale(0, RoundingMode.HALF_UP);
 
-        // 손절가(Stop Loss) 계산: 밴드 하단의 95% 또는 현재가의 90% 중 높은 쪽
         BigDecimal bandBottom = new BigDecimal(response.getBand().getMinPrice().replace(",", ""))
                 .multiply(new BigDecimal("0.95"));
         BigDecimal currentExit = currentPrice.multiply(new BigDecimal("0.90"));
@@ -865,7 +1093,7 @@ public class ValuationService {
                 mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
                 AiResponseJson result = mapper.readValue(jsonText.substring(start, end + 1), AiResponseJson.class);
                 if (result.getAiVerdict() == null)
-                    result.setAiVerdict(AiVerdict.builder().stance(Stance.HOLD).riskLevel(RiskLevel.MEDIUM)
+                    result.setAiVerdict(builder().stance(Stance.HOLD).riskLevel(RiskLevel.MEDIUM)
                             .guidance("분석 데이터를 파싱할 수 없습니다.").build());
                 if (result.getCatalysts() == null)
                     result.setCatalysts(List.of("시장 상황 모니터링 필요"));
@@ -878,10 +1106,10 @@ public class ValuationService {
         }
         AiResponseJson fallback = new AiResponseJson();
         fallback.setKeyInsight("데이터 분석 지연 중");
-        fallback.setAiVerdict(AiVerdict.builder().stance(Stance.HOLD).riskLevel(RiskLevel.MEDIUM)
+        fallback.setAiVerdict(builder().stance(Stance.HOLD).riskLevel(RiskLevel.MEDIUM)
                 .guidance("서버 응답 오류로 기본 분석값을 제공합니다.").build());
         fallback.setBeginnerVerdict(
-                BeginnerVerdict.builder().summarySentence("잠시 후 다시 시도해 주세요.").build());
+                Summary.BeginnerVerdict.builder().summarySentence("잠시 후 다시 시도해 주세요.").build());
         fallback.setCatalysts(List.of("분석 중"));
         fallback.setRisks(List.of("분석 중"));
         return fallback;

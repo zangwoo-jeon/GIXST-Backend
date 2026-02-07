@@ -16,13 +16,20 @@ public class PortStockResponse {
     private Integer quantity;
     private BigDecimal averagePrice;
     private Integer sequence;
-
+    private String currency; // 통화 (KRW, USD 등)
     private BigDecimal currentPrice;
     private BigDecimal totalValue;
     private BigDecimal profit;
     private BigDecimal profitRate;
     private BigDecimal dailyProfit;
     private BigDecimal dailyChangeRate;
+
+    // KRW 환산 값
+    private BigDecimal currentPriceKrw;
+    private BigDecimal totalValueKrw;
+    private BigDecimal profitKrw;
+    private BigDecimal dailyProfitKrw;
+    private BigDecimal exchangeRate;
 
     public PortStockResponse(PortStock portStock) {
         this.portStockId = portStock.getId();
@@ -31,14 +38,16 @@ public class PortStockResponse {
         this.quantity = portStock.getQuantity();
         this.averagePrice = portStock.getAveragePrice();
         this.sequence = portStock.getSequence();
+        this.currency = portStock.getStock().getCurrency();
     }
 
     public PortStockResponse(PortStock portStock, BigDecimal currentPrice, BigDecimal dailyProfit,
-            BigDecimal dailyChangeRate) {
+            BigDecimal dailyChangeRate, BigDecimal exchangeRate) {
         this(portStock);
         this.currentPrice = currentPrice;
         this.dailyProfit = dailyProfit;
         this.dailyChangeRate = dailyChangeRate;
+        this.exchangeRate = exchangeRate;
 
         if (currentPrice != null) {
             this.totalValue = currentPrice.multiply(BigDecimal.valueOf(this.quantity));
@@ -51,6 +60,20 @@ public class PortStockResponse {
                         .multiply(BigDecimal.valueOf(100));
             } else {
                 this.profitRate = BigDecimal.ZERO;
+            }
+
+            // KRW 환산
+            if (exchangeRate != null) {
+                this.currentPriceKrw = currentPrice.multiply(exchangeRate);
+                this.totalValueKrw = this.totalValue.multiply(exchangeRate);
+                this.profitKrw = this.profit.multiply(exchangeRate);
+                this.dailyProfitKrw = dailyProfit.multiply(exchangeRate);
+            } else {
+                // KRW인 경우 (exchangeRate이 1이거나 null일 수 있음)
+                this.currentPriceKrw = currentPrice;
+                this.totalValueKrw = this.totalValue;
+                this.profitKrw = this.profit;
+                this.dailyProfitKrw = dailyProfit;
             }
         }
     }

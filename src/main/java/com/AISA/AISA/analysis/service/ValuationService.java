@@ -71,7 +71,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.transaction.annotation.Transactional;
 
-import static com.AISA.AISA.analysis.dto.ValuationBaseDto.Summary.AiVerdict.builder;
+// Removed static builder import
 
 @Slf4j
 @Service
@@ -955,10 +955,10 @@ public class ValuationService {
             rP[i] = Math.log(stockSeries.get(commonDates.get(i + 1)) / stockSeries.get(commonDates.get(i)));
             rI[i] = Math.log(indexSeries.get(commonDates.get(i + 1)) / indexSeries.get(commonDates.get(i)));
         }
-        PearsonsCorrelation pc = new PearsonsCorrelation();
+        org.apache.commons.math3.stat.correlation.PearsonsCorrelation pc = new org.apache.commons.math3.stat.correlation.PearsonsCorrelation();
         double correlation = pc.correlation(rP, rI);
-        double volP = new DescriptiveStatistics(rP).getStandardDeviation();
-        double volI = new DescriptiveStatistics(rI).getStandardDeviation();
+        double volP = new org.apache.commons.math3.stat.descriptive.DescriptiveStatistics(rP).getStandardDeviation();
+        double volI = new org.apache.commons.math3.stat.descriptive.DescriptiveStatistics(rI).getStandardDeviation();
         return volI == 0 ? 1.0 : correlation * (volP / volI);
     }
 
@@ -1093,7 +1093,7 @@ public class ValuationService {
                 mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
                 AiResponseJson result = mapper.readValue(jsonText.substring(start, end + 1), AiResponseJson.class);
                 if (result.getAiVerdict() == null)
-                    result.setAiVerdict(builder().stance(Stance.HOLD).riskLevel(RiskLevel.MEDIUM)
+                    result.setAiVerdict(Summary.AiVerdict.builder().stance(Stance.HOLD).riskLevel(RiskLevel.MEDIUM)
                             .guidance("분석 데이터를 파싱할 수 없습니다.").build());
                 if (result.getCatalysts() == null)
                     result.setCatalysts(List.of("시장 상황 모니터링 필요"));
@@ -1106,7 +1106,7 @@ public class ValuationService {
         }
         AiResponseJson fallback = new AiResponseJson();
         fallback.setKeyInsight("데이터 분석 지연 중");
-        fallback.setAiVerdict(builder().stance(Stance.HOLD).riskLevel(RiskLevel.MEDIUM)
+        fallback.setAiVerdict(Summary.AiVerdict.builder().stance(Stance.HOLD).riskLevel(RiskLevel.MEDIUM)
                 .guidance("서버 응답 오류로 기본 분석값을 제공합니다.").build());
         fallback.setBeginnerVerdict(
                 Summary.BeginnerVerdict.builder().summarySentence("잠시 후 다시 시도해 주세요.").build());

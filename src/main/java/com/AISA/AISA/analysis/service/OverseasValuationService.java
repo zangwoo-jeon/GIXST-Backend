@@ -1,8 +1,8 @@
 package com.AISA.AISA.analysis.service;
 
 import com.AISA.AISA.analysis.dto.ValuationBaseDto.*;
-import com.AISA.AISA.analysis.dto.ValuationBaseDto.Summary.*;
-import com.AISA.AISA.analysis.dto.OverseasValuationDto;
+import com.AISA.AISA.analysis.dto.ValuationBaseDto.Summary.AiVerdict;
+import com.AISA.AISA.analysis.dto.ValuationBaseDto.Summary.BeginnerVerdict;
 import com.AISA.AISA.analysis.dto.OverseasValuationDto.*;
 import com.AISA.AISA.analysis.repository.OverseasStockAiSummaryRepository;
 import com.AISA.AISA.kisOverseasStock.dto.OverseasStockCashFlowDto;
@@ -495,16 +495,29 @@ public class OverseasValuationService {
             }
         }
 
-        String analysis = generateValuationAnalysisText(val);
-        AiResponseJson aiJson = parseAiResponse(analysis);
         String displayVerdict = val.getSummary().getOverallVerdict();
-        String displayLabel = displayVerdict.equals("BUY") ? "매수" : displayVerdict.equals("SELL") ? "매도" : "관망";
-        String displaySummary = aiJson.getBeginnerVerdict() != null ? aiJson.getBeginnerVerdict().getSummarySentence()
-                : "데이터 분석 중...";
-        String displayRisk = aiJson.getAiVerdict() != null && aiJson.getAiVerdict().getRiskLevel() != null
+
+        // [V4.3 Final Polishing] AI용 가격 전략 사전 계산
+        BigDecimal theoreticalMax = new BigDecimal(val.getBand().getMaxPrice().replace(",", ""));
+        BigDecimal baseTarget = theoreticalMax.max(currentPrice);
+        BigDecimal resPrice = baseTarget.multiply(new BigDecimal("1.05")).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal bandMin = new BigDecimal(val.getBand().getMinPrice().replace(",", ""));
+        BigDecimal supPrice = bandMin.multiply(new BigDecimal("0.95"))
+                .max(currentPrice.multiply(new BigDecimal("0.90"))).setScale(2, RoundingMode.HALF_UP);
+
+        String resistanceStr = "$" + String.format("%,.2f", resPrice);
+        String supportStr = "$" + String.format("%,.2f", supPrice);
+
+        String analysis = generateValuationAnalysisText(val, resistanceStr, supportStr);
+        AiResponseJson aiJson = parseAiResponse(analysis);
+        String displayLabel = mapVerdictToLabel(displayVerdict,
+                aiJson.getAiVerdict() != null ? aiJson.getAiVerdict().getStance() : Stance.HOLD);
+        String displaySummary = aiJson.getActionPlan() != null ? aiJson.getActionPlan() : "전략적 대응이 필요합니다.";
+        String displayRisk = (aiJson.getAiVerdict() != null && aiJson.getAiVerdict().getRiskLevel() != null)
                 ? aiJson.getAiVerdict().getRiskLevel().name()
                 : "MEDIUM";
 
+        // [V4.3] 캐시 저장 로직 업데이트
         if (cachedSummary.isPresent()) {
             var existing = cachedSummary.get();
             existing.updateValuationAnalysis(analysis, currentPrice, displayVerdict, displayLabel, displaySummary,
@@ -520,7 +533,7 @@ public class OverseasValuationService {
         return analysis;
     }
 
-    private String generateValuationAnalysisText(Response val) {
+    private String generateValuationAnalysisText(Response val, String resistance, String support) {
         StringBuilder prompt = new StringBuilder();
         String stockCode = val.getStockCode();
         OverseasStockFinancialRatio latestRatio = financialRatioRepository
@@ -560,20 +573,31 @@ public class OverseasValuationService {
         } catch (Exception e) {
         }
 
-        prompt.append("\n[전략가 미션]\n");
-        prompt.append(
-                "1. **지표 등급 요약**: PEG(1.0미만 우수, 1.5이상 주의), EV/EBITDA, 주주환원율을 종합하여 '성장성 대비 가격' 및 '주가 친화성' 관점에서 등급화(우수/보통/주의)하여 1줄 평을 작성하라.\n");
-        prompt.append(
-                "2. **격차 분석 및 프리미엄 해석**: 시스템 S-RIM($)과 시장가($) 사이의 괴리를 해석하라. 만약 Status가 ABOVE_BAND라면 '비싸다'는 표현 대신 '시장의 미래 성장 프리미엄이 X% 추가 반영된 상태'라고 전문적으로 브리핑하라.\n");
-        prompt.append(String.format("3. **생애주기 해석**: 시스템이 판정한 [%s] 티어의 타당성을 브리핑하라.\n",
-                val.getSrim().getDescription().split("]")[0] + "]"));
-        prompt.append("4. **입체적 포지션**: 보수적 밸류(S-RIM)와 시장 기대치(PER/밴드) 사이에서 전략적 투자 위치를 제안하라.\n");
-        prompt.append("5. **주의**: 데이터 한계를 인정하되 전문가다운 대안을 제시하라.\n");
+        prompt.append("\n[트레이딩 시나리오 분석 미션]\n");
+        prompt.append("\n[분석 미션: 5단계 전문 리서치 구조화]\n");
+        prompt.append("다음 5단계 구조에 맞춰 `guidance` 필드를 작성하라. 각 단계는 투자자의 사고 흐름을 완벽히 가이드해야 한다.\n");
 
-        prompt.append("\n[출력 포맷 (JSON)]\n");
-        prompt.append("응답은 오직 순수한 JSON 형식이어야 하며, 필드명은 정확히 일치해야 합니다.\n");
+        prompt.append("1. **[현재 상황 요약]**: 종목의 현재 추세와 밸류에이션 상태를 한 줄로 정의하라. (예: '하락 추세 지속 중이며 저평가 매력 부재')\n");
+        prompt.append("2. **[3대 판단 근거]**: 판단의 이유를 다음 3가지 축으로 설명하라.\n");
+        prompt.append("   - 밸류에이션: 내재가치 및 PEG 대비 고평가 여부\n");
+        prompt.append("   - 모멘텀: 이평선 배열 및 주가 밴드 위치\n");
+        prompt.append("   - 리스크: 배당 수익률 및 매크로 민감도\n");
+        prompt.append("3. **[향후 시나리오]**: 단기적으로 예상되는 주가 흐름(박스권, 추세 이탈 등)을 제시하라.\n");
+        prompt.append("4. **[행동 전략]**: 시스템이 계산한 Resistance(" + resistance + ")와 Support(" + support
+                + ") 가격을 인용하여 구체적인 행동 지침을 제시하라.\n");
+        prompt.append("   - '반등 시 Resistance 부근 비중 축소'\n");
+        prompt.append("   - 'Support 붕괴 시 리스크 관리'\n");
+        prompt.append("5. **[판단 변경 조건]**: 현재의 관점이 바뀔 수 있는 트리거(예: '실적 서프라이즈', '저항선 돌파')를 명시하라.\n");
+
+        prompt.append("\n[추가 지침]\n");
+        prompt.append("- **Action Plan 도출**: `actionPlan` 필드는 위 [행동 전략]을 1문장으로 요약하여 작성하라.\n");
+        prompt.append("- **용어 순화**: 어려운 금융 용어는 투자자가 이해하기 쉬운 표현으로 풀어서 설명하라.\n");
+
+        prompt.append("\nJSON format 가이드:\n");
         prompt.append(
-                "```json\n{\n  \"keyInsight\": \"30자 이내 핵심 요약\",\n  \"aiVerdict\": {\"stance\": \"BUY/ACCUMULATE/HOLD/REDUCE/SELL\", \"timing\": \"EARLY/MID/LATE\", \"riskLevel\": \"LOW/MEDIUM/HIGH\", \"guidance\": \"분석 의견\"},\n  \"suggestedWeights\": {\"srim\": 0.3, \"per\": 0.5, \"pbr\": 0.2},\n  \"beginnerVerdict\": {\"summarySentence\": \"PEG와 주주환원을 포함한 친근한 투자 포인트 요약\"},\n  \"catalysts\": [\"호재 1\"], \"risks\": [\"악재 1\"]\n}\n```\n");
+                "```json\n{\n  \"keyInsight\": \"30자 이내의 비판적 핵심 요약\",\n  \"aiVerdict\": {\"stance\": \"BUY/ACCUMULATE/HOLD/REDUCE/SELL\", \"timing\": \"EARLY/MID/LATE\", \"riskLevel\": \"LOW/MEDIUM/HIGH\", \"guidance\": \"[현재 상황] ...\\n\\n[판단 근거] ...\\n\\n[향후 전망] ...\\n\\n[투자 전략] ...\\n\\n[판단 변경 조건] ...\"},\n  \"actionPlan\": \"반등 시 Resistance("
+                        + resistance
+                        + ") 근처에서 비중 축소 권장\",\n  \"probabilityInfo\": \"상승 확률 예측치 및 근거\",\n  \"catalysts\": [\"호재\"], \"risks\": [\"베타 변동성 등 리스크\"]\n}\n```\n");
 
         return geminiService.generateAdvice(prompt.toString());
     }
@@ -586,19 +610,22 @@ public class OverseasValuationService {
 
         Summary.Display display = Summary.Display.builder()
                 .verdict(overallVerdict)
-                .verdictLabel(overallVerdict.contains("BUY") ? "매수" : overallVerdict.contains("SELL") ? "매도" : "관망")
-                .summary(aiJson.getBeginnerVerdict() != null ? aiJson.getBeginnerVerdict().getSummarySentence()
-                        : "분석 완료")
+                .verdictLabel(mapVerdictToLabel(overallVerdict,
+                        aiJson.getAiVerdict() != null ? aiJson.getAiVerdict().getStance() : Stance.HOLD))
+                .strategy(Summary.Strategy.builder()
+                        .actionPlan(aiJson.getActionPlan() != null ? aiJson.getActionPlan() : "전략적 대응이 필요합니다.")
+                        .build())
                 .risk(aiJson.getAiVerdict() != null && aiJson.getAiVerdict().getRiskLevel() != null
                         ? aiJson.getAiVerdict().getRiskLevel().name()
                         : "MEDIUM")
+                .probabilityInfo(aiJson.getProbabilityInfo() != null ? aiJson.getProbabilityInfo() : "상승 확률 분석 중")
                 .build();
 
         Summary newSummary = Summary.builder()
                 .overallVerdict(overallVerdict).confidence("HIGH")
-                .keyInsight(aiJson.getKeyInsight() != null ? aiJson.getKeyInsight() : "AI 분석 리포트")
+                .keyInsight(aiJson.getKeyInsight() != null ? aiJson.getKeyInsight() : "AI 전략 분석 리포트")
                 .verdicts(Summary.Verdicts.builder().aiVerdict(aiJson.getAiVerdict()).build())
-                .beginnerVerdict(aiJson.getBeginnerVerdict()).display(display).build();
+                .display(display).build();
 
         // [New Phase 2] 가격 전략 및 품질 지표 연동
         String pegRatioStr = "N/A", evEbitdaStr = "N/A", shareholderYieldStr = "N/A", downsideRiskStr = "N/A";
@@ -644,17 +671,20 @@ public class OverseasValuationService {
                 var pm = response.getOverseasAnalysisDetails().getPriceModel();
                 BigDecimal cur = new BigDecimal(response.getCurrentPrice().replace(",", ""));
 
-                if (newSummary.getDisplay().getTargetPrice() != null) {
+                if (newSummary.getDisplay().getStrategy() != null
+                        && newSummary.getDisplay().getStrategy().getResistanceZone() != null) {
                     BigDecimal tgt = new BigDecimal(
-                            newSummary.getDisplay().getTargetPrice().replace("$", "").replace(",", ""));
+                            newSummary.getDisplay().getStrategy().getResistanceZone().replace("$", "").replace(",",
+                                    ""));
                     BigDecimal upside = tgt.subtract(cur).divide(cur, 4, RoundingMode.HALF_UP)
                             .multiply(new BigDecimal(100));
                     pm.setUpsidePotential(String.format("%.2f%%", upside));
                 }
 
-                if (newSummary.getDisplay().getStopLossPrice() != null) {
+                if (newSummary.getDisplay().getStrategy() != null
+                        && newSummary.getDisplay().getStrategy().getSupportZone() != null) {
                     BigDecimal sl = new BigDecimal(
-                            newSummary.getDisplay().getStopLossPrice().replace("$", "").replace(",", ""));
+                            newSummary.getDisplay().getStrategy().getSupportZone().replace("$", "").replace(",", ""));
                     BigDecimal downside = sl.subtract(cur).divide(cur, 4, RoundingMode.HALF_UP)
                             .multiply(new BigDecimal(100));
                     pm.setDownsideRisk(String.format("%.2f%%", downside));
@@ -695,6 +725,8 @@ public class OverseasValuationService {
         private List<String> catalysts;
         private List<String> risks;
         private Map<String, Double> suggestedWeights;
+        private String actionPlan;
+        private String probabilityInfo;
     }
 
     private void calculatePriceStrategy(Response response, Summary summary, BigDecimal peg, BigDecimal yield) {
@@ -723,8 +755,11 @@ public class OverseasValuationService {
         BigDecimal currentExit = currentPrice.multiply(new BigDecimal("0.90"));
         BigDecimal stopLossPrice = bandBottom.max(currentExit).setScale(2, RoundingMode.HALF_UP);
 
-        summary.getDisplay().setTargetPrice("$" + String.format("%,.2f", targetPrice));
-        summary.getDisplay().setStopLossPrice("$" + String.format("%,.2f", stopLossPrice));
+        if (summary.getDisplay().getStrategy() == null) {
+            summary.getDisplay().setStrategy(new Summary.Strategy());
+        }
+        summary.getDisplay().getStrategy().setResistanceZone("$" + String.format("%,.2f", targetPrice));
+        summary.getDisplay().getStrategy().setSupportZone("$" + String.format("%,.2f", stopLossPrice));
     }
 
     private String shareholderReturnInfo(Response val, List<OverseasStockCashFlowDto> returns) {
@@ -745,6 +780,14 @@ public class OverseasValuationService {
         return String.format("%.2f%%", yield);
     }
 
+    private String mapVerdictToLabel(String modelRating, Stance aiStance) {
+        if ("BUY".equals(modelRating))
+            return aiStance == Stance.ACCUMULATE ? "분할 매수" : "매수";
+        if ("SELL".equals(modelRating))
+            return aiStance == Stance.REDUCE ? "비중 축소" : "매도";
+        return "관망";
+    }
+
     private AiResponseJson parseAiResponse(String jsonText) {
         try {
             int start = jsonText.indexOf("{"), end = jsonText.lastIndexOf("}");
@@ -755,6 +798,8 @@ public class OverseasValuationService {
                 if (result.getAiVerdict() == null)
                     result.setAiVerdict(AiVerdict.builder().stance(Stance.HOLD).riskLevel(RiskLevel.MEDIUM)
                             .guidance("분석 데이터를 파싱할 수 없습니다.").build());
+                if (result.getActionPlan() == null)
+                    result.setActionPlan("전략적 대응이 필요합니다.");
                 if (result.getCatalysts() == null)
                     result.setCatalysts(List.of("시장 상황 모니터링 필요"));
                 if (result.getRisks() == null)

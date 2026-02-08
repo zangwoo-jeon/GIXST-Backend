@@ -12,6 +12,8 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.util.List;
+import java.util.Map;
+import java.util.HashMap;
 
 public class DomesticValuationDto {
 
@@ -51,6 +53,9 @@ public class DomesticValuationDto {
         private ValuationBand band;
         private Summary summary;
 
+        private Double valuationScore;
+        private Double trendScore;
+
         private AnalysisDetails analysisDetails;
     }
 
@@ -66,11 +71,11 @@ public class DomesticValuationDto {
 
         @JsonIgnore
         private PriceModel priceModel;
-        private QualityMetrics qualityMetrics;
+
         private TechnicalIndicators technicalIndicators;
+        @JsonIgnore
         private ValuationContext valuationContext;
 
-        private PeerComparison peerComparison;
         private InvestorTrendDto investorTrend;
 
         @Getter
@@ -88,19 +93,10 @@ public class DomesticValuationDto {
         @NoArgsConstructor
         @AllArgsConstructor
         @Builder
-        public static class QualityMetrics {
-            private String evEbitda;
-        }
-
-        @Getter
-        @Setter
-        @NoArgsConstructor
-        @AllArgsConstructor
-        @Builder
         public static class TechnicalIndicators {
             private double rsi;
-            private List<String> movingAverages; // "20: 70,000", "60: 72,000" 등
-            private Double relativeStrengthIndex; // 지수 대비 강도 (Alpha)
+            private Map<String, String> movingAverages; // "MA20": "70,000", "status": "정배열" 등
+            private Double relativeStrength; // 지수 대비 강도 (Alpha)
             private String priceLocation; // "GOLDEN_CROSS", "SUPPORT_LINE" 등
         }
 
@@ -112,8 +108,10 @@ public class DomesticValuationDto {
         public static class ValuationContext {
             private Double beta;
             private Double costOfEquity;
+            private String evEbitda; // QualityMetrics에서 이동
             private HistoricalValuationRange historicalPerRange;
             private HistoricalValuationRange historicalPbrRange;
+            private String supplyPatternAnalysis; // KNN 수급 패턴 분석 결과
         }
 
         @Getter
@@ -127,27 +125,5 @@ public class DomesticValuationDto {
             private String median;
             private String current;
         }
-    }
-
-    @Getter
-    @Setter
-    @NoArgsConstructor
-    @AllArgsConstructor
-    @Builder
-    public static class PeerComparison {
-        private String sectorAvgPer;
-        private String status;
-        private List<PeerInfo> peers;
-    }
-
-    @Getter
-    @Setter
-    @NoArgsConstructor
-    @AllArgsConstructor
-    @Builder
-    public static class PeerInfo {
-        private String name;
-        private String per;
-        private String pbr;
     }
 }

@@ -56,10 +56,20 @@ public class ValuationBaseDto {
         public static class Display {
             private String verdict;
             private String verdictLabel;
-            private String summary;
+            private Strategy strategy;
             private String risk;
-            private String targetPrice;
-            private String stopLossPrice;
+            private String probabilityInfo;
+        }
+
+        @Getter
+        @Setter
+        @NoArgsConstructor
+        @AllArgsConstructor
+        @Builder
+        public static class Strategy {
+            private String resistanceZone;
+            private String supportZone;
+            private String actionPlan;
         }
 
         @Getter
@@ -103,6 +113,7 @@ public class ValuationBaseDto {
         private String verdict;
         private String gapRate;
         private String description;
+        @JsonIgnore
         private boolean available;
         @JsonIgnore
         private String reason;

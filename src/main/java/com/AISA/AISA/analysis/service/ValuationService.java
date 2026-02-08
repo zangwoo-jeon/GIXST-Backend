@@ -1074,7 +1074,7 @@ public class ValuationService {
                 .rsi(rsi)
                 .movingAverages(maMap)
                 .relativeStrength(rs)
-                .priceLocation(location)
+                .priceLocation(mapPriceLocation(location))
                 .build();
     }
 
@@ -1295,5 +1295,26 @@ public class ValuationService {
         }
         // 4. 관망/중립
         return "6-12 Months (Neutral)";
+    }
+
+    private String mapPriceLocation(String rawLocation) {
+        if (rawLocation == null)
+            return "N/A";
+
+        // [V4.3 UX Terminology] 기술적 용어 -> 사용자 행동 중심 용어 매핑
+        if (rawLocation.contains("정배열 상단") || rawLocation.contains("과열")) {
+            return "강세 국면 (단기 고점 경계)";
+        } else if (rawLocation.contains("정배열 하단") || rawLocation.contains("눌림목")) {
+            return "상승 추세 눌림목 (매수 기회)";
+        } else if (rawLocation.contains("역배열 상단") || rawLocation.contains("반등")) {
+            return "하락 추세 일시 반등 (매도 구간)";
+        } else if (rawLocation.contains("역배열 하단") || rawLocation.contains("바닥")) {
+            return "침체 국면 (과매도/바닥 다지기)";
+        } else if (rawLocation.contains("GOLDEN_CROSS")) {
+            return "추세 전환 초기 (골든크로스)";
+        } else if (rawLocation.contains("DEAD_CROSS")) {
+            return "추세 이탈 우려 (데드크로스)";
+        }
+        return rawLocation; // 매핑되지 않은 경우 원본 반환
     }
 }

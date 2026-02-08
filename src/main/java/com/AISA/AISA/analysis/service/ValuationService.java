@@ -661,6 +661,11 @@ public class ValuationService {
         if (val.getAnalysisDetails() != null && val.getAnalysisDetails().getValuationContext() != null) {
             val.getAnalysisDetails().getValuationContext().setSupplyPatternAnalysis(supplyAnalysis);
         }
+        if (val.getAnalysisDetails() == null) {
+            val.setAnalysisDetails(new AnalysisDetails());
+        }
+        val.getAnalysisDetails()
+                .setInvestmentTerm(determineInvestmentTerm(val.getTrendScore(), val.getValuationScore()));
 
         // [V4.3 Final Polishing] AI용 가격 전략 사전 계산
         BigDecimal theoreticalMax = new BigDecimal(val.getBand().getMaxPrice().replace(",", ""));
@@ -1270,5 +1275,25 @@ public class ValuationService {
 
     private boolean isValidPrice(String price) {
         return price != null && !price.equals("0");
+    }
+
+    private String determineInvestmentTerm(Double trendScore, Double valuationScore) {
+        if (trendScore == null || valuationScore == null)
+            return "6-12 Months";
+
+        // 1. 단기 트레이딩 선호 (추세 강력, 가격 부담)
+        if (trendScore >= 70 && valuationScore < 40) {
+            return "1-3 Months (Short-term Trading)";
+        }
+        // 2. 중기 스윙 (추세 양호, 가치 적정)
+        if (trendScore >= 50 && valuationScore >= 40 && valuationScore < 70) {
+            return "3-6 Months (Mid-term Swing)";
+        }
+        // 3. 장기 가치투자 (추세 바닥, 가치 매력 높음)
+        if (valuationScore >= 70) {
+            return "12+ Months (Long-term Value)";
+        }
+        // 4. 관망/중립
+        return "6-12 Months (Neutral)";
     }
 }

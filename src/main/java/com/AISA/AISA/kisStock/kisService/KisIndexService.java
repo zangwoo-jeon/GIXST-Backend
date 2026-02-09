@@ -797,4 +797,54 @@ public class KisIndexService {
         }
         return ratioList;
     }
+
+    @Cacheable(value = "vkospiUsdRatio", key = "#startDate + '-' + #endDate")
+    public List<IndexChartPriceDto> getVkospiUsdRatio(String startDate, String endDate) {
+        // 1. Fetch VKOSPI Data
+        IndexChartResponseDto vkospiData = getIndexChart("VKOSPI", startDate, endDate, "D");
+        Map<String, IndexChartPriceDto> vkospiMap = vkospiData.getPriceList().stream()
+                .collect(Collectors.toMap(
+                        IndexChartPriceDto::getDate,
+                        dto -> dto));
+
+        // 2. Fetch Exchange Rate Data (from KIS API)
+        List<MacroIndicatorDto> exchangeRateData = kisMacroService.fetchExchangeRate("FX@KRW", startDate, endDate);
+        Map<String, BigDecimal> exchangeRateMap = exchangeRateData.stream()
+                .collect(Collectors.toMap(
+                        MacroIndicatorDto::getDate,
+                        dto -> new BigDecimal(dto.getValue())));
+
+        // 3. Calculate Ratio
+        List<IndexChartPriceDto> ratioList = new ArrayList<>();
+        List<String> sortedDates = new ArrayList<>(vkospiMap.keySet());
+        Collections.sort(sortedDates);
+
+        for (String date : sortedDates) {
+            if (exchangeRateMap.containsKey(date)) {
+                IndexChartPriceDto vkospiDto = vkospiMap.get(date);
+                BigDecimal exchangeRate = exchangeRateMap.get(date);
+
+                if (exchangeRate.compareTo(BigDecimal.ZERO) > 0) {
+                    BigDecimal divisor = exchangeRate.divide(new BigDecimal(1000), 4, RoundingMode.HALF_UP);
+
+                    // Formula: VKOSPI / (ExchangeRate / 1000)
+                    BigDecimal open = new BigDecimal(vkospiDto.getOpenPrice()).divide(divisor, 2, RoundingMode.HALF_UP);
+                    BigDecimal high = new BigDecimal(vkospiDto.getHighPrice()).divide(divisor, 2, RoundingMode.HALF_UP);
+                    BigDecimal low = new BigDecimal(vkospiDto.getLowPrice()).divide(divisor, 2, RoundingMode.HALF_UP);
+                    BigDecimal close = new BigDecimal(vkospiDto.getPrice()).divide(divisor, 2, RoundingMode.HALF_UP);
+
+                    ratioList.add(IndexChartPriceDto.builder()
+                            .date(date)
+                            .price(close.toString())
+                            .openPrice(open.toString())
+                            .highPrice(high.toString())
+                            .lowPrice(low.toString())
+                            .volume(vkospiDto.getVolume())
+                            .exchangeRate(exchangeRate.toString())
+                            .build());
+                }
+            }
+        }
+        return ratioList;
+    }
 }

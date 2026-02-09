@@ -128,6 +128,15 @@ public class KisIndexController {
         return ResponseEntity.ok(new SuccessResponse<>(true, "달러 환산 코스닥 조회 성공", ratioList));
     }
 
+    @GetMapping("/vkospi-usd-ratio")
+    @Operation(summary = "달러 환산 VKOSPI 지수 조회", description = "VKOSPI 지수를 원/달러 환율로 나누어 달러 기준 가치를 계산합니다. (VKOSPI / (환율 / 1000))")
+    public ResponseEntity<SuccessResponse<List<IndexChartPriceDto>>> getVkospiUsdRatio(
+            @RequestParam String startDate,
+            @RequestParam String endDate) {
+        List<IndexChartPriceDto> ratioList = kisIndexService.getVkospiUsdRatio(startDate, endDate);
+        return ResponseEntity.ok(new SuccessResponse<>(true, "달러 환산 VKOSPI 조회 성공", ratioList));
+    }
+
     @GetMapping("/status/history")
     @Operation(summary = "시장 등락 종목 수 히스토리 조회", description = "DB에 저장된 날짜별 코스피/코스닥 상승/하락 종목 수를 조회합니다.")
     public ResponseEntity<SuccessResponse<List<MarketStatusHistory>>> getMarketStatusHistory(

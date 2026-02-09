@@ -13,6 +13,7 @@ import com.AISA.AISA.kisStock.dto.Dividend.StockDividendInfoDto;
 
 import com.AISA.AISA.kisStock.kisService.DividendService;
 import com.AISA.AISA.kisStock.repository.StockDailyDataRepository;
+import com.AISA.AISA.kisStock.exception.KisApiErrorCode;
 import com.AISA.AISA.portfolio.PortfolioGroup.exception.PortfolioErrorCode;
 import com.AISA.AISA.portfolio.PortfolioStock.PortStock;
 import com.AISA.AISA.portfolio.PortfolioStock.PortStockRepository;
@@ -93,6 +94,13 @@ public class IsaService {
 
             for (PortStock portStock : portStocks) {
                 Stock stock = portStock.getStock();
+
+                // 해외 주식 포함 여부 검증 (Exception 발생)
+                if (stock.getStockType() == Stock.StockType.US_STOCK) {
+                    log.warn("Overseas stock {} found in ISA Backtest for PortId: {}", stock.getStockCode(), portId);
+                    throw new BusinessException(KisApiErrorCode.INVALID_STOCK_TYPE);
+                }
+
                 BigDecimal quantity = new BigDecimal(portStock.getQuantity());
 
                 // 1. Calculate Price Return (PnL) - For Total Return Calculation Only (Not for

@@ -20,7 +20,7 @@ public interface StockDividendRepository extends JpaRepository<StockDividend, Lo
         List<StockDividend> findByStock_StockCodeInAndRecordDateBetweenOrderByRecordDateAsc(List<String> stockCodes,
                         String startDate, String endDate);
 
-        @Query("SELECT d FROM StockDividend d WHERE d.stock.stockType = com.AISA.AISA.kisStock.Entity.stock.Stock.StockType.US_STOCK AND (d.stockPrice IS NULL OR d.stockPrice = 0)")
+        @Query("SELECT d FROM StockDividend d WHERE d.stock.stockType IN (com.AISA.AISA.kisStock.Entity.stock.Stock.StockType.US_STOCK, com.AISA.AISA.kisStock.Entity.stock.Stock.StockType.US_ETF) AND (d.stockPrice IS NULL OR d.stockPrice = 0)")
         List<StockDividend> findUSDividendsWithMissingPrice();
 
         @Query("SELECT d FROM StockDividend d WHERE d.stock.stockCode IN :stockCodes AND "

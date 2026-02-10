@@ -61,10 +61,11 @@ public class OverseasAnalysisController {
         }
 
         @GetMapping("/static-analysis/{stockCode}")
-        @Operation(summary = "해외 주식 AI 기업 분석 조회", description = "Gemini를 사용하여 기업 개요, 미래 성장 동력, 리스크 요인을 조회합니다. (1주일 캐싱)")
+        @Operation(summary = "해외 주식 AI 기업 분석 조회", description = "Gemini를 사용하여 기업 개요, 미래 성장 동력, 리스크 요인을 조회합니다. (refresh=true 시 강제 갱신)")
         public ResponseEntity<SuccessResponse<String>> getStaticAnalysis(
-                        @PathVariable String stockCode) {
-                String result = overseasStockAnalysisService.getStaticAnalysis(stockCode);
+                        @PathVariable String stockCode,
+                        @RequestParam(defaultValue = "false") boolean refresh) {
+                String result = overseasStockAnalysisService.getStaticAnalysis(stockCode, refresh);
                 return ResponseEntity.ok(new SuccessResponse<>(true, "해외 주식 AI 기업 분석 조회 성공", result));
         }
 }

@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -45,7 +46,9 @@ public class KisOverseasStockMigrationService {
     @Transactional
     public void normalizeStockCodes() {
         log.info("Starting migration: Normalizing overseas stock codes (replacing / with .)");
-        List<Stock> usStocks = overseasStockRepository.findAllByStockType(Stock.StockType.US_STOCK);
+        List<Stock> usStocks = overseasStockRepository.findAll().stream()
+                .filter(s -> s.getStockType() == Stock.StockType.US_STOCK || s.getStockType() == Stock.StockType.US_ETF)
+                .collect(Collectors.toList());
         int count = 0;
         for (Stock stock : usStocks) {
             String originalCode = stock.getStockCode();

@@ -10,6 +10,7 @@ import com.AISA.AISA.kisStock.Entity.stock.Stock;
 import com.AISA.AISA.kisStock.exception.KisApiErrorCode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,6 +30,15 @@ public class OverseasStockAnalysisService {
     private final GeminiService geminiService;
 
     @Transactional
+    @CacheEvict(value = "overseasStaticAnalysis", key = "#stockCode", condition = "#refresh")
+    public String getStaticAnalysis(String stockCode, boolean refresh) {
+        if (refresh) {
+            staticAnalysisRepository.deleteByStockCode(stockCode);
+        }
+        return getStaticAnalysis(stockCode);
+    }
+
+    @Transactional
     @Cacheable(value = "overseasStaticAnalysis", key = "#stockCode")
     public String getStaticAnalysis(String stockCode) {
         Optional<OverseasStockStaticAnalysis> cachedAnalysis = staticAnalysisRepository.findByStockCode(stockCode);
@@ -40,7 +50,8 @@ public class OverseasStockAnalysisService {
             }
         }
 
-        Stock stock = overseasStockRepository.findByStockCodeAndStockType(stockCode, Stock.StockType.US_STOCK)
+        Stock stock = overseasStockRepository.findByStockCode(stockCode)
+                .filter(s -> s.getStockType() == Stock.StockType.US_STOCK || s.getStockType() == Stock.StockType.US_ETF)
                 .orElseThrow(() -> new BusinessException(KisApiErrorCode.STOCK_NOT_FOUND));
 
         // 최근 연간 실적 조회 (참고 데이터용)

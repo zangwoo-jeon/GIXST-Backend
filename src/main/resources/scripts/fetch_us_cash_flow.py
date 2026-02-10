@@ -31,7 +31,7 @@ def get_target_stocks():
         connection = pymysql.connect(**DB_CONFIG)
         with connection.cursor() as cursor:
             # is_suspended가 0(False)이거나 NULL인 경우만 조회
-            sql = "SELECT stock_code FROM stock WHERE stock_type = 'US_STOCK' AND (is_suspended IS NULL OR is_suspended = 0)"
+            sql = "SELECT stock_code FROM stock WHERE stock_type IN ('US_STOCK', 'US_ETF') AND (is_suspended IS NULL OR is_suspended = 0)"
             cursor.execute(sql)
             result = cursor.fetchall()
             return [row['stock_code'] for row in result]

@@ -49,7 +49,8 @@ public class OverseasValuationService {
 
     @Transactional
     public Response calculateValuation(String stockCode, Request request) {
-        Stock stock = overseasStockRepository.findByStockCodeAndStockType(stockCode, Stock.StockType.US_STOCK)
+        Stock stock = overseasStockRepository.findByStockCode(stockCode)
+                .filter(s -> s.getStockType() == Stock.StockType.US_STOCK || s.getStockType() == Stock.StockType.US_ETF)
                 .orElseThrow(() -> new IllegalArgumentException("Overseas Stock not found: " + stockCode));
 
         OverseasStockFinancialRatio latestRatio = financialRatioRepository

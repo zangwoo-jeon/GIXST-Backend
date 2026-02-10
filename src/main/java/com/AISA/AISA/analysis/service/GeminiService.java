@@ -77,23 +77,35 @@ public class GeminiService {
 
     private String generateResponseWithRetry(String context) throws Exception {
         List<String> keys = geminiProperties.getApiKeys();
-        if (keys == null || keys.isEmpty()) {
-            if (geminiProperties.getApiKey() == null) {
-                throw new IllegalStateException("Gemini API 키가 설정되지 않았습니다.");
-            }
+        int size = (keys != null) ? keys.size() : (geminiProperties.getApiKey() != null ? 1 : 0);
+        log.info("Gemini key rotation initialized. Total available keys: {}", size);
+
+        if (size == 0) {
+            throw new IllegalStateException("Gemini API 키가 설정되지 않았습니다.");
         }
 
-        int maxRetries = (keys != null && !keys.isEmpty()) ? keys.size() : 1;
+        int maxRetries = Math.max(size, 1);
 
+        String lastError = "No keys available";
         for (int attempt = 0; attempt < maxRetries; attempt++) {
             String currentKey = geminiProperties.getNextKey();
+            String maskedKey = currentKey != null && currentKey.length() > 8
+                    ? currentKey.substring(0, 4) + "****" + currentKey.substring(currentKey.length() - 4)
+                    : "****";
+            log.info("Attempting Gemini API call {}/{} using key: {}...", attempt + 1, maxRetries, maskedKey);
             try {
                 String response = callGeminiApi(context, currentKey);
                 return parseGeminiResponse(response);
 
             } catch (WebClientResponseException e) {
-                if (e.getStatusCode().value() == 429) {
-                    log.warn("Rate limit (429) exceeded. Rotating key...");
+                lastError = e.getResponseBodyAsString();
+                if (lastError == null || lastError.isEmpty())
+                    lastError = e.getMessage();
+
+                if (e.getStatusCode().value() == 429 || e.getStatusCode().value() == 400
+                        || e.getStatusCode().value() == 401 || e.getStatusCode().value() == 403) {
+                    log.warn("Gemini API Error ({}). Response: {}. Rotating key... (Attempt {}/{})",
+                            e.getStatusCode().value(), lastError, attempt + 1, maxRetries);
                     continue;
                 }
                 if (e.getStatusCode().is5xxServerError()) {
@@ -103,7 +115,7 @@ public class GeminiService {
                 throw e;
             }
         }
-        throw new RuntimeException("AI 서비스 사용량이 초과되었습니다.");
+        throw new RuntimeException("AI 서비스 사용량이 초과되었습니다. (최종 에러: " + lastError + ")");
     }
 
     private String callGeminiApi(String context, String apiKey) {

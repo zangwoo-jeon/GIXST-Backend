@@ -76,7 +76,8 @@ public class AnalysisController {
                         + "(할인율 커스텀 가능)")
         public ResponseEntity<SuccessResponse<?>> valuation(
                         @PathVariable String stockCode,
-                        @RequestBody(required = false) DomesticValuationDto.Request request) {
+                        @RequestBody(required = false) DomesticValuationDto.Request request,
+                        @RequestParam(defaultValue = "false") boolean refresh) { // Added refresh parameter
 
                 // Heuristic: If stockCode isn't 6 digits, assume Overseas (Simple check)
                 // Accurate way would be checking DB, but avoiding extra DB call if possible.
@@ -131,11 +132,12 @@ public class AnalysisController {
         }
 
         @GetMapping("/valuation/{stockCode}/static-report")
-        @Operation(summary = "AI 기업 개요 및 리스크 분석 (정적 캐싱: DB 1년, Redis 7일)", description = "기업 개요, 미래 성장 동력, 리스크 요인을 조회합니다. (변경 주기 긺)")
+        @Operation(summary = "AI 기업 개요 및 리스크 분석 (정적 캐싱: DB 1년, Redis 7일)", description = "기업 개요, 미래 성장 동력, 리스크 요인을 조회합니다. (refresh=true 시 강제 갱신)")
         public ResponseEntity<SuccessResponse<String>> getStaticValuationReport(
-                        @PathVariable String stockCode) {
+                        @PathVariable String stockCode,
+                        @RequestParam(defaultValue = "false") boolean refresh) {
                 return ResponseEntity.ok(new SuccessResponse<>(true, "기업 개요 및 리스크 분석 조회 성공",
-                                valuationService.getStaticAnalysis(stockCode)));
+                                valuationService.getStaticAnalysis(stockCode, refresh)));
         }
 
         @DeleteMapping("/cache")

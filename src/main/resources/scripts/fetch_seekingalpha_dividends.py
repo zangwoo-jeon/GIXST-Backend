@@ -28,7 +28,7 @@ def get_target_stocks():
     try:
         connection = pymysql.connect(**DB_CONFIG)
         with connection.cursor() as cursor:
-            sql = "SELECT stock_id, stock_code FROM stock WHERE stock_type = 'US_STOCK' AND (is_suspended IS NULL OR is_suspended = 0)"
+            sql = "SELECT stock_id, stock_code FROM stock WHERE stock_type IN ('US_STOCK', 'US_ETF') AND (is_suspended IS NULL OR is_suspended = 0)"
             cursor.execute(sql)
             return cursor.fetchall()
     except Exception as e:

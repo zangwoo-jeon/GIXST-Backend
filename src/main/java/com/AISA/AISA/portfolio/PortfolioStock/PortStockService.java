@@ -152,7 +152,8 @@ public class PortStockService {
                     BigDecimal applicableExchangeRate = BigDecimal.ONE;
 
                     Stock stock = portStock.getStock();
-                    boolean isOverseas = stock.getStockType() == Stock.StockType.US_STOCK;
+                    boolean isOverseas = stock.getStockType() == Stock.StockType.US_STOCK
+                            || stock.getStockType() == Stock.StockType.US_ETF;
 
                     try {
                         StockPriceDto stockPriceDto;

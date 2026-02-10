@@ -50,7 +50,8 @@ public class Stock {
     public enum StockType {
         DOMESTIC, // 국내 주식
         FOREIGN_ETF, // 국내 상장 해외 ETF
-        US_STOCK // 미국 주식
+        US_STOCK, // 미국 주식
+        US_ETF // 미국 ETF
     }
 
     public static Stock create(String stockCode, String stockName, MarketType market) {

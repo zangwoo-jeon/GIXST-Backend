@@ -55,7 +55,8 @@ public class KisOverseasStockService {
     }
 
     public StockPriceDto getOverseasStockPrice(String stockCode) {
-        Stock stock = overseasStockRepository.findByStockCodeAndStockType(stockCode, Stock.StockType.US_STOCK)
+        Stock stock = overseasStockRepository.findByStockCode(stockCode)
+                .filter(s -> s.getStockType() == Stock.StockType.US_STOCK || s.getStockType() == Stock.StockType.US_ETF)
                 .orElseGet(() -> {
                     try {
                         Long stockId = Long.parseLong(stockCode);
@@ -129,7 +130,8 @@ public class KisOverseasStockService {
 
     public List<KisOverseasStockChartDto> getOverseasStockChart(String stockCode, String startDate, String endDate,
             String periodType) {
-        Stock stock = overseasStockRepository.findByStockCodeAndStockType(stockCode, Stock.StockType.US_STOCK)
+        Stock stock = overseasStockRepository.findByStockCode(stockCode)
+                .filter(s -> s.getStockType() == Stock.StockType.US_STOCK || s.getStockType() == Stock.StockType.US_ETF)
                 .orElseGet(() -> {
                     try {
                         Long stockId = Long.parseLong(stockCode);
@@ -213,7 +215,8 @@ public class KisOverseasStockService {
         LocalDate targetStartDate = LocalDate.parse(startDateStr, formatter);
         LocalDate currentDate = LocalDate.now();
 
-        Stock stock = overseasStockRepository.findByStockCodeAndStockType(stockIdOrCode, Stock.StockType.US_STOCK)
+        Stock stock = overseasStockRepository.findByStockCode(stockIdOrCode)
+                .filter(s -> s.getStockType() == Stock.StockType.US_STOCK || s.getStockType() == Stock.StockType.US_ETF)
                 .orElseGet(() -> {
                     try {
                         Long stockId = Long.parseLong(stockIdOrCode);
@@ -279,7 +282,9 @@ public class KisOverseasStockService {
 
     public void fetchAllOverseasStocksHistoricalData(String startDateStr) {
         log.info("Starting batch historical overseas stock data fetch from {}", startDateStr);
-        List<Stock> allStocks = overseasStockRepository.findAllByStockType(Stock.StockType.US_STOCK);
+        List<Stock> allStocks = overseasStockRepository.findAll().stream()
+                .filter(s -> s.getStockType() == Stock.StockType.US_STOCK || s.getStockType() == Stock.StockType.US_ETF)
+                .collect(Collectors.toList());
 
         for (Stock stock : allStocks) {
             try {
@@ -294,11 +299,31 @@ public class KisOverseasStockService {
         log.info("Completed batch historical overseas stock data fetch.");
     }
 
+    public void fetchAllEtfHistoricalData(String startDateStr) {
+        log.info("Starting batch historical US ETF data fetch from {}", startDateStr);
+        List<Stock> etfStocks = overseasStockRepository.findAll().stream()
+                .filter(s -> s.getStockType() == Stock.StockType.US_ETF)
+                .collect(Collectors.toList());
+
+        for (Stock stock : etfStocks) {
+            try {
+                log.info("Updating data for ETF: {} ({})", stock.getStockName(), stock.getStockCode());
+                fetchAndSaveHistoricalOverseasStockData(stock.getStockCode(), startDateStr);
+                Thread.sleep(500); // Rate limit protection
+            } catch (Exception e) {
+                log.error("Failed to update ETF: {} ({}) - {}", stock.getStockName(), stock.getStockCode(),
+                        e.getMessage());
+            }
+        }
+        log.info("Completed batch historical US ETF data fetch.");
+    }
+
     public void fetchOverseasStocksHistoricalDataFromStockId(Long stockId, String startDateStr) {
         log.info("Starting partial batch historical overseas stock data fetch from stockId: {} and date: {}", stockId,
                 startDateStr);
         List<Stock> stocks = overseasStockRepository
-                .findAllByStockTypeAndStockIdGreaterThanEqual(Stock.StockType.US_STOCK, stockId);
+                .findAllByStockTypeInAndStockIdGreaterThanEqual(
+                        List.of(Stock.StockType.US_STOCK, Stock.StockType.US_ETF), stockId);
 
         for (Stock stock : stocks) {
             try {

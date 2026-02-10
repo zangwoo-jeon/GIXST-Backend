@@ -98,6 +98,15 @@ public class DomesticValuationDto {
             private Map<String, String> movingAverages; // "MA20": "70,000", "status": "정배열" 등
             private Double relativeStrength; // 지수 대비 강도 (Alpha)
             private String priceLocation; // "GOLDEN_CROSS", "SUPPORT_LINE" 등
+
+            // [v3] 추가 필드
+            private Double stochasticK;
+            private Double stochasticD;
+            private String stochasticZone; // OVERSOLD/WEAK/NEUTRAL/STRONG/OVERBOUGHT
+            private String stochasticSignal; // GOLDEN/DEAD/NONE
+            private Double stochasticStrength;
+            private String marketRegime; // STRONG_TREND/WEAK_TREND/SIDEWAYS
+            private Double regimeConfidence;
         }
 
         @Getter

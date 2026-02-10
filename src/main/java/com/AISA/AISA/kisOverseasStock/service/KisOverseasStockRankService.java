@@ -93,7 +93,9 @@ public class KisOverseasStockRankService {
     public void refreshOverseasDividendRank() {
         log.info("Starting overseas dividend rank refresh...");
 
-        List<Stock> usStocks = overseasStockRepository.findAllByStockType(Stock.StockType.US_STOCK);
+        List<Stock> usStocks = overseasStockRepository.findAll().stream()
+                .filter(s -> s.getStockType() == Stock.StockType.US_STOCK || s.getStockType() == Stock.StockType.US_ETF)
+                .collect(Collectors.toList());
         List<OverseasStockDividendRank> newRankList = new ArrayList<>();
 
         DateTimeFormatter RECORD_DATE_FORMATTER = DateTimeFormatter
@@ -211,14 +213,16 @@ public class KisOverseasStockRankService {
 
             if (targetMarket != null) {
                 marketCaps = stockMarketCapRepository
-                        .findByStockStockTypeAndStockMarketNameOrderByMarketCapDesc(Stock.StockType.US_STOCK,
+                        .findByStockStockTypeInAndStockMarketNameOrderByMarketCapDesc(
+                                List.of(Stock.StockType.US_STOCK, Stock.StockType.US_ETF),
                                 targetMarket, pageable);
             } else {
                 marketCaps = new ArrayList<>();
             }
         } else {
             marketCaps = stockMarketCapRepository
-                    .findByStockStockTypeOrderByMarketCapDesc(Stock.StockType.US_STOCK, pageable);
+                    .findByStockStockTypeInOrderByMarketCapDesc(
+                            List.of(Stock.StockType.US_STOCK, Stock.StockType.US_ETF), pageable);
         }
 
         List<OverseasStockRankDto.RankItem> rankings = new ArrayList<>();
@@ -347,7 +351,9 @@ public class KisOverseasStockRankService {
 
         for (OverseasStockFinancialRatio ratio : pagedRatios) {
             String stockName = overseasStockRepository
-                    .findByStockCodeAndStockType(ratio.getStockCode(), Stock.StockType.US_STOCK)
+                    .findByStockCode(ratio.getStockCode())
+                    .filter(s -> s.getStockType() == Stock.StockType.US_STOCK
+                            || s.getStockType() == Stock.StockType.US_ETF)
                     .map(Stock::getStockName)
                     .orElse(ratio.getStockCode());
 
@@ -431,7 +437,9 @@ public class KisOverseasStockRankService {
     public void refreshShareholderReturnRank() {
         log.info("Starting overseas shareholder return rank refresh...");
 
-        List<Stock> usStocks = overseasStockRepository.findAllByStockType(Stock.StockType.US_STOCK);
+        List<Stock> usStocks = overseasStockRepository.findAll().stream()
+                .filter(s -> s.getStockType() == Stock.StockType.US_STOCK || s.getStockType() == Stock.StockType.US_ETF)
+                .collect(Collectors.toList());
         List<OverseasStockShareholderReturnRank> newRankList = new ArrayList<>();
 
         for (Stock stock : usStocks) {

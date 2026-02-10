@@ -22,7 +22,7 @@ public class KisOverseasStockController {
     private final KisOverseasStockService kisOverseasStockService;
 
     @GetMapping("/search")
-    @Operation(summary = "해외 주식 검색", description = "미국 주식(US_STOCK)을 종목코드 또는 종목명으로 검색합니다.")
+    @Operation(summary = "해외 주식 검색", description = "미국 주식(US_STOCK, US_ETF)을 종목코드 또는 종목명으로 검색합니다.")
     public ResponseEntity<SuccessResponse<List<StockSimpleSearchResponseDto>>> searchOverseasStocks(
             @RequestParam String keyword) {
         return ResponseEntity.ok(new SuccessResponse<>(true, "해외 주식 검색 성공",
@@ -62,6 +62,13 @@ public class KisOverseasStockController {
     public ResponseEntity<SuccessResponse<String>> initAllHistoricalData(@RequestParam String startDate) {
         new Thread(() -> kisOverseasStockService.fetchAllOverseasStocksHistoricalData(startDate)).start();
         return ResponseEntity.ok(new SuccessResponse<>(true, "전체 해외 주식 초기 데이터 구축 시작 (백그라운드)", null));
+    }
+
+    @PostMapping("/etf/init-history")
+    @Operation(summary = "미국 ETF 차트 데이터 초기화", description = "모든 미국 ETF(US_ETF)의 과거 데이터를 수집하여 DB에 저장합니다. (비동기 실행)")
+    public ResponseEntity<SuccessResponse<String>> initEtfHistoricalData(@RequestParam String startDate) {
+        new Thread(() -> kisOverseasStockService.fetchAllEtfHistoricalData(startDate)).start();
+        return ResponseEntity.ok(new SuccessResponse<>(true, "미국 ETF 차트 데이터 초기화 시작 (백그라운드)", null));
     }
 
     @PostMapping("/init-history/from/{stockId}")

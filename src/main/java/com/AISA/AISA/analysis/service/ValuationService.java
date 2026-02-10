@@ -62,6 +62,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -705,6 +706,15 @@ public class ValuationService {
     }
 
     @Transactional
+    @CacheEvict(value = "staticAnalysis", key = "#stockCode", condition = "#refresh")
+    public String getStaticAnalysis(String stockCode, boolean refresh) {
+        if (refresh) {
+            stockStaticAnalysisRepository.deleteByStockCode(stockCode);
+        }
+        return getStaticAnalysis(stockCode);
+    }
+
+    @Transactional
     @Cacheable(value = "staticAnalysis", key = "#stockCode")
     public String getStaticAnalysis(String stockCode) {
         Optional<StockStaticAnalysis> cachedAnalysis = stockStaticAnalysisRepository.findByStockCode(stockCode);
@@ -734,6 +744,15 @@ public class ValuationService {
         StringBuilder prompt = new StringBuilder();
         prompt.append("다음 기업의 **기업 개요**, **미래 성장 동력**, **리스크 요인**을 분석해줘.\n\n");
         prompt.append(String.format("종목명: %s (%s)\n", stock.getStockName(), stock.getStockCode()));
+        prompt.append(String.format("시장: %s\n", stock.getMarketName()));
+
+        if (stock.getStockIndustries() != null && !stock.getStockIndustries().isEmpty()) {
+            String industries = stock.getStockIndustries().stream()
+                    .map(si -> si.getSubIndustry().getName())
+                    .collect(java.util.stream.Collectors.joining(", "));
+            prompt.append(String.format("업종: %s\n", industries));
+        }
+
         if (recentAnnuals != null && !recentAnnuals.isEmpty()) {
             prompt.append("\n[연간 실적 추이 (참고용)]\n");
             for (int i = recentAnnuals.size() - 1; i >= 0; i--) {
@@ -743,7 +762,7 @@ public class ValuationService {
             }
         }
         prompt.append(
-                "\n[요청사항]\n1. **Google Search**를 활용하여 최신 정보를 반영해.\n2. 다음 3가지 항목만 작성해 (마크다운 헤더 필수):\n   - **## 1. 기업 개요**\n   - **## 2. 미래 성장 동력**\n   - **## 3. 리스크 요인**\n3. 가치평가는 절대 포함하지 마.\n4. 금융 전문가 톤으로 요약.\n");
+                "\n[요청사항]\n1. 기업의 **정확한 사업 영역(업종)**을 파악하여 분석해. 명칭이 비슷하더라도 다른 업종(예: 바이오 vs 패션)으로 오해하지 않도록 주의해.\n2. 다음 3가지 항목만 작성해 (마크다운 헤더 필수):\n   - **## 1. 기업 개요**\n   - **## 2. 미래 성장 동력**\n   - **## 3. 리스크 요인**\n3. 가치평가는 절대 포함하지 마.\n4. 금융 전문가 톤으로 요약.\n");
         return geminiService.generateAdvice(prompt.toString());
     }
 

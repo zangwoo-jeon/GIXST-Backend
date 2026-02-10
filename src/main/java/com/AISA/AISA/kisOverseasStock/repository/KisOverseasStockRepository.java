@@ -11,16 +11,20 @@ import java.util.Optional;
 
 public interface KisOverseasStockRepository extends JpaRepository<Stock, Long> {
 
-    @Query("SELECT s FROM Stock s WHERE (s.stockCode LIKE %:keyword% OR s.stockName LIKE %:keyword%) AND s.stockType = 'US_STOCK'")
+    @Query("SELECT s FROM Stock s WHERE (s.stockCode LIKE %:keyword% OR s.stockName LIKE %:keyword%) AND s.stockType IN ('US_STOCK', 'US_ETF')")
     List<Stock> findByKeyword(@Param("keyword") String keyword);
 
+    Optional<Stock> findByStockCode(String stockCode);
+
     List<Stock> findAllByStockType(Stock.StockType stockType);
+
+    List<Stock> findAllByStockTypeInAndStockIdGreaterThanEqual(List<Stock.StockType> stockTypes, Long stockId);
 
     Optional<Stock> findByStockCodeAndStockType(String stockCode, Stock.StockType stockType);
 
     List<Stock> findAllByStockTypeAndStockIdGreaterThanEqual(Stock.StockType stockType, Long stockId);
 
-    @Query("SELECT s FROM Stock s WHERE s.stockType = 'US_STOCK' AND NOT EXISTS (SELECT 1 FROM OverseasStockDailyData d WHERE d.stock = s)")
+    @Query("SELECT s FROM Stock s WHERE s.stockType IN ('US_STOCK', 'US_ETF') AND NOT EXISTS (SELECT 1 FROM OverseasStockDailyData d WHERE d.stock = s)")
     List<Stock> findStocksWithNoDailyData();
 
     @Modifying

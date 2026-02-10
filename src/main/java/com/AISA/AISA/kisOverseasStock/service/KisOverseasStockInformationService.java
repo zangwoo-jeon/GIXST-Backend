@@ -102,7 +102,9 @@ public class KisOverseasStockInformationService {
          */
         @Transactional(readOnly = false)
         public OverseasStockPriceDetailDto getPriceDetail(String stockCode) {
-                Stock stock = overseasStockRepository.findByStockCodeAndStockType(stockCode, Stock.StockType.US_STOCK)
+                Stock stock = overseasStockRepository.findByStockCode(stockCode)
+                                .filter(s -> s.getStockType() == Stock.StockType.US_STOCK
+                                                || s.getStockType() == Stock.StockType.US_ETF)
                                 .orElseThrow(() -> new BusinessException(KisApiErrorCode.STOCK_NOT_FOUND));
 
                 KisOverseasPriceApiResponse response = kisApiClient.fetch(token -> webClient.get()
@@ -214,7 +216,10 @@ public class KisOverseasStockInformationService {
          */
         @Transactional(propagation = Propagation.NOT_SUPPORTED)
         public void updateAllMarketCap() {
-                List<Stock> stocks = overseasStockRepository.findAllByStockType(Stock.StockType.US_STOCK);
+                List<Stock> stocks = overseasStockRepository.findAll().stream()
+                                .filter(s -> s.getStockType() == Stock.StockType.US_STOCK
+                                                || s.getStockType() == Stock.StockType.US_ETF)
+                                .collect(Collectors.toList());
                 log.info("Updating market cap for {} US stocks...", stocks.size());
 
                 for (Stock stock : stocks) {
@@ -236,7 +241,8 @@ public class KisOverseasStockInformationService {
                 log.info("Updating top {} overseas stocks for real-time ranking...", topN);
                 Pageable pageable = PageRequest.of(0, topN);
                 List<StockMarketCap> topMarketCaps = stockMarketCapRepository
-                                .findByStockStockTypeOrderByMarketCapDesc(Stock.StockType.US_STOCK, pageable);
+                                .findByStockStockTypeInOrderByMarketCapDesc(
+                                                List.of(Stock.StockType.US_STOCK, Stock.StockType.US_ETF), pageable);
 
                 for (StockMarketCap smc : topMarketCaps) {
                         try {
@@ -254,7 +260,9 @@ public class KisOverseasStockInformationService {
          * 특정 종목의 실시간 현재가를 조회합니다. (ValuationService용)
          */
         public BigDecimal getCurrentPrice(String stockCode) {
-                Stock stock = overseasStockRepository.findByStockCodeAndStockType(stockCode, Stock.StockType.US_STOCK)
+                Stock stock = overseasStockRepository.findByStockCode(stockCode)
+                                .filter(s -> s.getStockType() == Stock.StockType.US_STOCK
+                                                || s.getStockType() == Stock.StockType.US_ETF)
                                 .orElseThrow(() -> new BusinessException(KisApiErrorCode.STOCK_NOT_FOUND));
 
                 KisOverseasPriceApiResponse response = kisApiClient.fetch(token -> webClient.get()
@@ -290,7 +298,10 @@ public class KisOverseasStockInformationService {
          * 모든 해외 종목의 투자 지표를 일괄적으로 갱신합니다. (배치용)
          */
         public void refreshAllFinancialRatios(String divCode) {
-                List<Stock> stocks = overseasStockRepository.findAllByStockType(Stock.StockType.US_STOCK);
+                List<Stock> stocks = overseasStockRepository.findAll().stream()
+                                .filter(s -> s.getStockType() == Stock.StockType.US_STOCK
+                                                || s.getStockType() == Stock.StockType.US_ETF)
+                                .collect(Collectors.toList());
                 log.info("Starting Batch Financial Ratio Refresh for {} stocks (divCode={})", stocks.size(), divCode);
 
                 for (Stock stock : stocks) {
@@ -319,7 +330,9 @@ public class KisOverseasStockInformationService {
                 }
 
                 // 2. 현재가 및 환율 정보 조회 (PER, PBR 등 계산용)
-                Stock stock = overseasStockRepository.findByStockCodeAndStockType(stockCode, Stock.StockType.US_STOCK)
+                Stock stock = overseasStockRepository.findByStockCode(stockCode)
+                                .filter(s -> s.getStockType() == Stock.StockType.US_STOCK
+                                                || s.getStockType() == Stock.StockType.US_ETF)
                                 .orElseThrow(() -> new BusinessException(KisApiErrorCode.STOCK_NOT_FOUND));
 
                 KisOverseasPriceApiResponse priceResponse = kisApiClient.fetch(token -> webClient.get()
@@ -530,7 +543,9 @@ public class KisOverseasStockInformationService {
          */
 
         public void updateSuspensionStatus(String stockCode) {
-                Stock stock = overseasStockRepository.findByStockCodeAndStockType(stockCode, Stock.StockType.US_STOCK)
+                Stock stock = overseasStockRepository.findByStockCode(stockCode)
+                                .filter(s -> s.getStockType() == Stock.StockType.US_STOCK
+                                                || s.getStockType() == Stock.StockType.US_ETF)
                                 .orElseThrow(() -> new BusinessException(KisApiErrorCode.STOCK_NOT_FOUND));
 
                 String prdtTypeCd;
@@ -584,7 +599,10 @@ public class KisOverseasStockInformationService {
          * 모든 해외 주식(US_STOCK)의 거래정지 여부를 일괄적으로 업데이트합니다.
          */
         public void updateAllSuspensionStatus() {
-                List<Stock> stocks = overseasStockRepository.findAllByStockType(Stock.StockType.US_STOCK);
+                List<Stock> stocks = overseasStockRepository.findAll().stream()
+                                .filter(s -> s.getStockType() == Stock.StockType.US_STOCK
+                                                || s.getStockType() == Stock.StockType.US_ETF)
+                                .collect(Collectors.toList());
                 log.info("Starting Batch Suspension Status Update for {} stocks", stocks.size());
 
                 for (Stock stock : stocks) {

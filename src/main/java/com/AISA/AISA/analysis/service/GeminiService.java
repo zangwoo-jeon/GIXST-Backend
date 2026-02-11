@@ -129,7 +129,7 @@ public class GeminiService {
                                 "parts", List.of(Map.of("text", context)))),
                         "generationConfig", Map.of(
                                 "temperature", 0.7,
-                                "maxOutputTokens", 800))) // Increased for dual response
+                                "maxOutputTokens", 2048))) // Increased for dual response
                 .retrieve()
                 .bodyToMono(String.class)
                 .block();

@@ -17,12 +17,15 @@ import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics;
 import org.springframework.stereotype.Service;
 
 import com.AISA.AISA.analysis.dto.DomesticValuationDto.AnalysisDetails;
-import com.AISA.AISA.analysis.dto.DomesticValuationDto.AnalysisDetails.HistoricalValuationRange;
-import com.AISA.AISA.analysis.dto.DomesticValuationDto.AnalysisDetails.TechnicalIndicators;
+import com.AISA.AISA.analysis.dto.ValuationBaseDto.HistoricalValuationRange;
+import com.AISA.AISA.analysis.dto.ValuationBaseDto.TechnicalIndicators;
 import com.AISA.AISA.analysis.dto.DomesticValuationDto.AnalysisDetails.ValuationContext;
 
 import com.AISA.AISA.analysis.dto.DomesticValuationDto.Request;
 import com.AISA.AISA.analysis.dto.DomesticValuationDto.Response;
+import com.AISA.AISA.analysis.dto.DomesticValuationDto.CurrentPosition;
+import com.AISA.AISA.analysis.dto.DomesticValuationDto.ActionStrategy;
+import com.AISA.AISA.analysis.dto.DomesticValuationDto.ProbabilityAndRisk;
 import com.AISA.AISA.analysis.dto.ValuationBaseDto.DiscountRateInfo;
 import com.AISA.AISA.analysis.dto.ValuationBaseDto.RiskLevel;
 import com.AISA.AISA.analysis.dto.ValuationBaseDto.Stance;
@@ -668,7 +671,7 @@ public class ValuationService {
         val.getAnalysisDetails()
                 .setInvestmentTerm(determineInvestmentTerm(val.getTrendScore(), val.getValuationScore()));
 
-        // [V4.3 Final Polishing] AI용 가격 전략 사전 계산
+        // [V4.5] Multi-term Target Prices
         BigDecimal theoreticalMax = new BigDecimal(val.getBand().getMaxPrice().replace(",", ""));
         BigDecimal baseTarget = theoreticalMax.max(cur);
         BigDecimal resPrice = baseTarget.multiply(new BigDecimal("1.05")).setScale(0, RoundingMode.HALF_UP);
@@ -676,10 +679,25 @@ public class ValuationService {
         BigDecimal supPrice = bandMin.multiply(new BigDecimal("0.95")).max(cur.multiply(new BigDecimal("0.90")))
                 .setScale(0, RoundingMode.HALF_UP);
 
-        String resistanceStr = String.format("%,d원", resPrice.longValue());
+        BigDecimal perTarget = val.getPer().isAvailable() ? new BigDecimal(val.getPer().getPrice()) : BigDecimal.ZERO;
+        BigDecimal pbrTarget = val.getPbr().isAvailable() ? new BigDecimal(val.getPbr().getPrice()) : BigDecimal.ZERO;
+        BigDecimal srimPrice = val.getSrim().isAvailable() ? new BigDecimal(val.getSrim().getPrice()) : BigDecimal.ZERO;
+        BigDecimal histAverage = perTarget.max(pbrTarget);
+
+        // [New V4.5 Refined] Progressive Target Prices
+        BigDecimal shortTarget = resPrice;
+        BigDecimal midTarget = histAverage.max(shortTarget.multiply(new BigDecimal("1.10"))).setScale(0,
+                RoundingMode.HALF_UP);
+        BigDecimal longTarget = srimPrice.max(midTarget.multiply(new BigDecimal("1.15"))).setScale(0,
+                RoundingMode.HALF_UP);
+
+        String shortTerm = String.format("%,d원", shortTarget.longValue());
+        String midTerm = String.format("%,d원", midTarget.longValue());
+        String longTerm = String.format("%,d원", longTarget.longValue());
         String supportStr = String.format("%,d원", supPrice.longValue());
 
-        String analysis = generateValuationAnalysisText(val, ratio, null, null, trend, resistanceStr, supportStr);
+        String analysis = generateValuationAnalysisText(val, ratio, null, null, trend, shortTerm, midTerm, longTerm,
+                supportStr);
 
         AiResponseJson aiJson = parseAiResponse(analysis);
         String displayVerdict = val.getSummary().getOverallVerdict();
@@ -773,7 +791,7 @@ public class ValuationService {
 
     private String generateValuationAnalysisText(Response val, StockFinancialRatio latestRatio,
             StockBalanceSheet balanceSheet, List<StockFinancialStatement> recentQuarters,
-            InvestorTrendDto investorTrend, String resistance, String support) {
+            InvestorTrendDto investorTrend, String shortTerm, String midTerm, String longTerm, String support) {
         StringBuilder prompt = new StringBuilder();
         prompt.append("[역할: 냉철한 헤지펀드 매니저(Critical Strategist)]\n");
         prompt.append(
@@ -783,6 +801,16 @@ public class ValuationService {
         prompt.append("- 현재가: ").append(val.getCurrentPrice()).append("원\n");
         prompt.append("- 가치 점수(Valuation Score): ").append(val.getValuationScore()).append("/100\n");
         prompt.append("- 추세 점수(Trend Score): ").append(val.getTrendScore()).append("/100\n");
+
+        double probScore = 50.0;
+        if (investorTrend != null) {
+            probScore = 45.0 + (investorTrend.getSupplyScore() - 45.0) * 0.4; // Recalculate prob score for signal
+        }
+        MarketPhase phase = determineMarketPhase(val.getTrendScore(), val.getValuationScore(), probScore);
+
+        prompt.append("- [중요] 시장 국면 진단(Meta-Analysis): ").append(phase.title).append("\n");
+        prompt.append("  > 해석 가이드: ").append(phase.desc).append("\n");
+        prompt.append("  > AI 지침: 위 '시장 국면'을 바탕으로, 서로 상충되는 신호(예: 추세↑ vs 가치↓)의 원인을 사용자에게 명확히 설명하라.\n");
 
         if (latestRatio != null) {
             prompt.append("- 펀더멘털: PER ").append(latestRatio.getPer()).append(", PBR ").append(latestRatio.getPbr())
@@ -801,6 +829,23 @@ public class ValuationService {
             }
         }
 
+        if (val.getAnalysisDetails() != null && val.getAnalysisDetails().getTechnicalIndicators() != null) {
+            TechnicalIndicators tech = val.getAnalysisDetails().getTechnicalIndicators();
+            prompt.append("- 시장 국면(Regime): ").append(tech.getMarketRegime())
+                    .append(" (신뢰도: ").append(tech.getRegimeConfidence()).append("%, ")
+                    .append("안정성: ").append(tech.getRegimeStability()).append("%)\n");
+            prompt.append("- Stochastic Slow(14,3,3): K=").append(tech.getStochasticK())
+                    .append(", D=").append(tech.getStochasticD())
+                    .append(" (").append(tech.getStochasticZone()).append(")\n");
+            if (!"NONE".equals(tech.getStochasticSignal())) {
+                prompt.append("  > 시그널: Stochastic ").append(tech.getStochasticSignal()).append(" Cross 발생!!\n");
+            }
+            prompt.append("- 추세 전환 확률: ").append(tech.getTransitionProbability()).append("%\n");
+            if (tech.getTransitionProbability() > 60) {
+                prompt.append("!! 주의: 현재 국면이 전환될 가능성이 매우 높으므로 변동성에 대비하라.\n");
+            }
+        }
+
         if (investorTrend != null) {
             prompt.append("- 최근 수급 현황: ").append(investorTrend.getTrendStatus()).append(" (Score: ")
                     .append(investorTrend.getSupplyScore()).append(")\n");
@@ -808,30 +853,49 @@ public class ValuationService {
                 prompt.append("- 시스템 매칭 조언: ").append(investorTrend.getAdvice()).append("\n");
         }
 
-        prompt.append("\n[분석 미션: 5단계 전문 리서치 구조화]\n");
-        prompt.append("다음 5단계 구조에 맞춰 `guidance` 필드를 작성하라. 각 단계는 투자자의 사고 흐름을 완벽히 가이드해야 한다.\n");
+        prompt.append("\n[시계열별 목표 가격 (중요)]\n");
+        prompt.append("- 단기 목표가: ").append(shortTerm).append("\n");
+        prompt.append("- 중기 목표가: ").append(midTerm).append("\n");
+        prompt.append("- 장기 목표가: ").append(longTerm).append("\n");
 
-        prompt.append(
-                "1. **[현재 상황 요약]**: 종목의 현재 추세(Trend)와 밸류에이션(Valuation) 상태를 한 줄로 명확히 정의하라. (예: '상승 추세가 유지되고 있으나 고평가 영역에 진입함')\n");
-        prompt.append("2. **[3대 판단 근거]**: 판단의 이유를 다음 3가지 축으로 설명하라.\n");
-        prompt.append("   - 밸류에이션: 내재가치 대비 저평가/고평가 여부\n");
-        prompt.append("   - 수급: 기관/외국인 매매 동향 및 강도\n");
-        prompt.append("   - 통계확률: KNN 분석 결과(상승 확률)에 기반한 통계적 유불리\n");
-        prompt.append("3. **[향후 시나리오]**: 단기적으로 예상되는 주가 흐름(박스권 등락, 추세 지속, 조정 가능성 등)을 제시하라.\n");
-        prompt.append("4. **[행동 전략]**: 시스템이 계산한 Resistance(%s)와 Support(%s) 가격을 인용하여 구체적인 행동 지침을 제시하라.\n");
-        prompt.append("   - '반등 시 Resistance 부근에서 비중 축소'\n");
-        prompt.append("   - 'Support 이탈 시 리스크 관리 필수'\n");
-        prompt.append("5. **[판단 변경 조건]**: 현재의 관점이 바뀔 수 있는 트리거(예: '수급 주체의 매수 전환', '저항선 돌파')를 명시하라.\n");
+        prompt.append("\n[분석 미션: 5대 핵심 지표 도출]\n");
+        prompt.append("사용자의 '지금 사도 돼?'라는 질문에 답하기 위해 다음 항목을 반드시 포함하여 `guidance`를 작성하라.\n");
+        prompt.append("1. **[현재 위치]**: 지금 주가가 역사적/기술적으로 어떤 지점인지 명확히 진단 (예: '무릎 이하 저평가', '어깨 위 과열')\n");
+        prompt.append("2. **[방향성 확률]**: 단기/중기/장기별 상승 확률과 메인 시나리오\n");
+        prompt.append("3. **[리스크&손절]**: 하방 위험 크기와 반드시 지켜야 할 손절선\n");
+        prompt.append("4. **[핵심 근거]**: 실적(P), 수급(Q), 모멘텀(M) 관점의 요약\n");
+        prompt.append("5. **[타이밍 지침]**: 오늘 당장 해야 할 행동 (예: '비중 확대', '관망', '분할 매수 시작')\n");
 
         prompt.append("\n[추가 지침]\n");
-        prompt.append("- **Action Plan 도출**: `actionPlan` 필드는 위 [행동 전략]을 1문장으로 요약하여 작성하라.\n");
-        prompt.append("- **용어 순화**: '베타(Beta)' 같은 전문 용어는 '시장 민감도'나 '변동성 위험' 같이 일반 투자자가 이해하기 쉬운 표현으로 풀어서 설명하라.\n");
+        prompt.append("- **Action Plan**: 1문장 요약 (목표가 및 지지선 인용 필수)\n");
+        prompt.append("- **결과 형식**: 오직 JSON만 반환하라.\n");
 
-        prompt.append("\nJSON format 가이드:\n");
+        prompt.append("\nJSON format guide:\n");
+        prompt.append("{\n");
+        prompt.append("  \"keyInsight\": \"30자 이내 결론 요약\",\n");
+        prompt.append("  \"positionSummary\": \"현재 주가 위치 한 줄 진단\",\n");
+        prompt.append("  \"aiVerdict\": {\n");
+        prompt.append("    \"stance\": \"BUY/ACCUMULATE/HOLD/REDUCE/SELL\",\n");
+        prompt.append("    \"timing\": \"EARLY/MID/LATE\",\n");
+        prompt.append("    \"riskLevel\": \"LOW/MEDIUM/HIGH\",\n");
         prompt.append(
-                "```json\n{\n  \"keyInsight\": \"30자 이내의 비판적 핵심 요약\",\n  \"aiVerdict\": {\"stance\": \"BUY/ACCUMULATE/HOLD/REDUCE/SELL\", \"timing\": \"EARLY/MID/LATE\", \"riskLevel\": \"LOW/MEDIUM/HIGH\", \"guidance\": \"[현재 상황] ...\\n\\n[판단 근거] ...\\n\\n[향후 전망] ...\\n\\n[투자 전략] ...\\n\\n[판단 변경 조건] ...\"},\n  \"actionPlan\": \"반등 시 Resistance("
-                        + resistance
-                        + ") 근처에서 비중 축소 권장\",\n  \"probabilityInfo\": \"상승 확률 27.4% (낮음)\",\n  \"catalysts\": [\"호재\"], \"risks\": [\"베타 변동성 등 리스크\"]\n}\n```\n");
+                "    \"guidance\": \"[현재 위치] ...\\n\\n[핵심 근거] ...\\n\\n[전망 및 확률] ...\\n\\n[대응 및 타이밍] ...\\n\\n[리스크 관리] ...\"\n");
+        prompt.append("  },\n");
+        prompt.append("  \"probabilities\": {\n");
+        prompt.append("  \"probabilities\": {\n");
+        prompt.append("    \"shortTerm\": \"50.9% (Example)\",\n");
+        prompt.append("    \"midTerm\": \"60.0% (Estimate based on trend)\",\n");
+        prompt.append("    \"longTerm\": \"70.0% (Estimate based on valuation)\"\n"); // [Fix] Force AI to estimate
+        prompt.append("  },\n");
+        prompt.append("  \"timingAction\": \"실전 투자 타이밍 지침 (예: 분할 매수 시작)\",\n");
+        prompt.append("  \"actionPlan\": \"단기 목표가(").append(shortTerm).append(") 도달 시 비중 축소, 지지선(").append(support)
+                .append(") 이탈 시 리스크 관리\",\n");
+        prompt.append("  \"probabilityInfo\": \"상승 확률 65% (높음)\",\n");
+        prompt.append("  \"catalysts\": [\"호재1\", \"호재2\"], \"risks\": [\"리스크1\", \"리스크2\"]\n"); // [Fix] Emphasize
+                                                                                                 // array format
+        prompt.append("}\n");
+        prompt.append(
+                "\n[Constraint]: `probabilities`의 midTerm, longTerm과 `catalysts`는 절대 'N/A'나 빈 배열로 남기지 마라. 추세와 펀더멘털을 근거로 합리적인 추정치를 반드시 제시하라.\n");
         return geminiService.generateAdvice(prompt.toString());
     }
 
@@ -851,78 +915,78 @@ public class ValuationService {
                 ? aiJson.getAiVerdict().getStance().name()
                 : "HOLD";
 
-        Summary.Display display = Summary.Display.builder()
-                .verdict(overallVerdict)
-                .verdictLabel(mapVerdictToLabel(overallVerdict,
-                        aiJson.getAiVerdict() != null ? aiJson.getAiVerdict().getStance() : Stance.HOLD))
-                .strategy(Summary.Strategy.builder()
-                        .actionPlan(
-                                aiJson.getActionPlan() != null ? aiJson.getActionPlan() : "시장 상황에 따른 유연한 대응이 필요합니다.")
-                        .build())
-                .risk(aiJson.getAiVerdict() != null && aiJson.getAiVerdict().getRiskLevel() != null
+        // 1. Calculate Market Phase
+        double probScore = 50.0;
+        if (trend != null) {
+            probScore = 45.0 + (trend.getSupplyScore() - 45.0) * 0.4;
+        }
+        MarketPhase phase = determineMarketPhase(response.getTrendScore(), response.getValuationScore(), probScore);
+
+        // 2. Build CurrentPosition
+        CurrentPosition currentPosition = CurrentPosition.builder()
+                .stockCode(response.getStockCode())
+                .stockName(response.getStockName())
+                .currentPrice(response.getCurrentPrice())
+                .marketCap(response.getMarketCap())
+                .valuationScore(response.getValuationScore())
+                .trendScore(response.getTrendScore())
+                .marketPhase(phase.name())
+                .marketPhaseDescription(phase.desc)
+                .build();
+
+        // 3. Build ProbabilityAndRisk (with Fallback)
+        Summary.Probabilities probs = fillMissingProbabilities(aiJson.getProbabilities(), response.getTrendScore(),
+                response.getValuationScore());
+        ProbabilityAndRisk probabilityAndRisk = ProbabilityAndRisk.builder()
+                .probabilities(probs)
+                .riskLevel(aiJson.getAiVerdict() != null && aiJson.getAiVerdict().getRiskLevel() != null
                         ? aiJson.getAiVerdict().getRiskLevel().name()
                         : "MEDIUM")
+                .riskFactors(aiJson.getRisks() != null ? aiJson.getRisks() : List.of("시장 변동성 주의"))
                 .probabilityInfo(aiJson.getProbabilityInfo() != null ? aiJson.getProbabilityInfo() : "상승 확률 분석 중")
                 .build();
 
+        // 4. Build ActionStrategy (Preliminary)
+        ActionStrategy actionStrategy = ActionStrategy.builder()
+                .actionPlan(aiJson.getActionPlan() != null ? aiJson.getActionPlan() : "시장 상황에 따른 유연한 대응이 필요합니다.")
+                .timingAction(aiJson.getTimingAction() != null ? aiJson.getTimingAction() : "관망 추천")
+                .build();
+
+        // 5. Build Summary (Lightweight)
         Summary newSummary = Summary.builder()
                 .overallVerdict(overallVerdict)
                 .confidence("HIGH")
                 .keyInsight(aiJson.getKeyInsight() != null ? aiJson.getKeyInsight() : "AI 전략 분석 리포트")
+                // Keep minimal backward compatibility if needed, otherwise leave empty or null
                 .verdicts(Summary.Verdicts.builder().aiVerdict(aiJson.getAiVerdict()).build())
                 .beginnerVerdict(aiJson.getBeginnerVerdict())
-                .display(display)
                 .build();
 
-        if (trend != null && trend.getAdvice() == null) {
-            trend.setAdvice(generateFallbackSupplyAdvice(trend.getSupplyScore()));
-        }
+        // 6. Calculate Price Targets & Update ActionStrategy
+        // We reuse the logic but map it to the new structure
+        calculatePriceStrategyForNewDto(response, actionStrategy, probs);
 
-        // [New Phase 3] 가격 전략 재구성 (목표가/손절가)
-        BigDecimal yieldVal = BigDecimal.ZERO;
-        calculatePriceStrategy(response, newSummary, null, yieldVal);
-
-        // AnalysisDetails 조립 (노이즈 필드 제거됨)
+        // 7. Update AnalysisDetails
         AnalysisDetails details = response.getAnalysisDetails();
         if (details != null) {
-            details.setCatalysts(aiJson.getCatalysts());
-            details.setRisks(aiJson.getRisks());
+            details.setCatalysts(ensureCatalysts(aiJson.getCatalysts(), response));
             details.setInvestorTrend(trend);
 
-            // downsideRisk 등 보정
-            AnalysisDetails.PriceModel pmDto = calculatePriceModel(response, newSummary);
+            // Calculate Price Model (Upside/Downside) based on new strategy
+            AnalysisDetails.PriceModel pmDto = calculatePriceModelNew(response, actionStrategy);
             details.setPriceModel(pmDto);
         }
 
         if (aiJson.getSuggestedWeights() != null && response.getBand() != null)
             response.getBand().setWeights(aiJson.getSuggestedWeights());
 
-        return response.toBuilder().summary(newSummary).analysisDetails(details).build();
-    }
-
-    private AnalysisDetails.PriceModel calculatePriceModel(Response response, Summary summary) {
-        String downsideStr = "N/A", upsideStr = "0%";
-        try {
-            BigDecimal cur = new BigDecimal(response.getCurrentPrice().replace(",", ""));
-            if (summary.getDisplay().getStrategy() != null
-                    && summary.getDisplay().getStrategy().getResistanceZone() != null) {
-                BigDecimal tgt = new BigDecimal(
-                        summary.getDisplay().getStrategy().getResistanceZone().replaceAll("[^0-9]", ""));
-                BigDecimal upside = tgt.subtract(cur).divide(cur, 4, RoundingMode.HALF_UP)
-                        .multiply(new BigDecimal(100));
-                upsideStr = String.format("%.2f%%", upside);
-            }
-            if (summary.getDisplay().getStrategy() != null
-                    && summary.getDisplay().getStrategy().getSupportZone() != null) {
-                BigDecimal sl = new BigDecimal(
-                        summary.getDisplay().getStrategy().getSupportZone().replaceAll("[^0-9]", ""));
-                BigDecimal downside = sl.subtract(cur).divide(cur, 4, RoundingMode.HALF_UP)
-                        .multiply(new BigDecimal(100));
-                downsideStr = String.format("%.2f%%", downside);
-            }
-        } catch (Exception e) {
-        }
-        return AnalysisDetails.PriceModel.builder().upsidePotential(upsideStr).downsideRisk(downsideStr).build();
+        return response.toBuilder()
+                .summary(newSummary)
+                .currentPosition(currentPosition)
+                .actionStrategy(actionStrategy)
+                .probabilityAndRisk(probabilityAndRisk)
+                .analysisDetails(details)
+                .build();
     }
 
     private static class KnnCandidate {
@@ -1089,12 +1153,165 @@ public class ValuationService {
         maMap.put("MA120", String.format("%,.0f원", ma120));
         maMap.put("status", location);
 
+        // [v3] Stochastic (14, 3, 3)
+        double[] stochastic = calculateStochastic(stockData, 14, 3);
+        double k = stochastic[0];
+        double d = stochastic[1];
+        String zone = determineStochasticZone(k);
+        String signal = determineStochasticSignal(stockData, 14, 3);
+
+        // [v3] Market Regime & ATR
+        double atr = calculateATR(stockData, 14);
+        Object[] regimeData = calculateMarketRegime(stockData, ma20, ma60, atr);
+        String marketRegime = (String) regimeData[0];
+        double regimeConfidence = (double) regimeData[1];
+        double transitionProb = (double) regimeData[2];
+        double stability = (double) regimeData[3];
+
         return TechnicalIndicators.builder()
                 .rsi(rsi)
                 .movingAverages(maMap)
                 .relativeStrength(rs)
                 .priceLocation(mapPriceLocation(location))
+                .stochasticK(k)
+                .stochasticD(d)
+                .stochasticZone(zone)
+                .stochasticSignal(signal)
+                .stochasticStrength(Math.abs(k - 50) * 2)
+                .marketRegime(marketRegime)
+                .regimeConfidence(regimeConfidence)
+                .transitionProbability(transitionProb)
+                .regimeStability(stability)
                 .build();
+    }
+
+    private double[] calculateStochastic(List<StockDailyData> data, int n, int m) {
+        if (data.size() < n + m)
+            return new double[] { 50.0, 50.0 };
+
+        List<Double> kList = new ArrayList<>();
+        for (int i = data.size() - m - 3; i < data.size(); i++) {
+            if (i < n - 1)
+                continue;
+            double low = Double.MAX_VALUE;
+            double high = Double.MIN_VALUE;
+            for (int j = i - n + 1; j <= i; j++) {
+                double currentPrice = data.get(j).getClosingPrice().doubleValue();
+                low = Math.min(low, currentPrice);
+                high = Math.max(high, currentPrice);
+            }
+            double close = data.get(i).getClosingPrice().doubleValue();
+            double k = (high == low) ? 50.0 : ((close - low) / (high - low)) * 100.0;
+            kList.add(k);
+        }
+
+        if (kList.size() < m)
+            return new double[] { 50.0, 50.0 };
+
+        double currentK = kList.size() >= 3
+                ? (kList.get(kList.size() - 1) + kList.get(kList.size() - 2) + kList.get(kList.size() - 3)) / 3.0
+                : kList.get(kList.size() - 1);
+        double prevK1 = kList.size() >= 4
+                ? (kList.get(kList.size() - 2) + kList.get(kList.size() - 3) + kList.get(kList.size() - 4)) / 3.0
+                : currentK;
+        double currentD = kList.size() >= 5
+                ? (currentK + prevK1
+                        + (kList.get(kList.size() - 3) + kList.get(kList.size() - 4) + kList.get(kList.size() - 5))
+                                / 3.0)
+                        / 3.0
+                : currentK;
+
+        return new double[] { Math.round(currentK * 10.0) / 10.0, Math.round(currentD * 10.0) / 10.0 };
+    }
+
+    private String determineStochasticZone(double k) {
+        if (k >= 80)
+            return "OVERBOUGHT";
+        if (k >= 60)
+            return "STRONG";
+        if (k <= 20)
+            return "OVERSOLD";
+        if (k <= 40)
+            return "WEAK";
+        return "NEUTRAL";
+    }
+
+    private String determineStochasticSignal(List<StockDailyData> data, int n, int m) {
+        double[] current = calculateStochastic(data, n, m);
+        // Simplified previous value calculation for signal detection
+        List<StockDailyData> prevData = data.subList(0, data.size() - 1);
+        double[] prev = calculateStochastic(prevData, n, m);
+
+        if (prev[0] <= prev[1] && current[0] > current[1])
+            return "GOLDEN";
+        if (prev[0] >= prev[1] && current[0] < current[1])
+            return "DEAD";
+        return "NONE";
+    }
+
+    private double calculateATR(List<StockDailyData> data, int period) {
+        if (data == null || data.size() < period + 1)
+            return 0.0;
+
+        List<Double> trs = new ArrayList<>();
+        for (int i = 1; i < data.size(); i++) {
+            double high = data.get(i).getHighPrice().doubleValue();
+            double low = data.get(i).getLowPrice().doubleValue();
+            double prevClose = data.get(i - 1).getClosingPrice().doubleValue();
+            double tr = Math.max(high - low, Math.max(Math.abs(high - prevClose), Math.abs(low - prevClose)));
+            trs.add(tr);
+        }
+
+        double sum = 0;
+        int count = 0;
+        for (int i = trs.size() - 1; i >= 0 && count < period; i--) {
+            sum += trs.get(i);
+            count++;
+        }
+        return count > 0 ? sum / count : 0.0;
+    }
+
+    private Object[] calculateMarketRegime(List<StockDailyData> data, double ma20, double ma60, double atr) {
+        if (data == null || data.size() < 20)
+            return new Object[] { "SIDEWAYS", 50.0, 10.0, 50.0 };
+
+        double currentPrice = data.get(data.size() - 1).getClosingPrice().doubleValue();
+        double prevPrice = data.get(data.size() - 5).getClosingPrice().doubleValue();
+        double momentum = (currentPrice - prevPrice) / prevPrice;
+        double volatilityRatio = (atr / currentPrice) * 100.0; // ATR relative to price
+
+        String regime = "SIDEWAYS";
+        double confidence = 50.0;
+        double transitionProb = 0.0;
+        double stability = 50.0;
+
+        double maGap = Math.abs(ma20 / ma60 - 1.0);
+
+        if (ma20 > ma60 * 1.02 && momentum > 0) {
+            regime = "STRONG_TREND";
+            confidence = 60.0 + (momentum * 1000);
+            stability = 100.0 - (volatilityRatio * 10.0);
+            transitionProb = (maGap < 0.01 || momentum < 0.01) ? 30.0 : 10.0;
+        } else if (ma20 < ma60 * 0.98 && momentum < 0) {
+            regime = "WEAK_TREND";
+            confidence = 60.0 + (Math.abs(momentum) * 1000);
+            stability = 100.0 - (volatilityRatio * 10.0);
+            transitionProb = (maGap < 0.01 || momentum > -0.01) ? 30.0 : 10.0;
+        } else {
+            regime = "SIDEWAYS";
+            // Sideways confidence is based on MA convergence
+            confidence = 100.0 - (maGap * 5000);
+            stability = 100.0 - (volatilityRatio * 20.0);
+            // Higher volatility in sideways suggests upcoming breakout (transition)
+            transitionProb = 20.0 + (volatilityRatio * 15.0) + (maGap < 0.005 ? 20.0 : 0.0);
+        }
+
+        // UX: Apply min floor and rounding
+        confidence = Math.max(10.0, Math.min(100.0, Math.round(confidence * 10.0) / 10.0));
+        transitionProb = Math.max(5.0, Math.min(95.0, Math.round(transitionProb * 10.0) / 10.0));
+        stability = Math.max(5.0, Math.min(100.0, Math.round(stability * 10.0) / 10.0));
+
+        return new Object[] { regime, confidence, transitionProb, stability };
     }
 
     private double calculateValuationScore(ValuationResult srim, ValuationResult per, ValuationResult pbr,
@@ -1169,6 +1386,17 @@ public class ValuationService {
                 technicalComponent += 10;
             else if (tech.getRsi() > 70)
                 technicalComponent -= 10;
+
+            // [V4.3] Stochastic Slow (14, 3, 3) 반영
+            if ("GOLDEN".equals(tech.getStochasticSignal()))
+                technicalComponent += 10;
+            else if ("DEAD".equals(tech.getStochasticSignal()))
+                technicalComponent -= 10;
+
+            if ("OVERSOLD".equals(tech.getStochasticZone()))
+                technicalComponent += 5;
+            else if ("OVERBOUGHT".equals(tech.getStochasticZone()))
+                technicalComponent -= 5;
         }
 
         double finalScore = (supplyComponent * 0.4) + (rsComponent * 0.3) + (technicalComponent * 0.3);
@@ -1199,24 +1427,47 @@ public class ValuationService {
                 .average().orElse(0.0);
     }
 
-    private String generateFallbackSupplyAdvice(double score) {
-        if (score >= 80)
-            return "외인/기관의 강력한 매집세가 확인되는 긍정적 구간입니다.";
-        if (score >= 60)
-            return "수급 흐름이 개선되고 있어 긍정적 시각을 유지합니다.";
-        if (score >= 40)
-            return "수급 주체 간 공방이 치열한 중립 구간입니다.";
-        if (score >= 20)
-            return "수급 유출 우려가 있어 보수적 관점이 필요합니다.";
-        return "수급 악화가 지속되고 있어 당분간 관망을 추천합니다.";
-    }
-
     private String mapVerdictToLabel(String modelRating, Stance aiStance) {
         if ("BUY".equals(modelRating))
             return aiStance == Stance.ACCUMULATE ? "분할 매수" : "매수";
         if ("SELL".equals(modelRating))
             return aiStance == Stance.REDUCE ? "비중 축소" : "매도";
         return "관망";
+    }
+
+    @Getter
+    private enum MarketPhase {
+        IDEAL_BULL("이상적인 상승장 (Ideal Bull)", "강력한 펀더멘털과 수급이 동반된 상승세. 적극 매수 구간."),
+        LATE_STAGE_RALLY("과열/추세 후반 (Late Stage)", "주가는 상승 중이나 밸류에이션 부담이 가중됨. 추세 추종하되 비중 조절 필요."),
+        BOTTOM_FISHING("저점 매수 기회 (Bottom Fishing)", "주가는 바닥권이나 밸류에이션 매력이 높음. 분할 매수로 접근 유효."),
+        FALLING_KNIFE("하락세/관망 (Falling Knife)", "추세와 밸류에이션 모두 부정적. 성급한 진입 자제."),
+        RECOVERY("회복 국면 (Recovery)", "수급이 개선되며 턴어라운드 시도 중."),
+        UNCERTAIN("방향성 탐색 (Uncertain)", "뚜렷한 방향성이 없는 중립 구간. 관망 필요.");
+
+        final String title;
+        final String desc;
+
+        MarketPhase(String title, String desc) {
+            this.title = title;
+            this.desc = desc;
+        }
+    }
+
+    private MarketPhase determineMarketPhase(double trendScore, double valuationScore, double probScore) {
+        if (trendScore >= 60 && valuationScore >= 60)
+            return MarketPhase.IDEAL_BULL;
+        if (trendScore >= 60 && valuationScore < 40)
+            return MarketPhase.LATE_STAGE_RALLY;
+        if (trendScore < 40 && valuationScore >= 60)
+            return MarketPhase.BOTTOM_FISHING;
+        if (trendScore < 40 && valuationScore < 40)
+            return MarketPhase.FALLING_KNIFE;
+
+        // Probability check for neutral zones (Bonus weighting for high probability)
+        if (probScore >= 55 && trendScore >= 40)
+            return MarketPhase.RECOVERY;
+
+        return MarketPhase.UNCERTAIN;
     }
 
     @Getter
@@ -1229,66 +1480,63 @@ public class ValuationService {
         private List<String> catalysts;
         private List<String> risks;
         private Map<String, Double> suggestedWeights;
-        // [V4.3] 신규 필드 추가
         private String actionPlan;
         private String probabilityInfo;
-    }
-
-    private void calculatePriceStrategy(Response response, Summary summary, BigDecimal peg, BigDecimal yield) {
-        if (response.getBand() == null || response.getBand().getMinPrice() == null)
-            return;
-
-        BigDecimal theoreticalMax = new BigDecimal(response.getBand().getMaxPrice().replace(",", ""));
-        BigDecimal currentPrice = new BigDecimal(response.getCurrentPrice().replace(",", ""));
-        BigDecimal baseForTarget = theoreticalMax.max(currentPrice);
-
-        BigDecimal multiplier = new BigDecimal("1.05");
-        if (peg != null && peg.compareTo(BigDecimal.ONE) < 0)
-            multiplier = multiplier.add(new BigDecimal("0.02"));
-
-        BigDecimal resistance = baseForTarget.multiply(multiplier).setScale(0, RoundingMode.HALF_UP);
-
-        BigDecimal bandBottom = new BigDecimal(response.getBand().getMinPrice().replace(",", ""))
-                .multiply(new BigDecimal("0.95"));
-        BigDecimal currentExit = currentPrice.multiply(new BigDecimal("0.90"));
-        BigDecimal support = bandBottom.max(currentExit).setScale(0, RoundingMode.HALF_UP);
-
-        if (summary.getDisplay().getStrategy() == null) {
-            summary.getDisplay().setStrategy(new Summary.Strategy());
-        }
-        summary.getDisplay().getStrategy().setResistanceZone(String.format("%,d원", resistance.longValue()));
-        summary.getDisplay().getStrategy().setSupportZone(String.format("%,d원", support.longValue()));
+        // [V5] New fields
+        private String positionSummary;
+        private Summary.Probabilities probabilities;
+        private String timingAction;
     }
 
     private AiResponseJson parseAiResponse(String jsonText) {
+        if (jsonText == null || jsonText.isEmpty())
+            return fallbackAiResponse();
+
         try {
-            int start = jsonText.indexOf("{"), end = jsonText.lastIndexOf("}");
-            if (start >= 0) {
+            // Extract the first JSON object found in the text
+            int start = jsonText.indexOf("{");
+            int end = jsonText.lastIndexOf("}");
+
+            if (start >= 0 && end > start) {
+                String potentialJson = jsonText.substring(start, end + 1);
                 ObjectMapper mapper = new ObjectMapper();
                 mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
-                AiResponseJson result = mapper.readValue(jsonText.substring(start, end + 1), AiResponseJson.class);
-                if (result.getAiVerdict() == null)
-                    result.setAiVerdict(Summary.AiVerdict.builder().stance(Stance.HOLD).riskLevel(RiskLevel.MEDIUM)
-                            .guidance("분석 데이터를 파싱할 수 없습니다.").build());
-                if (result.getActionPlan() == null)
-                    result.setActionPlan("시장 상황에 따른 유연한 대응이 필요합니다.");
-                if (result.getCatalysts() == null)
-                    result.setCatalysts(List.of("시장 상황 모니터링 필요"));
-                if (result.getRisks() == null)
-                    result.setRisks(List.of("데이터 지연 가능성"));
+
+                AiResponseJson result = mapper.readValue(potentialJson, AiResponseJson.class);
+
+                // Validate essential fields
+                if (result.getAiVerdict() == null) {
+                    result.setAiVerdict(Summary.AiVerdict.builder()
+                            .stance(Stance.HOLD)
+                            .riskLevel(RiskLevel.MEDIUM)
+                            .guidance("분석 데이터를 파싱할 수 없습니다.")
+                            .build());
+                }
                 return result;
+            } else {
+                log.warn("No valid JSON found in AI response (start: {}, end: {})", start, end);
+                log.debug("Raw AI response: {}", jsonText);
             }
         } catch (Exception e) {
-            log.error("Failed to parse AI JSON: {}", e.getMessage());
+            log.error("Failed to parse AI JSON. Error: {}. Raw text: {}", e.getMessage(), jsonText);
         }
+        return fallbackAiResponse();
+    }
+
+    private AiResponseJson fallbackAiResponse() {
         AiResponseJson fallback = new AiResponseJson();
         fallback.setKeyInsight("데이터 분석 지연 중");
-        fallback.setAiVerdict(Summary.AiVerdict.builder().stance(Stance.HOLD).riskLevel(RiskLevel.MEDIUM)
-                .guidance("서버 응답 오류로 기본 분석값을 제공합니다.").build());
-        fallback.setBeginnerVerdict(
-                Summary.BeginnerVerdict.builder().summarySentence("잠시 후 다시 시도해 주세요.").build());
-        fallback.setCatalysts(List.of("분석 중"));
-        fallback.setRisks(List.of("분석 중"));
+        fallback.setAiVerdict(Summary.AiVerdict.builder()
+                .stance(Stance.HOLD)
+                .riskLevel(RiskLevel.MEDIUM)
+                .guidance("시계열 목표가 분석 및 심층 리서치 데이터를 업데이트 중입니다. 잠시 후 다시 시도해 주세요.")
+                .build());
+        fallback.setBeginnerVerdict(Summary.BeginnerVerdict.builder()
+                .summarySentence("서버 응답 처리 중 오류가 발생했습니다.")
+                .build());
+        fallback.setCatalysts(List.of("데이터 동기화 필요", "시장 모니터링 중")); // [Fix] Provide default catalysts
+        fallback.setRisks(List.of("일시적 파싱 지연", "변동성 확대 주의"));
+        fallback.setActionPlan("현재 상세 분석 기능을 복구하고 있습니다.");
         return fallback;
     }
 
@@ -1335,5 +1583,127 @@ public class ValuationService {
             return "추세 이탈 우려 (데드크로스)";
         }
         return rawLocation; // 매핑되지 않은 경우 원본 반환
+    }
+
+    private Summary.Probabilities fillMissingProbabilities(Summary.Probabilities input, Double trendScore,
+            Double valuationScore) {
+        if (input == null)
+            input = new Summary.Probabilities();
+
+        // Short-term fallback (Trend dominant)
+        if (isInvalidProb(input.getShortTerm())) {
+            double prob = trendScore != null ? Math.min(99, Math.max(1, trendScore)) : 50.0;
+            input.setShortTerm(String.format("%.1f%%", prob));
+        }
+
+        // Mid-term fallback (Balanced)
+        if (isInvalidProb(input.getMidTerm())) {
+            double prob = 50.0;
+            if (trendScore != null && valuationScore != null) {
+                prob = (trendScore * 0.4) + (valuationScore * 0.6);
+            }
+            input.setMidTerm(String.format("%.1f%%", Math.min(99, Math.max(1, prob))));
+        }
+
+        // Long-term fallback (Valuation dominant)
+        if (isInvalidProb(input.getLongTerm())) {
+            double prob = valuationScore != null ? Math.min(99, Math.max(1, valuationScore)) : 50.0;
+            input.setLongTerm(String.format("%.1f%%", prob));
+        }
+        return input;
+    }
+
+    private boolean isInvalidProb(String prob) {
+        return prob == null || prob.contains("N/A") || prob.contains("분석중") || prob.trim().isEmpty();
+    }
+
+    private List<String> ensureCatalysts(List<String> input, Response val) {
+        if (input != null && !input.isEmpty())
+            return input;
+
+        List<String> defaultCatalysts = new ArrayList<>();
+        if (val.getTrendScore() > 60)
+            defaultCatalysts.add("기술적 모멘텀 개선");
+        if (val.getValuationScore() > 60)
+            defaultCatalysts.add("밸류에이션 매력 부각");
+        if (val.getSrim() != null && "UNDERVALUED".equals(val.getSrim().getVerdict()))
+            defaultCatalysts.add("저평가 매력 (S-RIM 기준)");
+
+        if (defaultCatalysts.isEmpty())
+            defaultCatalysts.add("시장 불확실성 지속");
+
+        return defaultCatalysts;
+    }
+
+    private void calculatePriceStrategyForNewDto(Response response, ActionStrategy actionStrategy,
+            Summary.Probabilities probs) {
+        if (response.getBand() == null || response.getBand().getMinPrice() == null)
+            return;
+
+        BigDecimal theoreticalMax = new BigDecimal(response.getBand().getMaxPrice().replace(",", ""));
+        BigDecimal currentPrice = new BigDecimal(response.getCurrentPrice().replace(",", ""));
+        BigDecimal baseForTarget = theoreticalMax.max(currentPrice);
+
+        // Adjust target based on probability if available
+        BigDecimal multiplier = new BigDecimal("1.05");
+        if (probs != null && probs.getShortTerm() != null && probs.getShortTerm().contains("%")) {
+            try {
+                double probVal = Double.parseDouble(probs.getShortTerm().replaceAll("[^0-9.]", ""));
+                if (probVal > 60)
+                    multiplier = multiplier.add(new BigDecimal("0.03"));
+            } catch (Exception e) {
+            }
+        }
+
+        BigDecimal resistance = baseForTarget.multiply(multiplier).setScale(0, RoundingMode.HALF_UP);
+        BigDecimal bandBottom = new BigDecimal(response.getBand().getMinPrice().replace(",", ""))
+                .multiply(new BigDecimal("0.95"));
+        BigDecimal currentExit = currentPrice.multiply(new BigDecimal("0.90"));
+        BigDecimal support = bandBottom.max(currentExit).setScale(0, RoundingMode.HALF_UP);
+
+        actionStrategy.setResistancePrice(String.format("%,d원", resistance.longValue()));
+        actionStrategy.setSupportPrice(String.format("%,d원", support.longValue()));
+
+        // Progressive Targets
+        BigDecimal shortTarget = resistance;
+        BigDecimal perTarget = response.getPer().isAvailable() ? new BigDecimal(response.getPer().getPrice())
+                : BigDecimal.ZERO;
+        BigDecimal pbrTarget = response.getPbr().isAvailable() ? new BigDecimal(response.getPbr().getPrice())
+                : BigDecimal.ZERO;
+        BigDecimal histAverage = perTarget.max(pbrTarget);
+
+        BigDecimal midTarget = histAverage.max(shortTarget.multiply(new BigDecimal("1.10"))).setScale(0,
+                RoundingMode.HALF_UP);
+        BigDecimal srimTarget = response.getSrim().isAvailable() ? new BigDecimal(response.getSrim().getPrice())
+                : BigDecimal.ZERO;
+        BigDecimal longTarget = srimTarget.max(midTarget.multiply(new BigDecimal("1.15"))).setScale(0,
+                RoundingMode.HALF_UP);
+
+        actionStrategy.setTargetPrices(ActionStrategy.TargetPrices.builder()
+                .shortTerm(String.format("%,d원", shortTarget.longValue()))
+                .midTerm(String.format("%,d원", midTarget.longValue()))
+                .longTerm(String.format("%,d원", longTarget.longValue()))
+                .build());
+    }
+
+    private AnalysisDetails.PriceModel calculatePriceModelNew(Response response, ActionStrategy strategy) {
+        String downsideStr = "N/A", upsideStr = "0%";
+        try {
+            BigDecimal cur = new BigDecimal(response.getCurrentPrice().replace(",", ""));
+            if (strategy.getResistancePrice() != null) {
+                BigDecimal tgt = new BigDecimal(strategy.getResistancePrice().replaceAll("[^0-9]", ""));
+                BigDecimal upside = tgt.subtract(cur).divide(cur, 4, RoundingMode.HALF_UP)
+                        .multiply(new BigDecimal(100));
+                upsideStr = String.format("%.2f%%", upside);
+            }
+            if (strategy.getSupportPrice() != null) {
+                BigDecimal sl = new BigDecimal(strategy.getSupportPrice().replaceAll("[^0-9]", ""));
+                BigDecimal downside = sl.subtract(cur).divide(cur, 4, RoundingMode.HALF_UP)
+                        .multiply(new BigDecimal(100));
+                downsideStr = String.format("%.2f%%", downside);
+            }
+        } catch (Exception e) {
+        }
+        return AnalysisDetails.PriceModel.builder().upsidePotential(upsideStr).downsideRisk(downsideStr).build();
     }
 }

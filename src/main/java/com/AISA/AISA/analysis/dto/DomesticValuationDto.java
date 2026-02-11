@@ -12,7 +12,6 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.util.List;
-import java.util.Map;
 import java.util.HashMap;
 
 public class DomesticValuationDto {
@@ -36,27 +35,100 @@ public class DomesticValuationDto {
     @Builder(toBuilder = true)
     @JsonInclude(Include.NON_NULL)
     public static class Response {
-        private String stockCode;
-        private String stockName;
-        private String currentPrice;
-        private String marketCap;
-        @JsonIgnore
-        private String targetReturn;
-        @JsonIgnore
-        private DiscountRateInfo discountRate;
+        // 1. Conclusion (요약 정보)
+        private Summary summary;
 
+        // 2. Current Position (기본 정보 + 점수 + 국면) [Promoted]
+        private CurrentPosition currentPosition;
+
+        // 3. Action Strategy (행동 전략) [Promoted]
+        private ActionStrategy actionStrategy;
+
+        // 4. Probability & Risk (확률 및 리스크) [Promoted]
+        private ProbabilityAndRisk probabilityAndRisk;
+
+        // 5. Evidence Data (밸류에이션 모델)
         private ValuationResult srim;
         private ValuationResult per;
         private ValuationResult pbr;
 
-        @JsonIgnore
-        private ValuationBand band;
-        private Summary summary;
+        // 6. Detailed Technical/Supply
+        private AnalysisDetails analysisDetails;
 
+        // Deprecated or Hidden fields for backward compatibility if needed,
+        // but for now we keep them to avoid breaking internal logic relying on them
+        // temporarily
+        @JsonIgnore
+        private String stockCode;
+        @JsonIgnore
+        private String stockName;
+        @JsonIgnore
+        private String currentPrice;
+        @JsonIgnore
+        private String marketCap;
+        @JsonIgnore
         private Double valuationScore;
+        @JsonIgnore
         private Double trendScore;
 
-        private AnalysisDetails analysisDetails;
+        @JsonIgnore
+        private String targetReturn;
+        @JsonIgnore
+        private DiscountRateInfo discountRate;
+        @JsonIgnore
+        private ValuationBand band;
+    }
+
+    @Getter
+    @Setter
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    public static class CurrentPosition {
+        private String stockCode;
+        private String stockName;
+        private String currentPrice;
+        private String marketCap;
+        private Double valuationScore;
+        private Double trendScore;
+        private String marketPhase; // [New] LATE_STAGE_RALLY etc.
+        private String marketPhaseDescription; // [New] Interpretive text
+    }
+
+    @Getter
+    @Setter
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    public static class ActionStrategy {
+        private String resistancePrice;
+        private String supportPrice;
+        private TargetPrices targetPrices;
+        private String actionPlan;
+        private String timingAction;
+
+        @Getter
+        @Setter
+        @NoArgsConstructor
+        @AllArgsConstructor
+        @Builder
+        public static class TargetPrices {
+            private String shortTerm;
+            private String midTerm;
+            private String longTerm;
+        }
+    }
+
+    @Getter
+    @Setter
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    public static class ProbabilityAndRisk {
+        private Summary.Probabilities probabilities;
+        private String riskLevel; // LOW, MEDIUM, HIGH
+        private List<String> riskFactors;
+        private String probabilityInfo; // Descriptive summary
     }
 
     @Getter
@@ -67,15 +139,13 @@ public class DomesticValuationDto {
     public static class AnalysisDetails {
         private String investmentTerm;
         private List<String> catalysts;
-        private List<String> risks;
-
-        @JsonIgnore
         private PriceModel priceModel;
+        // reviews removed from here, moved to ProbabilityAndRisk
 
-        private TechnicalIndicators technicalIndicators;
-        @JsonIgnore
+        private Summary.Probabilities probabilities;
+        private List<HistoricalValuationRange> historicalValuationRanges;
         private ValuationContext valuationContext;
-
+        private TechnicalIndicators technicalIndicators;
         private InvestorTrendDto investorTrend;
 
         @Getter
@@ -93,34 +163,13 @@ public class DomesticValuationDto {
         @NoArgsConstructor
         @AllArgsConstructor
         @Builder
-        public static class TechnicalIndicators {
-            private double rsi;
-            private Map<String, String> movingAverages; // "MA20": "70,000", "status": "정배열" 등
-            private Double relativeStrength; // 지수 대비 강도 (Alpha)
-            private String priceLocation; // "GOLDEN_CROSS", "SUPPORT_LINE" 등
-
-            // [v3] 추가 필드
-            private Double stochasticK;
-            private Double stochasticD;
-            private String stochasticZone; // OVERSOLD/WEAK/NEUTRAL/STRONG/OVERBOUGHT
-            private String stochasticSignal; // GOLDEN/DEAD/NONE
-            private Double stochasticStrength;
-            private String marketRegime; // STRONG_TREND/WEAK_TREND/SIDEWAYS
-            private Double regimeConfidence;
-        }
-
-        @Getter
-        @Setter
-        @NoArgsConstructor
-        @AllArgsConstructor
-        @Builder
         public static class ValuationContext {
             private Double beta;
-            private Double costOfEquity;
-            private String evEbitda; // QualityMetrics에서 이동
-            private HistoricalValuationRange historicalPerRange;
-            private HistoricalValuationRange historicalPbrRange;
-            private String supplyPatternAnalysis; // KNN 수급 패턴 분석 결과
+            private double costOfEquity;
+            private String evEbitda;
+            private com.AISA.AISA.analysis.dto.ValuationBaseDto.HistoricalValuationRange historicalPerRange;
+            private com.AISA.AISA.analysis.dto.ValuationBaseDto.HistoricalValuationRange historicalPbrRange;
+            private String supplyPatternAnalysis;
         }
 
         @Getter

@@ -33,24 +33,91 @@ public class OverseasValuationDto {
     @Builder(toBuilder = true)
     @JsonInclude(Include.NON_NULL)
     public static class Response {
+        // 1. Conclusion (요약 정보)
+        private Summary summary;
+
+        // 2. Current Position (기본 정보 + 점수 + 국면) [Promoted]
+        private CurrentPosition currentPosition;
+
+        // 3. Action Strategy (행동 전략) [Promoted]
+        private ActionStrategy actionStrategy;
+
+        // 4. Probability & Risk (확률 및 리스크) [Promoted]
+        private ProbabilityAndRisk probabilityAndRisk;
+
+        // 5. Evidence Data (밸류에이션 모델)
+        private ValuationResult srim;
+        private ValuationResult per;
+        private ValuationResult pbr;
+
+        // 6. Detailed Data
+        private OverseasAnalysisDetails overseasAnalysisDetails;
+
+        @JsonIgnore
         private String stockCode;
+        @JsonIgnore
         private String stockName;
+        @JsonIgnore
         private String currentPrice;
+        @JsonIgnore
         private String marketCap;
         @JsonIgnore
         private String targetReturn;
         @JsonIgnore
         private DiscountRateInfo discountRate;
-
-        private ValuationResult srim;
-        private ValuationResult per;
-        private ValuationResult pbr;
-
         @JsonIgnore
         private ValuationBand band;
-        private Summary summary;
+    }
 
-        private OverseasAnalysisDetails overseasAnalysisDetails;
+    @Getter
+    @Setter
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    public static class CurrentPosition {
+        private String stockCode;
+        private String stockName;
+        private String currentPrice;
+        private String marketCap;
+        private Double valuationScore;
+        private Double trendScore;
+        private String marketPhase;
+        private String marketPhaseDescription;
+    }
+
+    @Getter
+    @Setter
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    public static class ActionStrategy {
+        private String resistancePrice;
+        private String supportPrice;
+        private TargetPrices targetPrices;
+        private String actionPlan;
+        private String timingAction;
+
+        @Getter
+        @Setter
+        @NoArgsConstructor
+        @AllArgsConstructor
+        @Builder
+        public static class TargetPrices {
+            private String shortTerm;
+            private String midTerm;
+            private String longTerm;
+        }
+    }
+
+    @Getter
+    @Setter
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    public static class ProbabilityAndRisk {
+        private Summary.Probabilities probabilities;
+        private String riskLevel;
+        private String probabilityInfo;
     }
 
     @Getter
@@ -62,6 +129,8 @@ public class OverseasValuationDto {
         private String investmentTerm;
         private List<String> catalysts;
         private List<String> risks;
+
+        private TechnicalIndicators technicalIndicators;
 
         @JsonIgnore
         private PriceModel priceModel;
@@ -85,7 +154,7 @@ public class OverseasValuationDto {
         public static class QualityMetrics {
             private String pegRatio;
             private String evEbitda;
-            private String shareholderYield;
+            private String shareholderReturnRate;
         }
     }
 }

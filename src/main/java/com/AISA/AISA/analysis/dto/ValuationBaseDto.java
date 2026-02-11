@@ -37,6 +37,7 @@ public class ValuationBaseDto {
     @NoArgsConstructor
     @AllArgsConstructor
     @Builder
+    @JsonInclude(Include.NON_NULL)
     public static class Summary {
         private String overallVerdict;
         private String confidence;
@@ -44,6 +45,7 @@ public class ValuationBaseDto {
 
         private Verdicts verdicts;
         private Display display;
+        private Probabilities probabilities; // [V5] 시계열 확률 정보
 
         @JsonIgnore
         private BeginnerVerdict beginnerVerdict;
@@ -56,9 +58,11 @@ public class ValuationBaseDto {
         public static class Display {
             private String verdict;
             private String verdictLabel;
+            private String positionSummary; // [V5] "역사적 저점 부근", "단기 과열" 등
             private Strategy strategy;
             private String risk;
             private String probabilityInfo;
+            private String timingAction; // [V5] "분할 매수 시작", "관망 후 반등시 매도" 등
         }
 
         @Getter
@@ -69,6 +73,9 @@ public class ValuationBaseDto {
         public static class Strategy {
             private String resistanceZone;
             private String supportZone;
+            private String shortTermTarget;
+            private String midTermTarget;
+            private String longTermTarget;
             private String actionPlan;
         }
 
@@ -100,6 +107,17 @@ public class ValuationBaseDto {
             private Timing timing;
             private RiskLevel riskLevel;
             private String guidance;
+        }
+
+        @Getter
+        @Setter
+        @NoArgsConstructor
+        @AllArgsConstructor
+        @Builder
+        public static class Probabilities {
+            private String shortTerm; // "65%"
+            private String midTerm; // "50%"
+            private String longTerm; // "80%"
         }
     }
 
@@ -134,6 +152,40 @@ public class ValuationBaseDto {
         private String position;
         private String status;
         private Map<String, Double> weights;
+    }
+
+    @Getter
+    @Setter
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    public static class HistoricalValuationRange {
+        private String min;
+        private String max;
+        private String median;
+        private String current;
+    }
+
+    @Getter
+    @Setter
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    @JsonInclude(Include.NON_NULL)
+    public static class TechnicalIndicators {
+        private double rsi;
+        private Map<String, String> movingAverages;
+        private Double relativeStrength;
+        private String priceLocation;
+        private Double stochasticK;
+        private Double stochasticD;
+        private String stochasticZone;
+        private String stochasticSignal;
+        private Double stochasticStrength;
+        private String marketRegime;
+        private Double regimeConfidence;
+        private Double transitionProbability;
+        private Double regimeStability;
     }
 
     @Getter

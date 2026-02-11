@@ -29,6 +29,7 @@ public class KisApiProperties {
     private String otherMajorRatiosUrl; // EV/EBITDA 등 기타 지표
     private String searchStockInfoUrl; // 종목정보조회 (상장일 등)
     private String etfPriceUrl; // ETF/ETN 가격 조회 (ETF 여부 확인용)
+    private String futuresInvestorTrendUrl; // 선물 투자자 매매동향
     private String appkey;
     private String appsecret;
 }

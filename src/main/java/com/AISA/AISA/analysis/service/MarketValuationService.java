@@ -21,6 +21,7 @@ import com.AISA.AISA.kisStock.dto.Index.BreadthHistoryDto;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.scheduling.annotation.Scheduled;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -78,6 +79,21 @@ public class MarketValuationService {
     @CacheEvict(value = "marketValuation", key = "#market")
     public void evictMarketValuationCache(MarketType market) {
         log.info("Evicting market valuation cache for {}", market);
+    }
+
+    @Scheduled(cron = "0 10 9 * * MON-FRI", zone = "Asia/Seoul")
+    @Scheduled(cron = "0 0 12 * * MON-FRI", zone = "Asia/Seoul")
+    @Scheduled(cron = "0 30 15 * * MON-FRI", zone = "Asia/Seoul")
+    public void scheduledMarketValuationRefresh() {
+        log.info("Running scheduled market valuation refresh...");
+        refreshValuation(MarketType.KOSPI);
+        refreshValuation(MarketType.KOSDAQ);
+    }
+
+    private void refreshValuation(MarketType market) {
+        evictMarketValuationCache(market);
+        calculateMarketValuation(market);
+        log.info("Successfully refreshed market valuation for {}", market);
     }
 
     private MarketValuationDto performCalculation(MarketType market) {

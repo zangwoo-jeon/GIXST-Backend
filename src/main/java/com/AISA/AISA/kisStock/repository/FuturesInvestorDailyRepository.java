@@ -7,12 +7,15 @@ import org.springframework.stereotype.Repository;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface FuturesInvestorDailyRepository extends JpaRepository<FuturesInvestorDaily, Long> {
 
     List<FuturesInvestorDaily> findAllByMarketTypeAndDateBetweenOrderByDateAsc(
             FuturesMarketType marketType, LocalDate startDate, LocalDate endDate);
+
+    Optional<FuturesInvestorDaily> findByDateAndMarketType(LocalDate date, FuturesMarketType marketType);
 
     boolean existsByMarketTypeAndDate(FuturesMarketType marketType, LocalDate date);
 }

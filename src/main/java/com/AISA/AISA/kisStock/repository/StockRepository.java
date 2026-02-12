@@ -33,7 +33,7 @@ public interface StockRepository extends JpaRepository<Stock, Long> {
         List<Stock> findByStockCodeContainingOrStockNameContaining(String stockCode, String stockName);
 
         // Domestic Search
-        @Query("SELECT s FROM Stock s WHERE (s.stockCode LIKE %:keyword% OR s.stockName LIKE %:keyword%) AND s.stockType = 'DOMESTIC'")
+        @Query("SELECT s FROM Stock s WHERE (s.stockCode LIKE %:keyword% OR s.stockName LIKE %:keyword%) AND s.stockType IN ('DOMESTIC', 'DOMESTIC_ETF', 'FOREIGN_ETF')")
         List<Stock> findDomesticByKeyword(@Param("keyword") String keyword);
 
         // List View API: Find Stocks by SubIndustry Code with Pagination

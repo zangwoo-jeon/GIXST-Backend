@@ -224,26 +224,38 @@ public class OverseasValuationService {
                 .actionStrategy(strategy)
                 .build();
 
-        // Stage 4: Attribution & Drivers
+        // Update overall summary with attribution before AI call
         Summary.ConfidenceAttribution attribution = calculateConfidenceAttribution(prepResponse, tech);
+        Summary preliminarySummary = generateSummary(finalSrim, finalPer, finalPbr);
+        preliminarySummary.setConfidence(styleScores.getConfidence());
+        preliminarySummary.setAttribution(attribution);
 
-        // [V6.1] Integrated DB Caching Logic
-        String aiAnalysis = getValuationAnalysis(stockCode, prepResponse, request);
-
-        // Stage 6: Final Assembly
-        Response response = prepResponse.toBuilder()
+        prepResponse = prepResponse.toBuilder()
+                .summary(preliminarySummary)
                 .targetReturn(discountRateInfo.getValue())
                 .discountRate(discountRateInfo)
                 .build();
 
-        // Update overall summary with attribution
-        Summary summary = Summary.builder()
-                .confidence(styleScores.getConfidence())
-                .attribution(attribution)
-                .build();
-        response.setSummary(summary);
+        // [V6.1] Integrated DB Caching Logic
+        String aiAnalysis = getValuationAnalysis(stockCode, prepResponse, request);
 
-        return buildResponseWithAi(response, aiAnalysis, stockCode, stock, latestRatio, tech);
+        return buildResponseWithAi(prepResponse, aiAnalysis, stockCode, stock, latestRatio, tech);
+    }
+
+    private Summary generateSummary(ValuationResult srim, ValuationResult per, ValuationResult pbr) {
+        int score = 0;
+        if (srim.isAvailable())
+            score += getScore(srim) * 5;
+        if (per.isAvailable())
+            score += getScore(per) * 3;
+        if (pbr.isAvailable())
+            score += getScore(pbr) * 2;
+
+        String verdict = score >= 3 ? "BUY" : score <= -3 ? "SELL" : "HOLD";
+        return Summary.builder()
+                .overallVerdict(verdict)
+                .keyInsight("지표 종합 점수: " + score + "점 (AI 전략 분석 중)")
+                .build();
     }
 
     private DiscountRateInfo determineUSCOE(Request request) {
@@ -630,7 +642,8 @@ public class OverseasValuationService {
             cachedSummary = Optional.empty();
         }
 
-        if (!force && cachedSummary.isPresent() && !val.getSummary().getOverallVerdict().equals("N/A")) {
+        if (!force && cachedSummary.isPresent() && val.getSummary() != null
+                && !"N/A".equals(val.getSummary().getOverallVerdict())) {
             var summary = cachedSummary.get();
             if (!summary.isExpired(720)) {
                 BigDecimal refPrice = summary.getReferencePrice();
@@ -664,7 +677,7 @@ public class OverseasValuationService {
         Summary.ConfidenceAttribution attribution = calculateConfidenceAttribution(val, tech);
         String analysis = generateValuationAnalysisText(val, consensusResult, res, sup, sT, mT, lT, tech, attribution);
         AiResponseJson aiJson = parseAiResponse(analysis);
-        String displayVerdict = val.getSummary().getOverallVerdict();
+        String displayVerdict = (val.getSummary() != null) ? val.getSummary().getOverallVerdict() : "N/A";
         String displayLabel = mapVerdictToLabel(displayVerdict,
                 aiJson.getAiVerdict() != null ? aiJson.getAiVerdict().getStance() : Stance.HOLD);
         String displaySummary = aiJson.getActionPlan() != null ? aiJson.getActionPlan() : "전략적 대응이 필요합니다.";

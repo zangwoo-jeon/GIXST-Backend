@@ -106,6 +106,7 @@ public class DomesticValuationDto {
         private TargetPrices targetPrices;
         private String actionPlan;
         private String timingAction;
+        private String divergenceRiskIndex; // [New] LOW, MEDIUM, HIGH, EXTREME
 
         @Getter
         @Setter
@@ -142,8 +143,6 @@ public class DomesticValuationDto {
         private PriceModel priceModel;
         // reviews removed from here, moved to ProbabilityAndRisk
 
-        private Summary.Probabilities probabilities;
-        private List<HistoricalValuationRange> historicalValuationRanges;
         private ValuationContext valuationContext;
         private TechnicalIndicators technicalIndicators;
         private InvestorTrendDto investorTrend;
@@ -172,16 +171,5 @@ public class DomesticValuationDto {
             private String supplyPatternAnalysis;
         }
 
-        @Getter
-        @Setter
-        @NoArgsConstructor
-        @AllArgsConstructor
-        @Builder
-        public static class HistoricalValuationRange {
-            private String min;
-            private String max;
-            private String median;
-            private String current;
-        }
     }
 }

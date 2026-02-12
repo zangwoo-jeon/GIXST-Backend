@@ -46,6 +46,10 @@ public class ValuationBaseDto {
         private Verdicts verdicts;
         private Display display;
         private Probabilities probabilities; // [V5] 시계열 확률 정보
+        private ConfidenceAttribution attribution; // [V6] 신뢰도 분해
+        private java.util.List<String> catalysts; // [V6] 상승 촉매제
+        private java.util.List<String> risks; // [V6] 하방 리스크
+        private String timingAction; // [V6] 실행 타이밍 지침
 
         @JsonIgnore
         private BeginnerVerdict beginnerVerdict;
@@ -119,6 +123,18 @@ public class ValuationBaseDto {
             private String midTerm; // "50%"
             private String longTerm; // "80%"
         }
+
+        @Getter
+        @Setter
+        @NoArgsConstructor
+        @AllArgsConstructor
+        @Builder
+        public static class ConfidenceAttribution {
+            private Double dataQuality; // 0-100
+            private Double modelAgreement; // 0-100
+            private Double regimeStability; // 0-100
+            private String primaryDriver; // 주요 주도 요인
+        }
     }
 
     @Getter
@@ -137,6 +153,7 @@ public class ValuationBaseDto {
         private String reason;
         @JsonIgnore
         private String roeType;
+        private String modelName; // [V6] PEG, SRIM, Consensus 등
     }
 
     @Getter
@@ -186,6 +203,7 @@ public class ValuationBaseDto {
         private Double regimeConfidence;
         private Double transitionProbability;
         private Double regimeStability;
+        private Double atr; // [New] Average True Range
     }
 
     @Getter

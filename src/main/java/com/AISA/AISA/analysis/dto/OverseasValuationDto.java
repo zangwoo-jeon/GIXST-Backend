@@ -83,19 +83,24 @@ public class OverseasValuationDto {
         private Double trendScore;
         private String marketPhase;
         private String marketPhaseDescription;
+        private Double growthScore; // [New] 0-100
+        private Double valueScore; // [New] 0-100
+        private String styleConfidence; // [New] LOW, MEDIUM, HIGH
+        private String stockStyle; // [New] GROWTH, BLEND, VALUE
     }
 
     @Getter
     @Setter
     @NoArgsConstructor
     @AllArgsConstructor
-    @Builder
+    @Builder(toBuilder = true)
     public static class ActionStrategy {
         private String resistancePrice;
         private String supportPrice;
         private TargetPrices targetPrices;
         private String actionPlan;
         private String timingAction;
+        private String divergenceRiskIndex; // [New] LOW, MEDIUM, HIGH, EXTREME
 
         @Getter
         @Setter
@@ -116,7 +121,6 @@ public class OverseasValuationDto {
     @Builder
     public static class ProbabilityAndRisk {
         private Summary.Probabilities probabilities;
-        private String riskLevel;
         private String probabilityInfo;
     }
 

@@ -1,14 +1,11 @@
 package com.AISA.AISA.kisStock.Entity.stock;
 
-// import com.AISA.AISA.kisStock.enums.Industry; // Removed
-// import com.AISA.AISA.kisStock.enums.SubIndustry; // Removed
 import com.AISA.AISA.kisStock.enums.MarketType;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
-import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
@@ -36,7 +33,7 @@ public class Stock {
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
-    private StockType stockType = StockType.DOMESTIC;
+    private StockType stockType;
 
     @Column(nullable = false)
     private boolean isSuspended = false;
@@ -49,6 +46,7 @@ public class Stock {
 
     public enum StockType {
         DOMESTIC, // 국내 주식
+        DOMESTIC_ETF, // 국내 상장 국내 ETF
         FOREIGN_ETF, // 국내 상장 해외 ETF
         US_STOCK, // 미국 주식
         US_ETF // 미국 ETF

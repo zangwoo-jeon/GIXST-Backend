@@ -68,4 +68,11 @@ public class OverseasAnalysisController {
                 String result = overseasStockAnalysisService.getStaticAnalysis(stockCode, refresh);
                 return ResponseEntity.ok(new SuccessResponse<>(true, "해외 주식 AI 기업 분석 조회 성공", result));
         }
+
+        @DeleteMapping("/cache")
+        @Operation(summary = "해외 주식 AI 분석 캐시 초기화", description = "저장된 모든 해외 종목의 AI 분석 리포트 캐시(DB 및 Redis)를 삭제합니다.")
+        public ResponseEntity<SuccessResponse<Void>> clearAiSummaryCache() {
+                overseasValuationService.clearOverseasAiSummaryCache();
+                return ResponseEntity.ok(new SuccessResponse<>(true, "해외 주식 AI 분석 캐시 초기화 성공", null));
+        }
 }

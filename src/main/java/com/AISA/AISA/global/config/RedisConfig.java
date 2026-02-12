@@ -110,6 +110,7 @@ public class RedisConfig {
                 configMap.put("portfolioDiagnosis", mediumTermConfig);
                 configMap.put("staticAnalysis", sevenDayConfig);
                 configMap.put("overseasStaticAnalysis", sevenDayConfig);
+                configMap.put("overseasValuationReport", sevenDayConfig);
                 configMap.put("marketValuation", longTermConfig);
                 configMap.put("overseasIndexStatus", shortTermConfig);
                 configMap.put("exchangeRateStatus", shortTermConfig);

@@ -18,8 +18,6 @@ import com.AISA.AISA.kisStock.dto.Macro.KisOverseasDailyPriceResponseDto;
 import com.AISA.AISA.kisStock.dto.Macro.KisOverseasIndexBasicInfoDto;
 import com.AISA.AISA.kisStock.dto.Index.OverseasIndexStatusDto;
 import com.AISA.AISA.global.exception.BusinessException;
-import com.AISA.AISA.analysis.service.MarketValuationService;
-import com.AISA.AISA.kisStock.enums.MarketType;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.Cacheable;
@@ -54,7 +52,6 @@ public class KisIndexService {
     private final OverseasIndexDailyDataRepository overseasIndexDailyDataRepository;
     private final KisMacroService kisMacroService;
     private final KisApiClient kisApiClient;
-    private final MarketValuationService marketValuationService;
 
     @Transactional
     public void fetchAndSaveHistoricalData(String marketCode, String startDateStr) {
@@ -300,19 +297,6 @@ public class KisIndexService {
         // API 호출 시 dateType은 'D'로 고정
         IndexChartResponseDto response = fetchIndexChartFromApi(marketCode, today, "D");
         IndexChartInfoDto info = response.getInfo();
-
-        // 밸류에이션 등급 추가 (KOSPI, KOSDAQ 한정)
-        try {
-            MarketType marketType = MarketType.valueOf(marketCode.toUpperCase());
-            if (marketType == MarketType.KOSPI || marketType == MarketType.KOSDAQ) {
-                var valuation = marketValuationService.calculateMarketValuation(marketType);
-                if (valuation != null) {
-                    info.setGrade(valuation.getGrade());
-                }
-            }
-        } catch (Exception e) {
-            log.warn("Failed to fetch valuation grade for {}: {}", marketCode, e.getMessage());
-        }
 
         return info;
     }

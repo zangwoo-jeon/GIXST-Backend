@@ -6,7 +6,9 @@ import com.AISA.AISA.kisStock.Entity.stock.Stock;
 import com.AISA.AISA.kisStock.Entity.stock.StockBalanceSheet;
 import com.AISA.AISA.kisStock.Entity.stock.StockFinancialStatement;
 import com.AISA.AISA.kisStock.Entity.stock.StockMarketCap;
+import com.AISA.AISA.kisStock.dto.Index.IndexChartInfoDto;
 import com.AISA.AISA.kisStock.enums.MarketType;
+import com.AISA.AISA.kisStock.kisService.KisIndexService;
 import com.AISA.AISA.kisStock.repository.*;
 import com.AISA.AISA.kisStock.kisService.KisMacroService;
 import com.AISA.AISA.portfolio.macro.repository.MacroDailyDataRepository;
@@ -49,6 +51,7 @@ public class MarketValuationService {
     private final KisMacroService kisMacroService;
     private final StockDailyDataRepository stockDailyDataRepository;
     private final GeminiService geminiService;
+    private final KisIndexService kisIndexService;
 
     // Inner record for KNN calculation
     private static class KnnCandidate {
@@ -140,6 +143,17 @@ public class MarketValuationService {
                     .collect(Collectors.toSet());
 
             // 5. Calculate Basic Metrics
+            // Try fetching real-time index price for more accurate valuation
+            BigDecimal realTimeIndexPrice = null;
+            try {
+                IndexChartInfoDto indexStatus = kisIndexService.getIndexStatus(market.name());
+                if (indexStatus != null && indexStatus.getCurrentIndices() != null) {
+                    realTimeIndexPrice = new BigDecimal(indexStatus.getCurrentIndices());
+                }
+            } catch (Exception e) {
+                log.warn("Failed to fetch real-time {} price, using DB market cap only: {}", market, e.getMessage());
+            }
+
             BigDecimal totalMarketCapValue = marketCaps.stream()
                     .filter(mc -> validStockCodes.contains(mc.getStock().getStockCode()))
                     .map(smc -> smc.getMarketCap() != null ? smc.getMarketCap() : BigDecimal.ZERO)
@@ -567,8 +581,22 @@ public class MarketValuationService {
                 .collect(Collectors.toList());
 
         BreadthResult breadth = calculateMarketBreadth(market, subHistory.get(0).getDate());
-        BigDecimal vkospi = indexDailyDataRepository.findFirstByMarketNameOrderByDateDesc("VKOSPI")
-                .map(IndexDailyData::getClosingPrice).orElse(null);
+
+        // Use Real-time VKOSPI from API primarily, fallback to DB
+        BigDecimal vkospi = null;
+        try {
+            IndexChartInfoDto vkospiStatus = kisIndexService.getIndexStatus("VKOSPI");
+            if (vkospiStatus != null && vkospiStatus.getCurrentIndices() != null) {
+                vkospi = new BigDecimal(vkospiStatus.getCurrentIndices());
+            }
+        } catch (Exception e) {
+            log.warn("Failed to fetch real-time VKOSPI, falling back to DB: {}", e.getMessage());
+        }
+
+        if (vkospi == null) {
+            vkospi = indexDailyDataRepository.findFirstByMarketNameOrderByDateDesc("VKOSPI")
+                    .map(IndexDailyData::getClosingPrice).orElse(null);
+        }
 
         // Futures Integration
         long futForeignNet5d = 0, futIndividualNet5d = 0, futInstitutionalNet5d = 0;

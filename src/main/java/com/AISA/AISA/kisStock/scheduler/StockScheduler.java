@@ -166,7 +166,6 @@ public class StockScheduler {
         String startDateStr = startDate.format(DateTimeFormatter.ofPattern("yyyyMMdd"));
 
         // 1. Update Basic Rates (USD, JPY, HKD, EUR)
-        // JPY, HKD, EUR will be fetched as defined in ExchangeRateCode
         for (ExchangeRateCode code : ExchangeRateCode.values()) {
             if (code == ExchangeRateCode.HKD_KRW || code == ExchangeRateCode.EUR_KRW) {
                 continue; // Skip calculated rates for now
@@ -189,6 +188,24 @@ public class StockScheduler {
         }
 
         log.info("Completed scheduled exchange rate data update.");
+    }
+
+    // Run at 4:10 PM every day (After Korean market close and exchange rate update)
+    @Scheduled(cron = "0 10 16 * * MON-FRI")
+    public void updateDomesticIndexData() {
+        log.info("Starting scheduled domestic index data update...");
+        String today = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
+
+        String[] domesticIndices = { "KOSPI", "KOSDAQ", "VKOSPI" };
+        for (String index : domesticIndices) {
+            try {
+                kisIndexService.saveIndexDailyData(index, today, "D");
+                Thread.sleep(500); // Rate limit safety
+            } catch (Exception e) {
+                log.error("Failed to update domestic index {}: {}", index, e.getMessage());
+            }
+        }
+        log.info("Completed scheduled domestic index data update.");
     }
 
     // Run at 4:05 PM every day (After Exchange Rate update)

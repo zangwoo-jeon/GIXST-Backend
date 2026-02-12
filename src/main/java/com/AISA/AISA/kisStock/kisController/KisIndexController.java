@@ -6,6 +6,7 @@ import com.AISA.AISA.kisStock.dto.Index.IndexChartInfoDto;
 import com.AISA.AISA.kisStock.dto.Index.IndexChartResponseDto;
 import com.AISA.AISA.kisStock.enums.MarketType;
 import com.AISA.AISA.kisStock.kisService.KisIndexService;
+import com.AISA.AISA.analysis.service.MarketValuationService;
 import com.AISA.AISA.kisStock.dto.Index.OverseasIndexStatusDto;
 
 import com.AISA.AISA.kisStock.enums.OverseasIndex;
@@ -31,11 +32,26 @@ public class KisIndexController {
     private final KisIndexService kisIndexService;
     private final MacroService macroService;
     private final MarketStatusHistoryService marketStatusHistoryService;
+    private final MarketValuationService marketValuationService;
 
     @GetMapping("/{marketCode}/status")
     @Operation(summary = "지수 현재 상태 조회", description = "코스피(kospi) / 코스닥(kosdaq)의 실시간 지수 정보를 조회합니다.")
     public ResponseEntity<SuccessResponse<IndexChartInfoDto>> getIndexStatus(@PathVariable String marketCode) {
         IndexChartInfoDto statusData = kisIndexService.getIndexStatus(marketCode);
+
+        // 밸류에이션 등급 정보 추가
+        try {
+            MarketType marketType = MarketType.valueOf(marketCode.toUpperCase());
+            if (marketType == MarketType.KOSPI || marketType == MarketType.KOSDAQ) {
+                var valuation = marketValuationService.calculateMarketValuation(marketType);
+                if (valuation != null) {
+                    statusData.setGrade(valuation.getGrade());
+                }
+            }
+        } catch (Exception e) {
+            // 등급 추가 실패 시 무시하고 데이터만 반환
+        }
+
         return ResponseEntity.ok(new SuccessResponse<>(true, "지수 현재 상태 조회 성공", statusData));
     }
 

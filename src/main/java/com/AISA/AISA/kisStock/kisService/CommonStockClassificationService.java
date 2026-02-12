@@ -26,8 +26,10 @@ public class CommonStockClassificationService {
     private static final List<String> NON_COMMON_KEYWORDS = Arrays.asList(
             "스팩", "SPAC", "리츠", "REITs", "부동산투자", "인프라", "ETN");
 
+    private static final List<String> FOREIGN_ETF_KEYWORDS = Arrays.asList(
+            "미국", "나스닥", "NASDAQ", "S&P500", "SNP500", "해외", "글로벌", "재팬", "유로", "중국", "차이나", "인도", "베트남", "독일");
+
     public void classifyAllDomesticStocks() {
-        // 1. Initial cleanup for non-domestic types (Dedicated transactions)
         log.info("Resetting isCommon flag for non-domestic stocks...");
         resetNonDomesticStocks();
 
@@ -37,10 +39,8 @@ public class CommonStockClassificationService {
         int updatedCount = 0;
         for (Stock stock : domesticStocks) {
             try {
-                boolean isCommon = checkIfCommon(stock);
-                if (updateStockIsCommon(stock.getStockId(), isCommon)) {
-                    updatedCount++;
-                }
+                processStockClassification(stock);
+                updatedCount++;
 
                 // Rate limit handling
                 Thread.sleep(300);
@@ -52,65 +52,83 @@ public class CommonStockClassificationService {
             }
         }
 
-        log.info("Finished common stock classification. Updated {} stocks.", updatedCount);
+        log.info("Finished common stock classification. Processed {} stocks.", updatedCount);
     }
 
     @Transactional
     public void resetNonDomesticStocks() {
         stockRepository.updateIsCommonByStockType(Stock.StockType.US_STOCK, false);
         stockRepository.updateIsCommonByStockType(Stock.StockType.FOREIGN_ETF, false);
+        stockRepository.updateIsCommonByStockType(Stock.StockType.DOMESTIC_ETF, false);
     }
 
     @Transactional
-    public boolean updateStockIsCommon(Long stockId, boolean isCommon) {
-        Stock stock = stockRepository.findById(stockId).orElse(null);
-        if (stock != null && stock.isCommon() != isCommon) {
-            stock.updateIsCommon(isCommon);
-            stockRepository.save(stock);
-            return true;
-        }
-        return false;
-    }
-
-    private boolean checkIfCommon(Stock stock) {
+    public void processStockClassification(Stock stock) {
         String code = stock.getStockCode();
         String name = stock.getStockName();
 
-        // 1. Basic Code Rule: Must end with '0'
+        // 1. Basic Code Rule: Must end with '0' for common stocks
         if (!code.endsWith("0")) {
-            return false;
+            stock.updateIsCommon(false);
+            stockRepository.save(stock);
+            return;
         }
 
-        // 2. Keyword Filter
+        // 2. Keyword Filter for non-common (REITs, SPAC, etc.)
         for (String keyword : NON_COMMON_KEYWORDS) {
             if (name.contains(keyword)) {
-                return false;
+                stock.updateIsCommon(false);
+                stockRepository.save(stock);
+                return;
             }
         }
 
-        // 3. KIS ETF/ETN API Check with Retry
+        // 3. KIS ETF/ETN API Check
+        if (isEtfOrEtnByApiWithRetry(code)) {
+            stock.updateIsCommon(false);
+
+            // Determine specialized ETF type
+            boolean isForeign = false;
+            for (String kw : FOREIGN_ETF_KEYWORDS) {
+                if (name.contains(kw)) {
+                    isForeign = true;
+                    break;
+                }
+            }
+
+            Stock.StockType etfType = isForeign ? Stock.StockType.FOREIGN_ETF : Stock.StockType.DOMESTIC_ETF;
+            stock.updateStockType(etfType);
+            stockRepository.save(stock);
+            return;
+        }
+
+        // 4. If all checks pass, it's a common domestic stock
+        stock.updateIsCommon(true);
+        stock.updateStockType(Stock.StockType.DOMESTIC);
+        stockRepository.save(stock);
+    }
+
+    private boolean isEtfOrEtnByApiWithRetry(String code) {
         int maxRetries = 3;
         for (int i = 0; i < maxRetries; i++) {
             try {
-                return !isEtfOrEtnByApi(code);
+                return isEtfOrEtnByApi(code);
             } catch (Exception e) {
                 log.warn("Retry {}/{} for ETF check on {}: {}", i + 1, maxRetries, code, e.getMessage());
                 try {
-                    Thread.sleep(1000); // Wait longer before retry
+                    Thread.sleep(1000);
                 } catch (InterruptedException ie) {
                     Thread.currentThread().interrupt();
                     throw new RuntimeException(ie);
                 }
             }
         }
-        return true; // Default to true if all retries fail, or false based on safety preference.
-                     // Here we return true to avoid accidentally excluding valid stocks.
+        return false; // Safely assume not ETF if API fails repeatedly
     }
 
     private boolean isEtfOrEtnByApi(String stockCode) {
         String etfPriceUrl = kisApiProperties.getEtfPriceUrl();
         if (etfPriceUrl == null || etfPriceUrl.isBlank()) {
-            log.warn("ETF Price URL is not configured in application.yml");
             return false;
         }
 

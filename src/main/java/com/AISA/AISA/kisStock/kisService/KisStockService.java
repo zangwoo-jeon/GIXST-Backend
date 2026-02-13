@@ -649,6 +649,7 @@ public class KisStockService {
                                                 .stockCode(stock.getStockCode())
                                                 .stockName(stock.getStockName())
                                                 .marketName(stock.getMarketName())
+                                                .stockType(stock.getStockType())
                                                 .build())
                                 .collect(Collectors.toList());
         }

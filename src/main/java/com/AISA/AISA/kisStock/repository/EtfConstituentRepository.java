@@ -11,6 +11,9 @@ import java.util.List;
 @Repository
 public interface EtfConstituentRepository extends JpaRepository<EtfConstituent, Long> {
     @EntityGraph(attributePaths = "constituent")
+    List<EtfConstituent> findByEtfOrderByWeightDesc(Stock etf);
+
+    @EntityGraph(attributePaths = "constituent")
     List<EtfConstituent> findByEtf(Stock etf);
 
     void deleteByEtf(Stock etf);

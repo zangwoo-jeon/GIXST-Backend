@@ -236,7 +236,8 @@ public class EtfService {
     public List<EtfConstituentResponseDto> getConstituents(String stockCode) {
         Stock etf = stockRepository.findByStockCode(stockCode)
                 .orElseThrow(() -> new IllegalArgumentException("ETF not found: " + stockCode));
-        return etfConstituentRepository.findByEtf(etf).stream()
+        return etfConstituentRepository.findByEtfOrderByWeightDesc(etf).stream()
+                .limit(10)
                 .map(EtfConstituentResponseDto::from)
                 .toList();
     }

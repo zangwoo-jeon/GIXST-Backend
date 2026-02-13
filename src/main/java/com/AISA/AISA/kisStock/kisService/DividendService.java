@@ -131,11 +131,9 @@ public class DividendService {
                 // Given the instruction and diff, the new method is added, and the existing
                 // call in getDividendInfo will use it.
                 // The inline check here is left as is, as the diff didn't explicitly remove it.
-                if (stock.getStockType() != Stock.StockType.DOMESTIC) {
-                        // This check should ideally be updated or removed if validateDomesticStock is
-                        // the single source of truth.
-                        // For now, it remains as per the original document and the provided diff's
-                        // scope.
+                if (stock.getStockType() != Stock.StockType.DOMESTIC
+                                && stock.getStockType() != Stock.StockType.DOMESTIC_ETF
+                                && stock.getStockType() != Stock.StockType.FOREIGN_ETF) {
                         throw new BusinessException(KisApiErrorCode.INVALID_STOCK_TYPE);
                 }
 

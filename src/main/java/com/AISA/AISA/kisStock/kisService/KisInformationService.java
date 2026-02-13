@@ -1043,7 +1043,9 @@ public class KisInformationService {
         Stock stock = stockRepository.findByStockCode(stockCode)
                 .orElseThrow(() -> new BusinessException(KisApiErrorCode.STOCK_NOT_FOUND));
 
-        if (stock.getStockType() != Stock.StockType.DOMESTIC) {
+        if (stock.getStockType() != Stock.StockType.DOMESTIC
+                && stock.getStockType() != Stock.StockType.DOMESTIC_ETF
+                && stock.getStockType() != Stock.StockType.FOREIGN_ETF) {
             log.warn("Invalid stock type for domestic service: {} ({})", stockCode, stock.getStockType());
             throw new BusinessException(KisApiErrorCode.INVALID_STOCK_TYPE);
         }

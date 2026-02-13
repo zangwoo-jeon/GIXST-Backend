@@ -2,7 +2,6 @@ package com.AISA.AISA.kisStock.kisService;
 
 import com.AISA.AISA.kisStock.Entity.stock.StockFinancialRatio;
 import com.AISA.AISA.kisStock.dto.KisOtherMajorRatiosResponse;
-import com.AISA.AISA.kisStock.enums.MarketType;
 import com.AISA.AISA.global.exception.BusinessException;
 
 import com.AISA.AISA.kisStock.Entity.stock.Stock;
@@ -80,7 +79,9 @@ public class KisStockService {
                                 .orElseThrow(() -> new BusinessException(
                                                 KisApiErrorCode.STOCK_NOT_FOUND));
 
-                if (stock.getStockType() != Stock.StockType.DOMESTIC) {
+                if (stock.getStockType() != Stock.StockType.DOMESTIC
+                                && stock.getStockType() != Stock.StockType.DOMESTIC_ETF
+                                && stock.getStockType() != Stock.StockType.FOREIGN_ETF) {
                         throw new BusinessException(KisApiErrorCode.INVALID_STOCK_TYPE);
                 }
 
@@ -451,7 +452,9 @@ public class KisStockService {
                 Stock stock = stockRepository.findByStockCode(stockCode)
                                 .orElseThrow(() -> new BusinessException(KisApiErrorCode.STOCK_NOT_FOUND));
 
-                if (stock.getStockType() != Stock.StockType.DOMESTIC) {
+                if (stock.getStockType() != Stock.StockType.DOMESTIC
+                                && stock.getStockType() != Stock.StockType.DOMESTIC_ETF
+                                && stock.getStockType() != Stock.StockType.FOREIGN_ETF) {
                         throw new BusinessException(KisApiErrorCode.INVALID_STOCK_TYPE);
                 }
 
@@ -517,7 +520,11 @@ public class KisStockService {
 
         public void fetchAllStocksHistoricalData(String startDateStr) {
                 log.info("Starting batch historical stock data fetch from {}", startDateStr);
-                List<Stock> allStocks = stockRepository.findByStockType(Stock.StockType.DOMESTIC);
+                List<Stock> allStocks = stockRepository.findAll().stream()
+                                .filter(s -> s.getStockType() == Stock.StockType.DOMESTIC
+                                                || s.getStockType() == Stock.StockType.DOMESTIC_ETF
+                                                || s.getStockType() == Stock.StockType.FOREIGN_ETF)
+                                .collect(Collectors.toList());
 
                 for (Stock stock : allStocks) {
                         try {
@@ -668,8 +675,10 @@ public class KisStockService {
                 long offset = start - 1;
 
                 Pageable pageable = new OffsetBasedPageRequest(offset, limit);
+                List<Stock.StockType> domesticTypes = List.of(Stock.StockType.DOMESTIC,
+                                Stock.StockType.DOMESTIC_ETF, Stock.StockType.FOREIGN_ETF);
                 List<StockMarketCap> marketCaps = stockMarketCapRepository
-                                .findByStockStockTypeOrderByMarketCapDesc(Stock.StockType.DOMESTIC, pageable);
+                                .findByStockStockTypeInOrderByMarketCapDesc(domesticTypes, pageable);
 
                 return marketCaps.stream()
                                 .map(smc -> {
@@ -781,7 +790,9 @@ public class KisStockService {
                 Stock stock = stockRepository.findByStockCode(stockCode)
                                 .orElseThrow(() -> new BusinessException(KisApiErrorCode.STOCK_NOT_FOUND));
 
-                if (stock.getStockType() != Stock.StockType.DOMESTIC) {
+                if (stock.getStockType() != Stock.StockType.DOMESTIC
+                                && stock.getStockType() != Stock.StockType.DOMESTIC_ETF
+                                && stock.getStockType() != Stock.StockType.FOREIGN_ETF) {
                         throw new BusinessException(KisApiErrorCode.INVALID_STOCK_TYPE);
                 }
 
@@ -826,7 +837,9 @@ public class KisStockService {
                 Stock stock = stockRepository.findByStockCode(stockCode)
                                 .orElseThrow(() -> new BusinessException(KisApiErrorCode.STOCK_NOT_FOUND));
 
-                if (stock.getStockType() != Stock.StockType.DOMESTIC) {
+                if (stock.getStockType() != Stock.StockType.DOMESTIC
+                                && stock.getStockType() != Stock.StockType.DOMESTIC_ETF
+                                && stock.getStockType() != Stock.StockType.FOREIGN_ETF) {
                         throw new BusinessException(KisApiErrorCode.INVALID_STOCK_TYPE);
                 }
 
@@ -1078,7 +1091,9 @@ public class KisStockService {
                 Stock stock = stockRepository.findByStockCode(stockCode)
                                 .orElseThrow(() -> new BusinessException(KisApiErrorCode.STOCK_NOT_FOUND));
 
-                if (stock.getStockType() != Stock.StockType.DOMESTIC) {
+                if (stock.getStockType() != Stock.StockType.DOMESTIC
+                                && stock.getStockType() != Stock.StockType.DOMESTIC_ETF
+                                && stock.getStockType() != Stock.StockType.FOREIGN_ETF) {
                         throw new BusinessException(KisApiErrorCode.INVALID_STOCK_TYPE);
                 }
 
@@ -1386,7 +1401,9 @@ public class KisStockService {
                 Stock stock = stockRepository.findByStockCode(stockCode)
                                 .orElseThrow(() -> new BusinessException(KisApiErrorCode.STOCK_NOT_FOUND));
 
-                if (stock.getStockType() != Stock.StockType.DOMESTIC) {
+                if (stock.getStockType() != Stock.StockType.DOMESTIC
+                                && stock.getStockType() != Stock.StockType.DOMESTIC_ETF
+                                && stock.getStockType() != Stock.StockType.FOREIGN_ETF) {
                         log.warn("Invalid stock type for domestic service: {} ({})", stockCode, stock.getStockType());
                         throw new BusinessException(KisApiErrorCode.INVALID_STOCK_TYPE);
                 }

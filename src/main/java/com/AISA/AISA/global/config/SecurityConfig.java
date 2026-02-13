@@ -118,7 +118,9 @@ public class SecurityConfig {
                                                                 "/api/overseas-stocks/rank/**",
                                                                 "/api/stocks/growth/ranking",
                                                                 "/api/analysis/market/valuation",
-                                                                "/api/analysis/overseas/static-analysis/*")
+                                                                "/api/analysis/overseas/static-analysis/*",
+                                                                "/api/etf/*/detail",
+                                                                "/api/etf/*/constituents")
                                                 .permitAll()
                                                 .anyRequest().authenticated())
                                 .oauth2Login(oauth2 -> oauth2

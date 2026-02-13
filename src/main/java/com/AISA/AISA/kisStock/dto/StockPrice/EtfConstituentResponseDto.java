@@ -13,8 +13,6 @@ public class EtfConstituentResponseDto {
     private String componentName;
     private String componentSymbol;
     private BigDecimal weight;
-    private LocalDateTime lastUpdated;
-    private String constituentStockCode; // Internal stock code if mapped
 
     public static EtfConstituentResponseDto from(EtfConstituent entity) {
         return EtfConstituentResponseDto.builder()
@@ -22,8 +20,6 @@ public class EtfConstituentResponseDto {
                         : entity.getComponentName())
                 .componentSymbol(entity.getComponentSymbol())
                 .weight(entity.getWeight())
-                .lastUpdated(entity.getLastUpdated())
-                .constituentStockCode(entity.getConstituent() != null ? entity.getConstituent().getStockCode() : null)
                 .build();
     }
 }

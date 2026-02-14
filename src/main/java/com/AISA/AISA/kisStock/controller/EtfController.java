@@ -64,4 +64,10 @@ public class EtfController {
     public ResponseEntity<List<EtfConstituentResponseDto>> getEtfConstituents(@PathVariable String stockCode) {
         return ResponseEntity.ok(etfService.getConstituents(stockCode));
     }
+
+    @GetMapping("/{stockCode}/related")
+    @Operation(summary = "동일 기초지수 ETF 조회", description = "특정 ETF와 동일한 기초지수를 추종하는 다른 ETF 목록을 조회합니다.")
+    public ResponseEntity<List<EtfDetailResponseDto>> getRelatedEtfs(@PathVariable String stockCode) {
+        return ResponseEntity.ok(etfService.getRelatedEtfs(stockCode));
+    }
 }

@@ -17,5 +17,12 @@ public interface EtfDetailRepository extends JpaRepository<EtfDetail, Long> {
     List<EtfDetail> findAll(Sort sort);
 
     @EntityGraph(attributePaths = "stock")
+    List<EtfDetail> findByUnderlyingIndexAndTrackingMultiplierAndReplicationMethodAndStock_StockCodeNot(
+            String underlyingIndex, Double trackingMultiplier, String replicationMethod, String stockCode);
+
+    @EntityGraph(attributePaths = "stock")
+    List<EtfDetail> findByUnderlyingIndexAndStock_StockCodeNot(String underlyingIndex, String stockCode);
+
+    @EntityGraph(attributePaths = "stock")
     List<EtfDetail> findByUnderlyingIndexContaining(String indexName);
 }

@@ -10,6 +10,7 @@ import com.AISA.AISA.kisStock.dto.StockPrice.KisEtfPriceResponseDto;
 import com.AISA.AISA.kisStock.dto.StockPrice.NaverEtfComponentDto;
 import com.AISA.AISA.kisStock.repository.EtfConstituentRepository;
 import com.AISA.AISA.kisStock.repository.EtfDetailRepository;
+import com.AISA.AISA.kisStock.repository.StockMarketCapRepository;
 import com.AISA.AISA.kisStock.repository.StockRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -42,6 +43,7 @@ public class EtfService {
     private final StockRepository stockRepository;
     private final EtfDetailRepository etfDetailRepository;
     private final EtfConstituentRepository etfConstituentRepository;
+    private final StockMarketCapRepository stockMarketCapRepository;
     private final WebClient webClient;
     private final TransactionTemplate transactionTemplate;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -50,31 +52,38 @@ public class EtfService {
     public Optional<EtfDetailResponseDto> getEtfDetail(String stockCode) {
         return stockRepository.findByStockCode(stockCode)
                 .flatMap(stock -> etfDetailRepository.findById(stock.getStockId()))
-                .map(entity -> {
-                    KisEtfPriceResponseDto.Output realTimeData = getEtfRealTimeData(stockCode);
-                    String nav = null;
-                    String trackingError = null;
-                    String discrepancyRate = null;
+                .map(this::toEtfDetailResponseDto);
+    }
 
-                    if (realTimeData != null) {
-                        nav = realTimeData.getNav();
-                        trackingError = realTimeData.getTrcErrt();
+    private EtfDetailResponseDto toEtfDetailResponseDto(EtfDetail entity) {
+        String stockCode = entity.getStock().getStockCode();
+        KisEtfPriceResponseDto.Output realTimeData = getEtfRealTimeData(stockCode);
+        String nav = null;
+        String trackingError = null;
+        String discrepancyRate = null;
 
-                        // Calculate Discrepancy Rate: (Price - NAV) / NAV * 100
-                        try {
-                            double priceVal = Double.parseDouble(realTimeData.getStckPrpr());
-                            double navVal = Double.parseDouble(realTimeData.getNav());
-                            if (navVal != 0) {
-                                double diff = ((priceVal - navVal) / navVal) * 100;
-                                discrepancyRate = String.format("%.2f", diff);
-                            }
-                        } catch (Exception e) {
-                            log.warn("Failed to calculate discrepancy rate for {}: {}", stockCode, e.getMessage());
-                        }
-                    }
+        if (realTimeData != null) {
+            nav = realTimeData.getNav();
+            trackingError = realTimeData.getTrcErrt();
 
-                    return EtfDetailResponseDto.of(entity, nav, trackingError, discrepancyRate);
-                });
+            // Calculate Discrepancy Rate: (Price - NAV) / NAV * 100
+            try {
+                double priceVal = Double.parseDouble(realTimeData.getStckPrpr());
+                double navVal = Double.parseDouble(realTimeData.getNav());
+                if (navVal != 0) {
+                    double diff = ((priceVal - navVal) / navVal) * 100;
+                    discrepancyRate = String.format("%.2f", diff);
+                }
+            } catch (Exception e) {
+                log.warn("Failed to calculate discrepancy rate for {}: {}", stockCode, e.getMessage());
+            }
+        }
+
+        BigDecimal marketCap = stockMarketCapRepository.findByStock(entity.getStock())
+                .map(com.AISA.AISA.kisStock.Entity.stock.StockMarketCap::getMarketCap)
+                .orElse(null);
+
+        return EtfDetailResponseDto.of(entity, nav, trackingError, discrepancyRate, marketCap);
     }
 
     private KisEtfPriceResponseDto.Output getEtfRealTimeData(String stockCode) {
@@ -105,15 +114,49 @@ public class EtfService {
         return etfDetailRepository.findAll(Sort.by(Sort.Direction.ASC, "totalExpense"))
                 .stream()
                 .limit(limit)
-                .map(EtfDetailResponseDto::from)
+                .map(this::toEtfDetailResponseDto)
                 .toList();
     }
 
     @Transactional(readOnly = true)
     public List<EtfDetailResponseDto> getEtfsByUnderlyingIndex(String indexName) {
         return etfDetailRepository.findByUnderlyingIndexContaining(indexName).stream()
-                .map(EtfDetailResponseDto::from)
+                .map(this::toEtfDetailResponseDto)
                 .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<EtfDetailResponseDto> getRelatedEtfs(String stockCode) {
+        return stockRepository.findByStockCode(stockCode)
+                .flatMap(stock -> etfDetailRepository.findById(stock.getStockId()))
+                .map(detail -> {
+                    String underlyingIndex = detail.getUnderlyingIndex();
+                    if (underlyingIndex == null || underlyingIndex.isBlank()) {
+                        return List.<EtfDetailResponseDto>of();
+                    }
+
+                    Double multiplier = detail.getTrackingMultiplier();
+                    String method = detail.getReplicationMethod();
+                    String sourceName = detail.getStock().getStockName();
+
+                    boolean isInverse = sourceName.contains("인버스");
+                    boolean isHedge = sourceName.contains("(H)");
+                    boolean isLeverage = sourceName.contains("레버리지") || sourceName.contains("2X");
+
+                    return etfDetailRepository
+                            .findByUnderlyingIndexAndTrackingMultiplierAndReplicationMethodAndStock_StockCodeNot(
+                                    underlyingIndex, multiplier, method, stockCode)
+                            .stream()
+                            .filter(candidate -> {
+                                String name = candidate.getStock().getStockName();
+                                return (name.contains("인버스") == isInverse) &&
+                                        (name.contains("(H)") == isHedge) &&
+                                        ((name.contains("레버리지") || name.contains("2X")) == isLeverage);
+                            })
+                            .map(this::toEtfDetailResponseDto)
+                            .toList();
+                })
+                .orElse(List.of());
     }
 
     public void syncAllConstituents() {

@@ -120,7 +120,8 @@ public class SecurityConfig {
                                                                 "/api/analysis/market/valuation",
                                                                 "/api/analysis/overseas/static-analysis/*",
                                                                 "/api/etf/*/detail",
-                                                                "/api/etf/*/constituents")
+                                                                "/api/etf/*/constituents",
+                                                                "/api/etf/*/related")
                                                 .permitAll()
                                                 .anyRequest().authenticated())
                                 .oauth2Login(oauth2 -> oauth2

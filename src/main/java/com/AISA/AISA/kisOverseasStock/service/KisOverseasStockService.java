@@ -125,7 +125,8 @@ public class KisOverseasStockService {
                 output.getPrice(),
                 output.getExchangeRate(),
                 "0",
-                output.getMarketCap());
+                output.getMarketCap(),
+                stock.getStockType());
     }
 
     public List<KisOverseasStockChartDto> getOverseasStockChart(String stockCode, String startDate, String endDate,

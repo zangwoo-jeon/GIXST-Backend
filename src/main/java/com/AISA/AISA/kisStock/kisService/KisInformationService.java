@@ -254,8 +254,11 @@ public class KisInformationService {
         }
 
         // 5. Map to DTO (Top 20)
-        Map<String, String> stockMap = stockRepository.findAll().stream()
-                .collect(Collectors.toMap(Stock::getStockCode, Stock::getStockName));
+        List<Stock> allStocks = stockRepository.findAll();
+        Map<String, String> stockNameMap = allStocks.stream()
+                .collect(Collectors.toMap(Stock::getStockCode, Stock::getStockName, (a, b) -> a));
+        Map<String, Stock.StockType> stockTypeMap = allStocks.stream()
+                .collect(Collectors.toMap(Stock::getStockCode, Stock::getStockType, (a, b) -> a));
 
         List<FinancialRatioRankDto.FinancialRatioEntry> entries = filteredRanks.stream()
                 .limit(20)
@@ -263,7 +266,8 @@ public class KisInformationService {
                         // Use updated list index for rank
                         .rank(String.valueOf(filteredRanks.indexOf(ratio) + 1))
                         .stockCode(ratio.getStockCode())
-                        .stockName(stockMap.getOrDefault(ratio.getStockCode(), "Unknown"))
+                        .stockName(stockNameMap.getOrDefault(ratio.getStockCode(), "Unknown"))
+                        .stockType(stockTypeMap.getOrDefault(ratio.getStockCode(), null))
                         .stacYymm(ratio.getStacYymm())
                         .roe(ratio.getRoe() != null ? ratio.getRoe().toString() : "0")
                         .eps(ratio.getEps() != null ? ratio.getEps().toString() : "0")
@@ -711,10 +715,15 @@ public class KisInformationService {
         List<StockFinancialRank> allRanks = stockFinancialRankRepository.findAll();
 
         // 2. Map to DTO
+        List<Stock> allStocksForType = stockRepository.findAll();
+        Map<String, Stock.StockType> stockTypeMapForRank = allStocksForType.stream()
+                .collect(Collectors.toMap(Stock::getStockCode, Stock::getStockType, (a, b) -> a));
+
         List<FinancialRankDto.FinancialRankEntry> calculatedRanks = allRanks.stream()
                 .map(rank -> FinancialRankDto.FinancialRankEntry.builder()
                         .stockCode(rank.getStockCode())
                         .stockName(rank.getStockName())
+                        .stockType(stockTypeMapForRank.getOrDefault(rank.getStockCode(), null))
                         .stacYymm(rank.getStacYymm())
                         .saleTotalProfit(rank.getSaleAccount() != null ? rank.getSaleAccount().toString() : "0")
                         .operatingProfit(rank.getOperatingProfit() != null ? rank.getOperatingProfit().toString() : "0")

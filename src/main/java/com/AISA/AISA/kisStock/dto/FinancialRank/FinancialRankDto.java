@@ -1,5 +1,6 @@
 package com.AISA.AISA.kisStock.dto.FinancialRank;
 
+import com.AISA.AISA.kisStock.Entity.stock.Stock;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -37,5 +38,6 @@ public class FinancialRankDto {
         private String totalLiabilities; // total_lblt
         private String totalCapital; // total_cptl
         private String operatingRate; // 영업이익률
+        private Stock.StockType stockType;
     }
 }

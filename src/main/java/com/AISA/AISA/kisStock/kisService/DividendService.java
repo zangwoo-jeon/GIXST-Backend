@@ -268,14 +268,15 @@ public class DividendService {
 
         @Caching(evict = {
                         @CacheEvict(value = "stockDividendDetail", key = "#stockCode"),
-                        @CacheEvict(value = "stockDividend", allEntries = true)
+                        @CacheEvict(value = "stockDividend", allEntries = true),
+                        @CacheEvict(value = "dividendRank", key = "'all'")
         })
         public List<StockDividendInfoDto> refreshStockDividend(String stockCode, String startDate, String endDate) {
                 log.info("Refreshing dividend data for stock: {} ({}-{})", stockCode, startDate, endDate);
                 return fetchAndSaveDividendsFromApi(stockCode, startDate, endDate);
         }
 
-        @CacheEvict(value = { "stockDividend", "stockDividendDetail" }, allEntries = true)
+        @CacheEvict(value = { "stockDividend", "stockDividendDetail", "dividendRank" }, allEntries = true)
         public void refreshAllDividends(String startDate, String endDate) {
                 log.info("Starting batch dividend refresh for period: {} ~ {}", startDate, endDate);
                 List<Stock> allStocks = stockRepository.findAll();
@@ -316,6 +317,10 @@ public class DividendService {
                                 .collect(Collectors.toList());
 
                 // 3. 실시간 현재가 조회 및 DTO 변환
+                List<Stock> allStocksForType = stockRepository.findAll();
+                Map<String, Stock.StockType> stockTypeMap = allStocksForType.stream()
+                                .collect(Collectors.toMap(Stock::getStockCode, Stock::getStockType, (a, b) -> a));
+
                 List<DividendRankDto.DividendRankEntry> entries = top20.stream()
                                 .map(entity -> {
                                         String currentPrice = "0";
@@ -340,6 +345,8 @@ public class DividendService {
                                                         .dividendAmount(entity.getDividendAmount())
                                                         .dividendRate(entity.getDividendRate())
                                                         .currentPrice(currentPrice)
+                                                        .stockType(stockTypeMap.getOrDefault(entity.getStockCode(),
+                                                                        null))
                                                         .build();
                                 })
                                 .collect(Collectors.toList());

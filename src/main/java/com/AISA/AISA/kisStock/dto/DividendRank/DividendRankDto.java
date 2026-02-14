@@ -1,5 +1,6 @@
 package com.AISA.AISA.kisStock.dto.DividendRank;
 
+import com.AISA.AISA.kisStock.Entity.stock.Stock;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -28,5 +29,6 @@ public class DividendRankDto {
         private String dividendAmount;
         private String dividendRate;
         private String currentPrice;
+        private Stock.StockType stockType;
     }
 }

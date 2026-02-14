@@ -1,5 +1,6 @@
 package com.AISA.AISA.kisStock.dto.FinancialRank;
 
+import com.AISA.AISA.kisStock.Entity.stock.Stock;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -44,5 +45,6 @@ public class FinancialRatioRankDto {
         private String per;
         private String pbr;
         private String psr;
+        private Stock.StockType stockType;
     }
 }

@@ -1,5 +1,6 @@
 package com.AISA.AISA.kisStock.dto.InvestorTrend;
 
+import com.AISA.AISA.kisStock.Entity.stock.Stock;
 import java.math.BigDecimal;
 
 public interface InvestorTrendAggregationProjection {
@@ -12,5 +13,7 @@ public interface InvestorTrendAggregationProjection {
     BigDecimal getForeignerNetBuyAmount();
 
     BigDecimal getInstitutionNetBuyAmount();
+
+    Stock.StockType getStockType();
 
 }

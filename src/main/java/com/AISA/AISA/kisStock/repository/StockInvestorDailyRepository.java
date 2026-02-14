@@ -26,13 +26,14 @@ public interface StockInvestorDailyRepository extends JpaRepository<StockInvesto
         boolean existsByStockAndDate(Stock stock, LocalDate date);
 
         @Query("SELECT s.stock.stockCode as stockCode, s.stock.stockName as stockName, " +
+                        "s.stock.stockType as stockType, " +
                         "SUM(s.personalNetBuyAmount) as personalNetBuyAmount, " +
                         "SUM(s.foreignerNetBuyAmount) as foreignerNetBuyAmount, " +
                         "SUM(s.institutionNetBuyAmount) as institutionNetBuyAmount " +
                         "FROM StockInvestorDaily s " +
                         "WHERE s.date >= :startDate AND s.stock.stockType = com.AISA.AISA.kisStock.Entity.stock.Stock.StockType.DOMESTIC "
                         +
-                        "GROUP BY s.stock.stockCode, s.stock.stockName")
+                        "GROUP BY s.stock.stockCode, s.stock.stockName, s.stock.stockType")
         List<InvestorTrendAggregationProjection> findAggregatedInvestorTrend(
                         @Param("startDate") LocalDate startDate);
 

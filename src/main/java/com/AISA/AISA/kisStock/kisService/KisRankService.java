@@ -88,6 +88,7 @@ public class KisRankService {
                 .map(d -> InvestorRankDto.builder()
                         .stockCode(d.getStockCode())
                         .stockName(d.getStockName())
+                        .stockType(d.getStockType())
                         .personalNetBuyAmount(d.getPersonalNetBuyAmount() != null
                                 ? d.getPersonalNetBuyAmount().toString()
                                 : "0")

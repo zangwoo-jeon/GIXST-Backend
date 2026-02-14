@@ -1,5 +1,6 @@
 package com.AISA.AISA.kisStock.dto.InvestorTrend;
 
+import com.AISA.AISA.kisStock.Entity.stock.Stock;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -20,4 +21,5 @@ public class InvestorRankDto {
     private String personalNetBuyAmount;
     private String foreignerNetBuyAmount;
     private String institutionNetBuyAmount;
+    private Stock.StockType stockType;
 }

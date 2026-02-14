@@ -625,6 +625,11 @@ public class KisStockService {
                                 return VolumeRankDto.builder().ranks(new ArrayList<>()).build();
                         }
 
+                        List<Stock> allStocks = stockRepository.findAll();
+                        Map<String, Stock.StockType> stockTypeMap = allStocks.stream()
+                                        .collect(Collectors.toMap(Stock::getStockCode, Stock::getStockType,
+                                                        (a, b) -> a));
+
                         List<VolumeRankDto.VolumeRankEntry> ranks = response.getOutput().stream()
                                         .map(item -> VolumeRankDto.VolumeRankEntry.builder()
                                                         .stockName(item.getStockName())
@@ -637,6 +642,7 @@ public class KisStockService {
                                                         .accumulatedVolume(item.getAccumulatedVolume())
                                                         .previousDayVolume(item.getPreviousDayVolume())
                                                         .averageVolume(item.getAverageVolume())
+                                                        .stockType(stockTypeMap.getOrDefault(item.getStockCode(), null))
                                                         .build())
                                         .collect(Collectors.toList());
 
@@ -688,6 +694,7 @@ public class KisStockService {
                                                         .stockCode(stock.getStockCode())
                                                         .stockName(stock.getStockName())
                                                         .marketName(stock.getMarketName())
+                                                        .stockType(stock.getStockType())
                                                         .marketCap(smc.getMarketCap() != null
                                                                         ? smc.getMarketCap().toString()
                                                                         : null)
@@ -1305,6 +1312,7 @@ public class KisStockService {
                                 .stockCode(stock.getStockCode())
                                 .stockName(stock.getStockName())
                                 .marketName(stock.getMarketName())
+                                .stockType(stock.getStockType())
                                 .build());
         }
 

@@ -1,5 +1,6 @@
 package com.AISA.AISA.kisStock.dto.VolumeRank;
 
+import com.AISA.AISA.kisStock.Entity.stock.Stock;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -29,5 +30,6 @@ public class VolumeRankDto {
         private String accumulatedVolume;
         private String previousDayVolume;
         private String averageVolume;
+        private Stock.StockType stockType;
     }
 }

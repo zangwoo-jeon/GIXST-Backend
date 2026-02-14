@@ -112,10 +112,22 @@ def migrate():
             underlying_index = row.get('기초지수명', '')
             index_provider = row.get('지수산출기관', '')
             
-            try:
-                tracking_multiplier = float(row.get('추적배수', '1'))
-            except:
+            raw_tracking_mult = row.get('추적배수', '1')
+            if '2X 인버스' in raw_tracking_mult:
+                tracking_multiplier = -2.0
+            elif '1X 인버스' in raw_tracking_mult:
+                tracking_multiplier = -1.0
+            elif '인버스' in raw_tracking_mult: # Fallback for other inverse
+                tracking_multiplier = -1.0
+            elif '2X 레버리지' in raw_tracking_mult:
+                tracking_multiplier = 2.0
+            elif '일반' in raw_tracking_mult:
                 tracking_multiplier = 1.0
+            else:
+                try:
+                    tracking_multiplier = float(raw_tracking_mult)
+                except:
+                    tracking_multiplier = 1.0
 
             replication_method = row.get('복제방법', '')
             manager = row.get('운용사', '')

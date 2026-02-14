@@ -1,5 +1,6 @@
 package com.AISA.AISA.kisStock.dto.StockPrice;
 
+import com.AISA.AISA.kisStock.Entity.stock.Stock.StockType;
 import com.AISA.AISA.kisStock.enums.MarketType;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -21,4 +22,5 @@ public class StockPriceDto {
     private String exchangeRate;
     private String listedSharesCount;
     private String marketCap;
+    private StockType stockType;
 }

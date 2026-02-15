@@ -9,9 +9,9 @@ import com.AISA.AISA.portfolio.backtest.service.BacktestService;
 import com.AISA.AISA.portfolio.PortfolioStock.PortStockService;
 import com.AISA.AISA.portfolio.PortfolioStock.dto.PortfolioReturnResponse;
 import com.AISA.AISA.portfolio.PortfolioStock.dto.PortStockResponse;
+import com.AISA.AISA.kisStock.Entity.stock.Stock;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -39,7 +39,6 @@ public class PortfolioDiagnosisService {
     private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyyMMdd");
 
     @Transactional(readOnly = true)
-    @Cacheable(value = "portfolioDiagnosis", key = "#portfolioId.toString()", sync = true)
     public DiagnosisResultDto diagnosePortfolio(UUID portfolioId) {
         // 1. Setup Adaptive Time Horizon (Max 5 Years for Data Fetching)
         LocalDate endVal = LocalDate.now();
@@ -73,39 +72,39 @@ public class PortfolioDiagnosisService {
         // 3. Define Factors to Analyze with Adaptive Windows
         // Factor 1: KOSPI (Domestic Market - 3 Years)
         Map<LocalDate, Double> kospiSeries = analyzeFactorAdaptive(portfolioSeries, "INDEX", "KOSPI", "국내 시장(KOSPI)", 3,
-                factorResults, rawSignals, portfolioStockCodes);
+                factorResults, rawSignals, portfolioStockCodes, portfolioComposition);
 
         // Factor 2: KOSDAQ (Domestic Growth - 3 Years)
         analyzeFactorAdaptive(portfolioSeries, "INDEX", "KOSDAQ", "국내 코스닥(KOSDAQ)", 3, factorResults, rawSignals,
-                portfolioStockCodes);
+                portfolioStockCodes, portfolioComposition);
 
         // Factor 3: NASDAQ (Global Tech Market - 5 Years)
         analyzeFactorAdaptiveWithControl(portfolioSeries, "INDEX", "NASDAQ", "미국 기술주(NASDAQ)", 5, factorResults,
-                rawSignals, kospiSeries, "국내 시장", portfolioStockCodes);
+                rawSignals, kospiSeries, "국내 시장", portfolioStockCodes, portfolioComposition);
 
         // Factor 4: S&P 500 (US Broad Market - 5 Years)
         analyzeFactorAdaptiveWithControl(portfolioSeries, "INDEX", "SP500", "미국 대형주(S&P500)", 5, factorResults,
-                rawSignals, kospiSeries, "국내 시장", portfolioStockCodes);
+                rawSignals, kospiSeries, "국내 시장", portfolioStockCodes, portfolioComposition);
 
         // Factor 5: USD Exchange Rate (Currency Risk - 5 Years)
         analyzeFactorAdaptive(portfolioSeries, "EXCHANGE", "FX@KRW", "달러 환율", 5, factorResults, rawSignals,
-                portfolioStockCodes);
+                portfolioStockCodes, portfolioComposition);
 
         // Factor 6: KR Base Rate (Monetary Policy - 5 Years)
         analyzeFactorAdaptive(portfolioSeries, "BASE_RATE", "BASE_RATE", "한국 기준금리", 5, factorResults, rawSignals,
-                portfolioStockCodes);
+                portfolioStockCodes, portfolioComposition);
 
         // Factor 7: KR Bonds (Interest Rate Risk - 5 Years)
         analyzeFactorAdaptive(portfolioSeries, "BOND", "KR_3Y", "한국 국채 3년(금리)", 5, factorResults, rawSignals,
-                portfolioStockCodes);
+                portfolioStockCodes, portfolioComposition);
         analyzeFactorAdaptive(portfolioSeries, "BOND", "KR_10Y", "한국 국채 10년(금리)", 5, factorResults, rawSignals,
-                portfolioStockCodes);
+                portfolioStockCodes, portfolioComposition);
 
         // Factor 8: US Bonds (Interest Rate Risk - 5 Years)
         analyzeFactorAdaptive(portfolioSeries, "BOND", "US_1Y", "미국 국채 1년(금리)", 5, factorResults, rawSignals,
-                portfolioStockCodes);
+                portfolioStockCodes, portfolioComposition);
         analyzeFactorAdaptive(portfolioSeries, "BOND", "US_10Y", "미국 10년물 국채(금리)", 5, factorResults, rawSignals,
-                portfolioStockCodes);
+                portfolioStockCodes, portfolioComposition);
 
         // 4. Generate AI Advice
         String prompt = createPrompt(factorResults, rawSignals, portfolioComposition);
@@ -143,11 +142,14 @@ public class PortfolioDiagnosisService {
             BigDecimal totalValue = portfolioComposition.getTotalValue();
             for (PortStockResponse stock : portfolioComposition.getPortStocks()) {
                 double weight = 0;
-                if (totalValue != null && totalValue.compareTo(BigDecimal.ZERO) > 0 && stock.getTotalValue() != null) {
-                    weight = stock.getTotalValue().divide(totalValue, 4, java.math.RoundingMode.HALF_UP).doubleValue()
+                if (totalValue != null && totalValue.compareTo(BigDecimal.ZERO) > 0
+                        && stock.getTotalValueKrw() != null) {
+                    weight = stock.getTotalValueKrw().divide(totalValue, 4, java.math.RoundingMode.HALF_UP)
+                            .doubleValue()
                             * 100;
                 }
-                sb.append(String.format("- %s (%s): 비중 %.1f%%\n", stock.getStockName(), stock.getStockCode(), weight));
+                sb.append(String.format("- %s (%s, %s): 비중 %.1f%% (현재 포트폴리오에 실제 보유 중인 자산)\n",
+                        stock.getStockName(), stock.getStockCode(), stock.getStockType(), weight));
             }
         }
         sb.append("\n");
@@ -185,16 +187,17 @@ public class PortfolioDiagnosisService {
             String factorCode,
             String factorName, int pearsonYears,
             List<DiagnosisResultDto.FactorAnalysisResult> results, List<String> rawSignals,
-            Set<String> portfolioStocks) {
+            Set<String> portfolioStocks, PortfolioReturnResponse portfolioComposition) {
         return analyzeFactorAdaptiveWithControl(portfolioSeries, factorType, factorCode, factorName, pearsonYears,
-                results, rawSignals, null, null, portfolioStocks);
+                results, rawSignals, null, null, portfolioStocks, portfolioComposition);
     }
 
     private Map<LocalDate, Double> analyzeFactorAdaptiveWithControl(Map<LocalDate, Double> portfolioSeries,
             String factorType, String factorCode,
             String factorName, int pearsonYears,
             List<DiagnosisResultDto.FactorAnalysisResult> results, List<String> rawSignals,
-            Map<LocalDate, Double> controlSeries, String controlName, Set<String> portfolioStocks) {
+            Map<LocalDate, Double> controlSeries, String controlName, Set<String> portfolioStocks,
+            PortfolioReturnResponse portfolioComposition) {
 
         Map<LocalDate, Double> factorSeries = null;
         try {
@@ -221,13 +224,42 @@ public class PortfolioDiagnosisService {
 
             // Interpretation Layer: Check if the factor is actually in the portfolio
             boolean isHeldInPortfolio = false;
-            // Simplified check: exact match of code or name contains (heuristic for
-            // indices)
-            // Ideally, we should check IsHeld for STOCK only, and maybe 'IsTracking' for
-            // ETFs.
-            // For now, if it's a stock in portfolio, set true.
-            if (portfolioStocks != null && "STOCK".equals(factorType) && portfolioStocks.contains(factorCode)) {
-                isHeldInPortfolio = true;
+            if (portfolioStocks != null) {
+                if ("STOCK".equals(factorType) && portfolioStocks.contains(factorCode)) {
+                    isHeldInPortfolio = true;
+                } else if ("INDEX".equals(factorType)) {
+                    // Heuristic for Index ETFs
+                    for (PortStockResponse ps : portfolioComposition.getPortStocks()) {
+                        String name = ps.getStockName().toUpperCase();
+                        Stock.StockType st = ps.getStockType();
+
+                        boolean isEtf = (st == Stock.StockType.DOMESTIC_ETF || st == Stock.StockType.FOREIGN_ETF
+                                || st == Stock.StockType.US_ETF);
+
+                        if (isEtf) {
+                            if ("KOSPI".equals(factorCode)
+                                    && (name.contains("KOSPI") || name.contains("코스피") || name.contains("200"))) {
+                                isHeldInPortfolio = true;
+                                break;
+                            }
+                            if ("KOSDAQ".equals(factorCode)
+                                    && (name.contains("KOSDAQ") || name.contains("코스닥") || name.contains("150"))) {
+                                isHeldInPortfolio = true;
+                                break;
+                            }
+                            if ("NASDAQ".equals(factorCode)
+                                    && (name.contains("NASDAQ") || name.contains("나스닥") || name.contains("100"))) {
+                                isHeldInPortfolio = true;
+                                break;
+                            }
+                            if ("SP500".equals(factorCode)
+                                    && (name.contains("S&P") || name.contains("SP500") || name.contains("500"))) {
+                                isHeldInPortfolio = true;
+                                break;
+                            }
+                        }
+                    }
+                }
             }
             // For indices, if the user holds an ETF tracking it, we can't easily know
             // without mapping.

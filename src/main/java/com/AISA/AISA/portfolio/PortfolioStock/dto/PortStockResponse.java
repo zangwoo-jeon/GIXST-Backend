@@ -1,6 +1,7 @@
 package com.AISA.AISA.portfolio.PortfolioStock.dto;
 
 import com.AISA.AISA.portfolio.PortfolioStock.PortStock;
+import com.AISA.AISA.kisStock.Entity.stock.Stock;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
@@ -17,6 +18,7 @@ public class PortStockResponse {
     private BigDecimal averagePrice;
     private Integer sequence;
     private String currency; // 통화 (KRW, USD 등)
+    private Stock.StockType stockType; // 주식 유형 (DOMESTIC, DOMESTIC_ETF 등)
     private BigDecimal currentPrice;
     private BigDecimal totalValue;
     private BigDecimal profit;
@@ -39,6 +41,7 @@ public class PortStockResponse {
         this.averagePrice = portStock.getAveragePrice();
         this.sequence = portStock.getSequence();
         this.currency = portStock.getStock().getCurrency();
+        this.stockType = portStock.getStock().getStockType();
     }
 
     public PortStockResponse(PortStock portStock, BigDecimal currentPrice, BigDecimal dailyProfit,

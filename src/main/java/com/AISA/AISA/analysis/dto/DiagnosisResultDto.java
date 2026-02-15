@@ -1,12 +1,16 @@
 package com.AISA.AISA.analysis.dto;
 
+import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
+import lombok.NoArgsConstructor;
 
 import java.util.List;
 
 @Getter
 @Builder
+@NoArgsConstructor
+@AllArgsConstructor
 public class DiagnosisResultDto {
     private String portfolioId;
     private String diagnosisDate;
@@ -15,6 +19,8 @@ public class DiagnosisResultDto {
 
     @Getter
     @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class FactorAnalysisResult {
         private String factorName; // e.g., "KOSPI", "NASDAQ", "USD", "BOND"
         private double correlation;

@@ -22,6 +22,7 @@ public class CorrelationResultDto {
     private List<DataPoint> points; // 산점도용 데이터
 
     @Getter
+    @NoArgsConstructor
     @AllArgsConstructor
     public static class DataPoint {
         private String date;

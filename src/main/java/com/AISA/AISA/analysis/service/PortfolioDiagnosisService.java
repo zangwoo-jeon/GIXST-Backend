@@ -47,8 +47,8 @@ public class PortfolioDiagnosisService {
         String endDate = endVal.format(FORMATTER);
         String startDate = startVal.format(FORMATTER);
 
-        // 2. Get Portfolio Daily Values (Virtual Asset) & Composition
-        BacktestResultDto backtestResult = backtestService.calculatePortfolioBacktest(portfolioId, startDate, endDate);
+        BacktestResultDto backtestResult = backtestService.calculatePortfolioBacktest(portfolioId, startDate, endDate,
+                null);
         PortfolioReturnResponse portfolioComposition = portStockService.getPortStocks(portfolioId);
 
         // Extract Stock Codes for Interpretation Layer
@@ -541,8 +541,8 @@ public class PortfolioDiagnosisService {
     @Transactional(readOnly = true)
     public RollingCorrelationDto getPortfolioRollingCorrelation(UUID portfolioId,
             String benchmarkType, String benchmarkCode, String startDate, String endDate, int windowSize) {
-        // 1. Get Portfolio Daily Values (Virtual Asset)
-        BacktestResultDto backtestResult = backtestService.calculatePortfolioBacktest(portfolioId, startDate, endDate);
+        BacktestResultDto backtestResult = backtestService.calculatePortfolioBacktest(portfolioId, startDate, endDate,
+                null);
         Map<LocalDate, Double> portfolioSeries = new TreeMap<>();
         for (DailyPortfolioValueDto daily : backtestResult.getDailyValues()) {
             if (daily.getAdjustedValue() != null) {

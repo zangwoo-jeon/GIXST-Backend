@@ -28,9 +28,11 @@ public class BacktestController {
     public ResponseEntity<SuccessResponse<BacktestResultDto>> runBacktest(
             @PathVariable UUID portId,
             @RequestParam String startDate,
-            @RequestParam String endDate) {
+            @RequestParam String endDate,
+            @RequestParam(required = false) java.math.BigDecimal initialCapital) {
 
-        BacktestResultDto result = backtestService.calculatePortfolioBacktest(portId, startDate, endDate);
+        BacktestResultDto result = backtestService.calculatePortfolioBacktest(portId, startDate, endDate,
+                initialCapital);
         return ResponseEntity.ok(new SuccessResponse<>(true, "백테스트 실행 성공", result));
     }
 

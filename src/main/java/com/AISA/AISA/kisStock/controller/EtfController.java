@@ -27,7 +27,7 @@ public class EtfController {
     }
 
     @GetMapping("/rank/expense")
-    @Operation(summary = "총보수 낮은 순 ETF 랭킹", description = "전체 ETF 중 총보수가 낮은 순으로 상위 N개를 조회합니다.")
+    @Operation(summary = "총보수 낮은 순 ETF 랭킹 조회", description = "전체 ETF 중 총보수가 낮은 순으로 상위 N개를 조회합니다.")
     public ResponseEntity<List<EtfDetailResponseDto>> getLowExpenseEtfs(@RequestParam(defaultValue = "10") int limit) {
         return ResponseEntity.ok(etfService.getTopEtfsByLowExpense(limit));
     }

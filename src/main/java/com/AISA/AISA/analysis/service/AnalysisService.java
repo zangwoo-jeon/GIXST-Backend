@@ -2,12 +2,16 @@ package com.AISA.AISA.analysis.service;
 
 import com.AISA.AISA.analysis.dto.CorrelationResultDto;
 import com.AISA.AISA.analysis.dto.RollingCorrelationDto;
+import com.AISA.AISA.kisOverseasStock.entity.OverseasStockDailyData;
+import com.AISA.AISA.kisOverseasStock.repository.KisOverseasStockDailyDataRepository;
+import com.AISA.AISA.kisStock.Entity.stock.Stock;
 import com.AISA.AISA.kisStock.Entity.stock.StockDailyData;
 import com.AISA.AISA.kisStock.enums.BondYield;
 import com.AISA.AISA.kisStock.enums.OverseasIndex;
 import com.AISA.AISA.kisStock.kisService.KisMacroService;
 import com.AISA.AISA.kisStock.kisService.KisIndexService;
 import com.AISA.AISA.kisStock.repository.StockDailyDataRepository;
+import com.AISA.AISA.kisStock.repository.StockRepository;
 import com.AISA.AISA.kisStock.dto.Index.IndexChartPriceDto;
 import com.AISA.AISA.portfolio.macro.dto.MacroIndicatorDto;
 import com.AISA.AISA.portfolio.macro.service.EcosService;
@@ -37,6 +41,8 @@ import java.util.stream.Collectors;
 public class AnalysisService {
 
     private final StockDailyDataRepository stockDailyDataRepository;
+    private final KisOverseasStockDailyDataRepository overseasStockDailyDataRepository;
+    private final StockRepository stockRepository;
     private final KisMacroService kisMacroService;
     private final KisIndexService kisIndexService; // Inject KisIndexService
     private final EcosService ecosService;
@@ -417,10 +423,25 @@ public class AnalysisService {
         Map<LocalDate, Double> dataMap = new TreeMap<>(); // Sorted by date
 
         if ("STOCK".equalsIgnoreCase(type)) {
-            List<StockDailyData> stockData = stockDailyDataRepository.findByStock_StockCodeAndDateBetweenOrderByDateAsc(
-                    code, LocalDate.parse(startDate, FORMATTER), LocalDate.parse(endDate, FORMATTER));
-            for (StockDailyData d : stockData) {
-                dataMap.put(d.getDate(), d.getClosingPrice().doubleValue());
+            Stock stock = stockRepository.findByStockCode(code).orElse(null);
+            if (stock != null) {
+                if (stock.getStockType() == Stock.StockType.US_STOCK
+                        || stock.getStockType() == Stock.StockType.US_ETF
+                        || stock.getStockType() == Stock.StockType.FOREIGN_ETF) {
+                    List<OverseasStockDailyData> overseasData = overseasStockDailyDataRepository
+                            .findByStockAndDateBetween(
+                                    stock, LocalDate.parse(startDate, FORMATTER), LocalDate.parse(endDate, FORMATTER));
+                    for (OverseasStockDailyData d : overseasData) {
+                        dataMap.put(d.getDate(), d.getClosingPrice().doubleValue());
+                    }
+                } else {
+                    List<StockDailyData> stockData = stockDailyDataRepository
+                            .findByStock_StockCodeAndDateBetweenOrderByDateAsc(
+                                    code, LocalDate.parse(startDate, FORMATTER), LocalDate.parse(endDate, FORMATTER));
+                    for (StockDailyData d : stockData) {
+                        dataMap.put(d.getDate(), d.getClosingPrice().doubleValue());
+                    }
+                }
             }
         } else if ("INDEX".equalsIgnoreCase(type)) {
             if ("KOSPI".equalsIgnoreCase(code) || "KOSDAQ".equalsIgnoreCase(code)) {

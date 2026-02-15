@@ -18,6 +18,7 @@ public class RollingCorrelationDto {
     private List<RollingDataPoint> rollingData;
 
     @Getter
+    @NoArgsConstructor
     @AllArgsConstructor
     public static class RollingDataPoint {
         private String date;

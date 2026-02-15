@@ -86,4 +86,10 @@ public interface StockDailyDataRepository extends JpaRepository<StockDailyData, 
         List<com.AISA.AISA.kisStock.dto.Index.BreadthHistoryDto> findBreadthHistoryByDates(
                         @RequestParam("marketName") MarketType marketName,
                         @RequestParam("dates") List<LocalDate> dates);
+
+        Optional<StockDailyData> findFirstByStockOrderByDateDesc(Stock stock);
+
+        default Optional<java.math.BigDecimal> findLatestPriceByStock(Stock stock) {
+                return findFirstByStockOrderByDateDesc(stock).map(StockDailyData::getClosingPrice);
+        }
 }

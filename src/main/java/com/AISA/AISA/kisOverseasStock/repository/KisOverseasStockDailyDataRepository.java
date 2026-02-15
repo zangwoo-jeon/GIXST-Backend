@@ -12,19 +12,29 @@ import java.util.Optional;
 
 public interface KisOverseasStockDailyDataRepository extends JpaRepository<OverseasStockDailyData, Long> {
 
-    @Query("SELECT d FROM OverseasStockDailyData d WHERE d.stock = :stock AND d.date BETWEEN :startDate AND :endDate ORDER BY d.date ASC")
-    List<OverseasStockDailyData> findByStockAndDateBetween(@Param("stock") Stock stock,
-            @Param("startDate") LocalDate startDate,
-            @Param("endDate") LocalDate endDate);
+        @Query("SELECT d FROM OverseasStockDailyData d WHERE d.stock = :stock AND d.date BETWEEN :startDate AND :endDate ORDER BY d.date ASC")
+        List<OverseasStockDailyData> findByStockAndDateBetween(@Param("stock") Stock stock,
+                        @Param("startDate") LocalDate startDate,
+                        @Param("endDate") LocalDate endDate);
 
-    @Query("SELECT MAX(d.date) FROM OverseasStockDailyData d WHERE d.stock = :stock")
-    Optional<LocalDate> findLatestDateByStock(@Param("stock") Stock stock);
+        @Query("SELECT MAX(d.date) FROM OverseasStockDailyData d WHERE d.stock = :stock")
+        Optional<LocalDate> findLatestDateByStock(@Param("stock") Stock stock);
 
-    boolean existsByStockAndDate(Stock stock, LocalDate date);
+        boolean existsByStockAndDate(Stock stock, LocalDate date);
 
-    Optional<OverseasStockDailyData> findByStockAndDate(Stock stock, LocalDate date);
+        Optional<OverseasStockDailyData> findByStockAndDate(Stock stock, LocalDate date);
 
-    List<OverseasStockDailyData> findTop5ByStockOrderByDateDesc(Stock stock);
+        List<OverseasStockDailyData> findTop5ByStockOrderByDateDesc(Stock stock);
 
-    List<OverseasStockDailyData> findTop60ByStockOrderByDateDesc(Stock stock);
+        List<OverseasStockDailyData> findTop60ByStockOrderByDateDesc(Stock stock);
+
+        List<OverseasStockDailyData> findAllByStockInAndDateBetweenOrderByDateAsc(List<Stock> stocks,
+                        LocalDate startDate,
+                        LocalDate endDate);
+
+        Optional<OverseasStockDailyData> findFirstByStockOrderByDateDesc(Stock stock);
+
+        default Optional<java.math.BigDecimal> findLatestPriceByStock(Stock stock) {
+                return findFirstByStockOrderByDateDesc(stock).map(OverseasStockDailyData::getClosingPrice);
+        }
 }

@@ -2,6 +2,9 @@ package com.AISA.AISA.portfolio.backtest.service;
 
 import com.AISA.AISA.kisStock.Entity.stock.Stock;
 import com.AISA.AISA.kisStock.Entity.stock.StockDailyData;
+import com.AISA.AISA.kisOverseasStock.entity.OverseasStockDailyData;
+import com.AISA.AISA.kisOverseasStock.repository.KisOverseasStockDailyDataRepository;
+import com.AISA.AISA.kisStock.kisService.KisMacroService;
 import com.AISA.AISA.kisStock.repository.StockDailyDataRepository;
 import com.AISA.AISA.kisStock.repository.StockRepository;
 import com.AISA.AISA.portfolio.PortfolioGroup.Portfolio;
@@ -31,10 +34,13 @@ public class BacktestService {
     private final PortfolioRepository portfolioRepository;
     private final PortStockRepository portStockRepository;
     private final StockDailyDataRepository stockDailyDataRepository;
+    private final KisOverseasStockDailyDataRepository overseasStockDailyDataRepository;
     private final StockRepository stockRepository;
+    private final KisMacroService kisMacroService;
 
     @Transactional(readOnly = true)
-    public BacktestResultDto calculatePortfolioBacktest(UUID portId, String startDateStr, String endDateStr) {
+    public BacktestResultDto calculatePortfolioBacktest(UUID portId, String startDateStr, String endDateStr,
+            BigDecimal initialCapital) {
         Portfolio portfolio = portfolioRepository.findById(portId)
                 .orElseThrow(() -> new BusinessException(PortfolioErrorCode.PORTFOLIO_NOT_FOUND));
 
@@ -46,18 +52,66 @@ public class BacktestService {
         Map<Stock, BigDecimal> stockQuantityMap = portStocks.stream()
                 .collect(Collectors.toMap(PortStock::getStock, ps -> BigDecimal.valueOf(ps.getQuantity())));
 
-        // Note: For existing portfolio backtest, we don't scale by InitialCapital. We
-        // use actual quantities.
-        // If we want to support "Initial Capital" for existing portfolios, we would
-        // need to simulate buying.
-        // For now, we keep the original behavior: simulate the *existing* holdings.
+        if (initialCapital != null) {
+            // Capital-based simulation: calculate weights and allocate capital
+            Map<Stock, BigDecimal> strategyQuantities = new HashMap<>();
+            Map<String, BigDecimal> allocatedCapitalMap = new HashMap<>();
+
+            // 1. Get latest prices for weighting (using the same logic as simulation
+            // fallback)
+            Double latestExchangeRate = kisMacroService.getLatestExchangeRate();
+            BigDecimal exchangeRate = (latestExchangeRate != null) ? BigDecimal.valueOf(latestExchangeRate)
+                    : BigDecimal.valueOf(1350.0);
+
+            BigDecimal totalCurrentValueKrw = BigDecimal.ZERO;
+            Map<Stock, BigDecimal> positionsValueKrw = new HashMap<>();
+
+            for (PortStock ps : portStocks) {
+                Stock stock = ps.getStock();
+                BigDecimal latestPrice = BigDecimal.ZERO;
+
+                if (stock.getStockType() == Stock.StockType.US_STOCK
+                        || stock.getStockType() == Stock.StockType.US_ETF) {
+                    latestPrice = overseasStockDailyDataRepository.findLatestPriceByStock(stock)
+                            .orElse(BigDecimal.ZERO);
+                    totalCurrentValueKrw = totalCurrentValueKrw
+                            .add(latestPrice.multiply(BigDecimal.valueOf(ps.getQuantity())).multiply(exchangeRate));
+                    positionsValueKrw.put(stock,
+                            latestPrice.multiply(BigDecimal.valueOf(ps.getQuantity())).multiply(exchangeRate));
+                } else {
+                    latestPrice = stockDailyDataRepository.findLatestPriceByStock(stock)
+                            .orElse(BigDecimal.ZERO);
+                    totalCurrentValueKrw = totalCurrentValueKrw
+                            .add(latestPrice.multiply(BigDecimal.valueOf(ps.getQuantity())));
+                    positionsValueKrw.put(stock, latestPrice.multiply(BigDecimal.valueOf(ps.getQuantity())));
+                }
+            }
+
+            // 2. Allocate Capital based on weights
+            if (totalCurrentValueKrw.compareTo(BigDecimal.ZERO) > 0) {
+                for (PortStock ps : portStocks) {
+                    Stock stock = ps.getStock();
+                    BigDecimal weight = positionsValueKrw.get(stock).divide(totalCurrentValueKrw, 8,
+                            RoundingMode.HALF_UP);
+                    BigDecimal allocatedCapital = initialCapital.multiply(weight);
+
+                    strategyQuantities.put(stock, BigDecimal.ZERO); // Buying in simulation
+                    allocatedCapitalMap.put(stock.getStockCode(), allocatedCapital);
+                }
+            }
+
+            return runBacktestSimulation(strategyQuantities, startDateStr, endDateStr, portId, initialCapital,
+                    allocatedCapitalMap);
+        }
+
+        // Existing behavior: simulate the actual quantities
         return runBacktestSimulation(stockQuantityMap, startDateStr, endDateStr, portId, null, null);
     }
 
     @Transactional(readOnly = true)
     public BacktestCompareResultDto comparePortfolioBacktest(BacktestCompareRequestDto requestDto) {
         BacktestResultDto targetResult = calculatePortfolioBacktest(requestDto.getPortId(), requestDto.getStartDate(),
-                requestDto.getEndDate());
+                requestDto.getEndDate(), null);
 
         Map<Stock, BigDecimal> comparisonStockMap = new HashMap<>();
         for (ComparisonStockDto dto : requestDto.getComparisonStocks()) {
@@ -141,13 +195,42 @@ public class BacktestService {
             return buildEmptyResult(portId, startDateStr, endDateStr);
         }
 
-        List<StockDailyData> allDailyData = stockDailyDataRepository.findAllByStockInAndDateBetweenOrderByDateAsc(
-                stocks, startDate, endDate);
+        List<Stock> domesticStocks = stocks.stream()
+                .filter(s -> s.getStockType() == Stock.StockType.DOMESTIC ||
+                        s.getStockType() == Stock.StockType.DOMESTIC_ETF ||
+                        s.getStockType() == Stock.StockType.FOREIGN_ETF)
+                .collect(Collectors.toList());
 
-        Map<LocalDate, List<StockDailyData>> dataByDate = allDailyData.stream()
-                .collect(Collectors.groupingBy(StockDailyData::getDate));
+        List<Stock> overseasStocks = stocks.stream()
+                .filter(s -> s.getStockType() == Stock.StockType.US_STOCK ||
+                        s.getStockType() == Stock.StockType.US_ETF)
+                .collect(Collectors.toList());
 
-        List<LocalDate> sortedDates = new ArrayList<>(dataByDate.keySet());
+        List<StockDailyData> domesticData = domesticStocks.isEmpty() ? Collections.emptyList()
+                : stockDailyDataRepository.findAllByStockInAndDateBetweenOrderByDateAsc(domesticStocks, startDate,
+                        endDate);
+
+        List<OverseasStockDailyData> overseasData = overseasStocks.isEmpty() ? Collections.emptyList()
+                : overseasStockDailyDataRepository.findAllByStockInAndDateBetweenOrderByDateAsc(overseasStocks,
+                        startDate, endDate);
+
+        Map<String, Double> exchangeRateMap = kisMacroService.getExchangeRateMap(startDateStr, endDateStr);
+        Double latestRate = kisMacroService.getLatestExchangeRate();
+        BigDecimal fallbackRate = BigDecimal.valueOf(latestRate != null ? latestRate : 1350.0);
+
+        // Group data by date
+        Map<LocalDate, Map<String, BigDecimal>> pricesByDateMap = new HashMap<>();
+
+        for (StockDailyData d : domesticData) {
+            pricesByDateMap.computeIfAbsent(d.getDate(), k -> new HashMap<>())
+                    .put(d.getStock().getStockCode(), d.getClosingPrice());
+        }
+        for (OverseasStockDailyData d : overseasData) {
+            pricesByDateMap.computeIfAbsent(d.getDate(), k -> new HashMap<>())
+                    .put(d.getStock().getStockCode(), d.getClosingPrice());
+        }
+
+        List<LocalDate> sortedDates = new ArrayList<>(pricesByDateMap.keySet());
         Collections.sort(sortedDates);
 
         if (sortedDates.isEmpty()) {
@@ -156,109 +239,115 @@ public class BacktestService {
 
         List<DailyPortfolioValueDto> dailyValues = new ArrayList<>();
         Map<String, BigDecimal> currentPrices = new HashMap<>();
-        Map<String, BigDecimal> prevPrices = new HashMap<>();
+        Map<String, BigDecimal> prevPricesKrw = new HashMap<>(); // Track price in KRW
 
         BigDecimal maxTotalValue = BigDecimal.ZERO;
         double maxDrawdown = 0.0;
-
-        // If initialCapitalOverride is provided, we use it to calculate returns
-        // relative to the invested capital?
-        // Actually, "Total Value" is Sum(Price * Qty).
-        // If quantities were calculated from Initial Capital, then Total Value at Day 0
-        // should be approx Initial Capital.
-        // We track "Total Value" as the primary metric.
-        // "Adjusted Value" usually starts at 1000.0 or 100.0 for index comparison.
         BigDecimal currentAdjustedValue = new BigDecimal("1000.0");
 
         Map<String, BigDecimal> codeQuantityMap = stockQuantityMap.entrySet().stream()
                 .collect(Collectors.toMap(e -> e.getKey().getStockCode(), Map.Entry::getValue));
 
-        // Mutable map for remaining allocated capital
+        // Map for quick stock lookup
+        Map<String, Stock> stockLookup = stocks.stream()
+                .collect(Collectors.toMap(Stock::getStockCode, s -> s));
+
         Map<String, BigDecimal> remainingCapitalMap = new HashMap<>();
         if (allocatedCapitalMap != null) {
             remainingCapitalMap.putAll(allocatedCapitalMap);
         }
 
         for (LocalDate date : sortedDates) {
-            List<StockDailyData> dailyDataList = dataByDate.get(date);
+            Map<String, BigDecimal> dailyPrices = pricesByDateMap.get(date);
+            currentPrices.putAll(dailyPrices);
 
-            for (StockDailyData data : dailyDataList) {
-                currentPrices.put(data.getStock().getStockCode(), data.getClosingPrice());
-            }
+            // Get exchange rate for the day
+            String dateStr = date.format(DateTimeFormatter.ofPattern("yyyyMMdd"));
+            BigDecimal exchangeRate = exchangeRateMap.containsKey(dateStr)
+                    ? BigDecimal.valueOf(exchangeRateMap.get(dateStr))
+                    : fallbackRate;
 
-            BigDecimal currentTotalValue = BigDecimal.ZERO;
-            BigDecimal currentBalance = BigDecimal.ZERO;
+            BigDecimal currentTotalValueKrw = BigDecimal.ZERO;
+            BigDecimal currentBalanceKrw = BigDecimal.ZERO;
+            Map<String, BigDecimal> currentPricesKrw = new HashMap<>();
 
             for (String stockCode : codeQuantityMap.keySet()) {
-                BigDecimal price = currentPrices.get(stockCode);
+                Stock stock = stockLookup.get(stockCode);
+                BigDecimal rawPrice = currentPrices.get(stockCode);
+                boolean isUsAsset = stock.getStockType() == Stock.StockType.US_STOCK
+                        || stock.getStockType() == Stock.StockType.US_ETF;
+
+                BigDecimal priceKrw = rawPrice;
+                if (rawPrice != null && isUsAsset) {
+                    priceKrw = rawPrice.multiply(exchangeRate);
+                }
+                currentPricesKrw.put(stockCode, priceKrw);
 
                 // --- Lazy Buying Logic ---
-                // If we have 0 quantity but hold allocated capital, and price exists -> BUY
                 BigDecimal quantity = codeQuantityMap.get(stockCode);
                 if (quantity.compareTo(BigDecimal.ZERO) == 0
                         && remainingCapitalMap.containsKey(stockCode)
-                        && price != null && price.compareTo(BigDecimal.ZERO) > 0) {
+                        && priceKrw != null && priceKrw.compareTo(BigDecimal.ZERO) > 0) {
 
-                    BigDecimal capitalToInvest = remainingCapitalMap.get(stockCode);
-                    quantity = capitalToInvest.divide(price, 4, RoundingMode.HALF_UP);
+                    BigDecimal capitalToInvestKrw = remainingCapitalMap.get(stockCode);
+                    quantity = capitalToInvestKrw.divide(priceKrw, 4, RoundingMode.HALF_UP);
 
-                    codeQuantityMap.put(stockCode, quantity); // Update quantity
-                    remainingCapitalMap.remove(stockCode); // Capital used
+                    codeQuantityMap.put(stockCode, quantity);
+                    remainingCapitalMap.remove(stockCode);
                 }
 
                 // --- Valuation ---
-                if (price != null && price.compareTo(BigDecimal.ZERO) > 0) {
-                    currentTotalValue = currentTotalValue.add(price.multiply(codeQuantityMap.get(stockCode)));
+                if (priceKrw != null && priceKrw.compareTo(BigDecimal.ZERO) > 0) {
+                    currentTotalValueKrw = currentTotalValueKrw.add(priceKrw.multiply(codeQuantityMap.get(stockCode)));
                 }
 
-                // If still not bought (capital remains), add to balance
                 if (remainingCapitalMap.containsKey(stockCode)) {
-                    currentBalance = currentBalance.add(remainingCapitalMap.get(stockCode));
+                    currentBalanceKrw = currentBalanceKrw.add(remainingCapitalMap.get(stockCode));
                 }
             }
 
-            // Total Value = Stock Value + Cash Balance
-            currentTotalValue = currentTotalValue.add(currentBalance);
+            currentTotalValueKrw = currentTotalValueKrw.add(currentBalanceKrw);
 
             Double dailyReturnRate = 0.0;
-            if (!prevPrices.isEmpty()) {
-                BigDecimal sumPrev = BigDecimal.ZERO;
-                BigDecimal sumCurr = BigDecimal.ZERO;
+            if (!prevPricesKrw.isEmpty()) {
+                BigDecimal sumPrevKrw = BigDecimal.ZERO;
+                BigDecimal sumCurrKrw = BigDecimal.ZERO;
 
                 for (String stockCode : codeQuantityMap.keySet()) {
-                    if (prevPrices.containsKey(stockCode) && currentPrices.containsKey(stockCode)) {
+                    BigDecimal pPrev = prevPricesKrw.get(stockCode);
+                    BigDecimal pCurr = currentPricesKrw.get(stockCode);
+                    if (pPrev != null && pCurr != null) {
                         BigDecimal qty = codeQuantityMap.get(stockCode);
-                        sumPrev = sumPrev.add(prevPrices.get(stockCode).multiply(qty));
-                        sumCurr = sumCurr.add(currentPrices.get(stockCode).multiply(qty));
+                        sumPrevKrw = sumPrevKrw.add(pPrev.multiply(qty));
+                        sumCurrKrw = sumCurrKrw.add(pCurr.multiply(qty));
                     }
                 }
 
-                if (sumPrev.compareTo(BigDecimal.ZERO) > 0) {
-                    dailyReturnRate = sumCurr.subtract(sumPrev)
-                            .divide(sumPrev, 8, RoundingMode.HALF_UP)
+                if (sumPrevKrw.compareTo(BigDecimal.ZERO) > 0) {
+                    dailyReturnRate = sumCurrKrw.subtract(sumPrevKrw)
+                            .divide(sumPrevKrw, 8, RoundingMode.HALF_UP)
                             .doubleValue();
                 }
             }
 
+            prevPricesKrw.putAll(currentPricesKrw);
             currentAdjustedValue = currentAdjustedValue.multiply(BigDecimal.valueOf(1.0 + dailyReturnRate));
-            Double dailyReturnPercent = dailyReturnRate * 100.0;
 
-            dailyValues.add(new DailyPortfolioValueDto(
-                    date.format(formatter),
-                    currentTotalValue,
-                    dailyReturnPercent,
-                    currentAdjustedValue,
-                    currentBalance));
+            dailyValues.add(DailyPortfolioValueDto.builder()
+                    .date(date.format(formatter))
+                    .totalValue(currentTotalValueKrw.setScale(0, RoundingMode.HALF_UP))
+                    .dailyReturnRate(Math.round(dailyReturnRate * 100.0 * 1000.0) / 1000.0)
+                    .adjustedValue(currentAdjustedValue.setScale(3, RoundingMode.HALF_UP))
+                    .balance(currentBalanceKrw.setScale(3, RoundingMode.HALF_UP))
+                    .build());
 
-            prevPrices = new HashMap<>(currentPrices);
-
-            if (currentTotalValue.compareTo(maxTotalValue) > 0) {
-                maxTotalValue = currentTotalValue;
+            if (currentTotalValueKrw.compareTo(maxTotalValue) > 0) {
+                maxTotalValue = currentTotalValueKrw;
             }
 
             if (maxTotalValue.compareTo(BigDecimal.ZERO) > 0) {
-                double drawdown = maxTotalValue.subtract(currentTotalValue)
-                        .divide(maxTotalValue, 4, RoundingMode.HALF_UP)
+                double drawdown = maxTotalValue.subtract(currentTotalValueKrw)
+                        .divide(maxTotalValue, 8, RoundingMode.HALF_UP)
                         .multiply(new BigDecimal(100))
                         .doubleValue();
                 if (drawdown > maxDrawdown) {
@@ -270,23 +359,16 @@ public class BacktestService {
         if (dailyValues.isEmpty())
             return buildEmptyResult(portId, startDateStr, endDateStr);
 
-        BigDecimal initialValue = dailyValues.get(0).getTotalValue(); // First day's market value
-        BigDecimal finalValue = dailyValues.get(dailyValues.size() - 1).getTotalValue();
-
-        // If we want to use the explicit InitialCapital as the "Start Value" for Return
-        // calculation:
-        // usually return is (Final - Initial) / Initial.
-        // If Initial Market Value differs from Initial Capital (due to cash drag or
-        // price changes on day 0?),
-        // usually we care about the positions value.
-        // Let's stick to the "Sum of positions" as initial value.
+        BigDecimal initialValue = dailyValues.get(0).getTotalValue().setScale(0, RoundingMode.HALF_UP);
+        BigDecimal finalValue = dailyValues.get(dailyValues.size() - 1).getTotalValue().setScale(0,
+                RoundingMode.HALF_UP);
 
         Double totalReturnRate = 0.0;
         Double cagr = 0.0;
 
         if (initialValue.compareTo(BigDecimal.ZERO) > 0) {
             totalReturnRate = finalValue.subtract(initialValue)
-                    .divide(initialValue, 4, RoundingMode.HALF_UP)
+                    .divide(initialValue, 8, RoundingMode.HALF_UP)
                     .multiply(new BigDecimal(100))
                     .doubleValue();
 
@@ -304,9 +386,9 @@ public class BacktestService {
                 .endDate(endDateStr)
                 .initialValue(initialValue)
                 .finalValue(finalValue)
-                .totalReturnRate(totalReturnRate)
-                .cagr(Math.round(cagr * 100.0) / 100.0)
-                .mdd(Math.round(maxDrawdown * 100.0) / 100.0)
+                .totalReturnRate(Math.round(totalReturnRate * 1000.0) / 1000.0)
+                .cagr(Math.round(cagr * 1000.0) / 1000.0)
+                .mdd(Math.round(maxDrawdown * 1000.0) / 1000.0)
                 .dailyValues(dailyValues)
                 .build();
     }

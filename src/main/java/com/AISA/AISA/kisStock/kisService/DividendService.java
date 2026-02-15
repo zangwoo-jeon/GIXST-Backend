@@ -1,6 +1,8 @@
 package com.AISA.AISA.kisStock.kisService;
 
 import com.AISA.AISA.global.exception.BusinessException;
+import com.AISA.AISA.kisOverseasStock.entity.OverseasStockDailyData;
+import com.AISA.AISA.kisOverseasStock.repository.KisOverseasStockDailyDataRepository;
 import com.AISA.AISA.kisStock.Entity.stock.Stock;
 import com.AISA.AISA.kisStock.Entity.stock.StockDividend;
 import com.AISA.AISA.kisStock.Entity.stock.StockFinancialRatio;
@@ -14,6 +16,7 @@ import com.AISA.AISA.kisStock.exception.KisApiErrorCode;
 import com.AISA.AISA.kisStock.kisService.Auth.KisAuthService;
 import com.AISA.AISA.kisStock.kisService.KisInformationService;
 import com.AISA.AISA.kisStock.repository.StockDividendRepository;
+import com.AISA.AISA.kisStock.repository.StockDailyDataRepository;
 import com.AISA.AISA.kisStock.repository.StockRepository;
 import com.AISA.AISA.portfolio.PortfolioStock.PortStock;
 import com.AISA.AISA.portfolio.PortfolioStock.PortStockRepository;
@@ -32,6 +35,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.stream.Collectors;
 import com.AISA.AISA.kisStock.Entity.stock.StockDividendRank;
@@ -62,6 +66,9 @@ public class DividendService {
         private final KisInformationService kisInformationService;
         private final StockDividendRepository stockDividendRepository;
         private final PortStockRepository portStockRepository;
+        private final KisMacroService kisMacroService;
+        private final StockDailyDataRepository stockDailyDataRepository;
+        private final KisOverseasStockDailyDataRepository overseasDailyDataRepository;
 
         @Cacheable(value = "stockDividend", key = "#stockCode + '-' + #startDate + '-' + #endDate", sync = true)
         public List<StockDividendInfoDto> getDividendInfo(
@@ -76,17 +83,64 @@ public class DividendService {
                                                 endDate);
 
                 if (!savedDividends.isEmpty()) {
+                        // 환율 정보 준비 (US 자산용 - getDividendInfo는 국내주식 전용일 수 있으나 DTO 호환성 유지)
+                        Double latestRate = kisMacroService.getLatestExchangeRate();
+                        BigDecimal fallbackRate = BigDecimal.valueOf(latestRate != null ? latestRate : 1350.0);
+
+                        Set<String> paymentDates = savedDividends.stream()
+                                        .map(StockDividend::getPaymentDate)
+                                        .filter(d -> d != null && d.length() == 10)
+                                        .map(d -> d.replace("/", ""))
+                                        .collect(Collectors.toSet());
+
+                        Map<String, Double> finalExchangeRateMap;
+                        if (!paymentDates.isEmpty()) {
+                                String minDate = paymentDates.stream().min(String::compareTo).get();
+                                String maxDate = paymentDates.stream().max(String::compareTo).get();
+                                finalExchangeRateMap = kisMacroService.getExchangeRateMap(minDate, maxDate);
+                        } else {
+                                finalExchangeRateMap = Collections.emptyMap();
+                        }
+
                         return savedDividends.stream()
                                         .filter(entity -> entity.getDividendAmount().compareTo(BigDecimal.ZERO) > 0)
-                                        .map(entity -> StockDividendInfoDto.builder()
-                                                        .id(entity.getId())
-                                                        .stockCode(entity.getStock().getStockCode())
-                                                        .stockName(entity.getStock().getStockName())
-                                                        .recordDate(entity.getRecordDate())
-                                                        .paymentDate(entity.getPaymentDate())
-                                                        .dividendAmount(entity.getDividendAmount())
-                                                        .dividendRate(entity.getDividendRate())
-                                                        .build())
+                                        .map(entity -> {
+                                                Stock stock = entity.getStock();
+                                                boolean isUsAsset = stock.getStockType() == Stock.StockType.US_STOCK
+                                                                || stock.getStockType() == Stock.StockType.US_ETF;
+
+                                                BigDecimal rate = BigDecimal.ONE;
+                                                if (isUsAsset) {
+                                                        String dateStr = entity.getPaymentDate().replace("/", "");
+                                                        rate = finalExchangeRateMap.containsKey(dateStr)
+                                                                        ? BigDecimal.valueOf(finalExchangeRateMap
+                                                                                        .get(dateStr))
+                                                                        : fallbackRate;
+                                                }
+
+                                                double rateToUse = entity.getDividendRate();
+                                                if (rateToUse == 0 && entity.getPaymentDate() != null) {
+                                                        rateToUse = calculateDividendRate(stock,
+                                                                        entity.getDividendAmount(),
+                                                                        entity.getPaymentDate());
+                                                }
+
+                                                BigDecimal dividendAmountKrw = entity.getDividendAmount()
+                                                                .multiply(rate);
+
+                                                return StockDividendInfoDto.builder()
+                                                                .id(entity.getId())
+                                                                .stockCode(stock.getStockCode())
+                                                                .stockName(stock.getStockName())
+                                                                .recordDate(entity.getRecordDate())
+                                                                .paymentDate(entity.getPaymentDate())
+                                                                .dividendAmount(entity.getDividendAmount())
+                                                                .dividendRate(rateToUse)
+                                                                .stockType(stock.getStockType())
+                                                                .exchangeRate(rate)
+                                                                .dividendAmountKrw(dividendAmountKrw)
+                                                                .build();
+                                        })
                                         .collect(Collectors.toList());
                 }
 
@@ -185,13 +239,17 @@ public class DividendService {
                                         } catch (NumberFormatException e) {
                                                 // Ignore invalid rate
                                         }
+                                        BigDecimal amount = new BigDecimal(apiDto.getDividendAmount());
                                         return StockDividendInfoDto.builder()
                                                         .stockCode(apiDto.getStockCode())
                                                         .stockName(apiDto.getStockName())
                                                         .recordDate(apiDto.getRecordDate())
                                                         .paymentDate(apiDto.getPaymentDate())
-                                                        .dividendAmount(new BigDecimal(apiDto.getDividendAmount()))
+                                                        .dividendAmount(amount)
                                                         .dividendRate(rate)
+                                                        .stockType(stock.getStockType())
+                                                        .exchangeRate(BigDecimal.ONE)
+                                                        .dividendAmountKrw(amount)
                                                         .build();
                                 })
                                 .collect(Collectors.toList());
@@ -549,17 +607,61 @@ public class DividendService {
                 List<StockDividend> dividends = stockDividendRepository
                                 .findByRecordDateBetweenOrderByRecordDateAsc(startDate, endDate);
 
-                // 3. DTO 변환
+                // 3. 환율 정보 준비 (US 자산 포함 가능)
+                Double latestRate = kisMacroService.getLatestExchangeRate();
+                BigDecimal fallbackRate = BigDecimal.valueOf(latestRate != null ? latestRate : 1350.0);
+
+                Set<String> paymentDates = dividends.stream()
+                                .map(StockDividend::getPaymentDate)
+                                .filter(d -> d != null && d.length() == 10)
+                                .map(d -> d.replace("/", ""))
+                                .collect(Collectors.toSet());
+
+                Map<String, Double> finalExchangeRateMap;
+                if (!paymentDates.isEmpty()) {
+                        String minDate = paymentDates.stream().min(String::compareTo).get();
+                        String maxDate = paymentDates.stream().max(String::compareTo).get();
+                        finalExchangeRateMap = kisMacroService.getExchangeRateMap(minDate, maxDate);
+                } else {
+                        finalExchangeRateMap = Collections.emptyMap();
+                }
+
+                // 4. DTO 변환
                 return dividends.stream()
-                                .map(entity -> StockDividendInfoDto.builder()
-                                                .id(entity.getId())
-                                                .stockCode(entity.getStock().getStockCode())
-                                                .stockName(entity.getStock().getStockName())
-                                                .recordDate(entity.getRecordDate())
-                                                .paymentDate(entity.getPaymentDate())
-                                                .dividendAmount(entity.getDividendAmount())
-                                                .dividendRate(entity.getDividendRate())
-                                                .build())
+                                .map(entity -> {
+                                        Stock stock = entity.getStock();
+                                        boolean isUsAsset = stock.getStockType() == Stock.StockType.US_STOCK
+                                                        || stock.getStockType() == Stock.StockType.US_ETF;
+
+                                        BigDecimal rate = BigDecimal.ONE;
+                                        if (isUsAsset) {
+                                                String dateStr = entity.getPaymentDate().replace("/", "");
+                                                rate = finalExchangeRateMap.containsKey(dateStr)
+                                                                ? BigDecimal.valueOf(finalExchangeRateMap.get(dateStr))
+                                                                : fallbackRate;
+                                        }
+
+                                        double rateToUse = entity.getDividendRate();
+                                        if (rateToUse == 0 && entity.getPaymentDate() != null) {
+                                                rateToUse = calculateDividendRate(stock, entity.getDividendAmount(),
+                                                                entity.getPaymentDate());
+                                        }
+
+                                        BigDecimal dividendAmountKrw = entity.getDividendAmount().multiply(rate);
+
+                                        return StockDividendInfoDto.builder()
+                                                        .id(entity.getId())
+                                                        .stockCode(stock.getStockCode())
+                                                        .stockName(stock.getStockName())
+                                                        .recordDate(entity.getRecordDate())
+                                                        .paymentDate(entity.getPaymentDate())
+                                                        .dividendAmount(entity.getDividendAmount())
+                                                        .dividendRate(rateToUse)
+                                                        .stockType(stock.getStockType())
+                                                        .exchangeRate(rate)
+                                                        .dividendAmountKrw(dividendAmountKrw)
+                                                        .build();
+                                })
                                 .distinct()
                                 .collect(Collectors.toList());
         }
@@ -602,31 +704,72 @@ public class DividendService {
                                 .findDividendsByStockCodesAndDateRange(stockCodes, recordStart, recordEnd, paymentStart,
                                                 paymentEnd);
 
-                // 4. DTO 변환 & distinct
-                // 4. DTO 변환 & distinct
+                // 4. 환율 정보 준비 (US 자산용)
+                Double latestRate = kisMacroService.getLatestExchangeRate();
+                BigDecimal fallbackRate = BigDecimal.valueOf(latestRate != null ? latestRate : 1350.0);
+
+                // 지급일들 수집 (yyyy/MM/dd -> yyyyMMdd 변환 필요)
+                Set<String> paymentDates = dividends.stream()
+                                .map(StockDividend::getPaymentDate)
+                                .filter(d -> d != null && d.length() == 10)
+                                .map(d -> d.replace("/", ""))
+                                .collect(Collectors.toSet());
+
+                Map<String, Double> finalExchangeRateMap;
+                if (!paymentDates.isEmpty()) {
+                        String minDate = paymentDates.stream().min(String::compareTo).get();
+                        String maxDate = paymentDates.stream().max(String::compareTo).get();
+                        finalExchangeRateMap = kisMacroService.getExchangeRateMap(minDate, maxDate);
+                } else {
+                        finalExchangeRateMap = Collections.emptyMap();
+                }
+
+                // 5. DTO 변환 & distinct
                 List<StockDividendInfoDto> dividendList = dividends.stream()
                                 .map(entity -> {
-                                        Integer quantity = stockQuantityMap
-                                                        .getOrDefault(entity.getStock().getStockCode(), 0);
-                                        BigDecimal totalAmount = entity.getDividendAmount()
+                                        Stock stock = entity.getStock();
+                                        Integer quantity = stockQuantityMap.getOrDefault(stock.getStockCode(), 0);
+
+                                        boolean isUsAsset = stock.getStockType() == Stock.StockType.US_STOCK
+                                                        || stock.getStockType() == Stock.StockType.US_ETF;
+
+                                        BigDecimal rate = BigDecimal.ONE;
+                                        if (isUsAsset) {
+                                                String dateStr = entity.getPaymentDate().replace("/", "");
+                                                rate = finalExchangeRateMap.containsKey(dateStr)
+                                                                ? BigDecimal.valueOf(finalExchangeRateMap.get(dateStr))
+                                                                : fallbackRate;
+                                        }
+
+                                        BigDecimal dividendAmountKrw = entity.getDividendAmount().multiply(rate);
+                                        BigDecimal totalAmountKrw = dividendAmountKrw
                                                         .multiply(new BigDecimal(quantity));
+
+                                        double rateToUse = entity.getDividendRate();
+                                        if (rateToUse == 0 && entity.getPaymentDate() != null) {
+                                                rateToUse = calculateDividendRate(stock, entity.getDividendAmount(),
+                                                                entity.getPaymentDate());
+                                        }
 
                                         return StockDividendInfoDto.builder()
                                                         .id(entity.getId())
-                                                        .stockCode(entity.getStock().getStockCode())
-                                                        .stockName(entity.getStock().getStockName())
+                                                        .stockCode(stock.getStockCode())
+                                                        .stockName(stock.getStockName())
                                                         .recordDate(entity.getRecordDate())
                                                         .paymentDate(entity.getPaymentDate())
                                                         .dividendAmount(entity.getDividendAmount())
-                                                        .dividendRate(entity.getDividendRate())
-                                                        .totalExpectedDividend(totalAmount)
+                                                        .dividendRate(rateToUse)
+                                                        .totalExpectedDividend(totalAmountKrw) // 원화로 통일
                                                         .quantity(quantity)
+                                                        .stockType(stock.getStockType())
+                                                        .exchangeRate(rate)
+                                                        .dividendAmountKrw(dividendAmountKrw)
                                                         .build();
                                 })
                                 .distinct()
                                 .collect(Collectors.toList());
 
-                // 5. 월간 총 배당금 합산 (배당 지급일 기준)
+                // 6. 월간 총 배당금 합산 (배당 지급일 기준)
                 BigDecimal totalMonthlyDividend = dividendList.stream()
                                 .filter(dto -> dto.getPaymentDate() != null &&
                                                 dto.getPaymentDate().compareTo(paymentStart) >= 0 &&
@@ -638,5 +781,45 @@ public class DividendService {
                                 .dividends(dividendList)
                                 .totalMonthlyDividend(totalMonthlyDividend)
                                 .build();
+        }
+
+        private double calculateDividendRate(Stock stock, BigDecimal dividendAmount, String paymentDate) {
+                try {
+                        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy/MM/dd");
+                        LocalDate date = LocalDate.parse(paymentDate, formatter);
+
+                        BigDecimal price = BigDecimal.ZERO;
+                        boolean isUs = stock.getStockType() == Stock.StockType.US_STOCK
+                                        || stock.getStockType() == Stock.StockType.US_ETF;
+
+                        if (isUs) {
+                                price = overseasDailyDataRepository.findByStockAndDate(stock, date)
+                                                .map(OverseasStockDailyData::getClosingPrice)
+                                                .orElse(BigDecimal.ZERO);
+                                if (price.compareTo(BigDecimal.ZERO) <= 0) {
+                                        price = overseasDailyDataRepository.findFirstByStockOrderByDateDesc(stock)
+                                                        .map(OverseasStockDailyData::getClosingPrice)
+                                                        .orElse(BigDecimal.ZERO);
+                                }
+                        } else {
+                                price = stockDailyDataRepository.findByStockAndDate(stock, date)
+                                                .map(entity -> entity.getClosingPrice())
+                                                .orElse(BigDecimal.ZERO);
+                                if (price.compareTo(BigDecimal.ZERO) <= 0) {
+                                        price = stockDailyDataRepository.findFirstByStockOrderByDateDesc(stock)
+                                                        .map(entity -> entity.getClosingPrice())
+                                                        .orElse(BigDecimal.ZERO);
+                                }
+                        }
+
+                        if (price.compareTo(BigDecimal.ZERO) > 0) {
+                                return dividendAmount.divide(price, 4, RoundingMode.HALF_UP)
+                                                .multiply(new BigDecimal(100))
+                                                .doubleValue();
+                        }
+                } catch (Exception e) {
+                        log.warn("Failed to calculate dividend rate for {}: {}", stock.getStockCode(), e.getMessage());
+                }
+                return 0.0;
         }
 }

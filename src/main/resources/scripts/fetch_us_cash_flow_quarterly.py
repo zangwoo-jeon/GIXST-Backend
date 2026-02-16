@@ -47,7 +47,6 @@ def parse_number(text: str):
     숫자 파싱:
     - 콤마 제거
     - '-' 또는 공백은 None 처리
-    - 괄호 (123) -> 음수 -123 처리는 한경 사이트 특성에 맞게 확인 필요 (보통 -로 표시됨)
     """
     if not text:
         return 0.0
@@ -61,16 +60,30 @@ def parse_number(text: str):
     except ValueError:
         return 0.0
 
-def extract_cash_flow_data(container, div_code):
+def fetch_dividend_and_capital_change_quarterly(stock_code):
     """
-    Extract cash flow data from a specific container (Annual or Quarterly)
+    한경 글로벌마켓에서 해당 종목의 분기 현금흐름표를 크롤링
     """
-    if not container:
+    formatted_code = stock_code.lower().replace('.', '')
+    url = f"https://www.hankyung.com/globalmarket/equities/americas/{formatted_code}"
+    
+    try:
+        res = requests.get(url, headers=HEADERS, timeout=10)
+        res.raise_for_status()
+    except Exception as e:
+        print(f"⚠️ Failed to fetch {stock_code}: {e}")
         return []
 
-    # 1️⃣ 현금흐름표 item 찾기
+    soup = BeautifulSoup(res.text, "html.parser")
+
+    # 1️⃣ 분기 재무 영역 (finance-statements-quarter)
+    quarter_section = soup.select_one("div.finance-statements-quarter")
+    if not quarter_section:
+        return []
+
+    # 2️⃣ 현금흐름표 item 찾기
     cashflow_item = None
-    for item in container.select("div.item"):
+    for item in quarter_section.select("div.item"):
         title = item.select_one("strong.module-stit")
         if title and "현금흐름표" in title.text.strip():
             cashflow_item = item
@@ -79,7 +92,7 @@ def extract_cash_flow_data(container, div_code):
     if not cashflow_item:
         return []
 
-    # 2️⃣ 헤더 (연도/분기)
+    # 3️⃣ 분기 헤더
     raw_periods_cols = cashflow_item.select("table.table-striped-col thead th strong")
     raw_periods = [th.text.strip() for th in raw_periods_cols]
 
@@ -87,23 +100,22 @@ def extract_cash_flow_data(container, div_code):
     periods = []
     
     for i, p in enumerate(raw_periods):
-        if "기간" in p or "TTM" in p or "지난" in p or not p:
+        if "기간" in p or not p:
             continue
             
-        # 날짜 파싱
+        # 날짜 파싱 (2024-09-30, 2024/09 등)
         clean_date = p.replace('/', '').replace('-', '').strip()
         
+        # YYYYMM 형태로 변환
         formatted_yymm = ""
         if len(clean_date) >= 6:
             formatted_yymm = clean_date[:6]
-        elif len(clean_date) == 4:
-            formatted_yymm = f"{clean_date}12" 
-            
+        
         if formatted_yymm:
             valid_indexes.append(i)
             periods.append(formatted_yymm)
 
-    # 3️⃣ 배당금 지급 (Cash Dividends Paid)
+    # 4️⃣ 배당금 지급 (Cash Dividends Paid)
     div_row = cashflow_item.select_one("tr.div_cf")
     div_values = []
     
@@ -117,7 +129,7 @@ def extract_cash_flow_data(container, div_code):
     else:
         div_values = [0.0] * len(valid_indexes)
 
-    # 4️⃣ 자본금 변동 (Repurchase of Capital Stock)
+    # 5️⃣ 자본금 변동 (Repurchase)
     cap_row = cashflow_item.select_one("tr.stk_chg_cf")
     cap_values = []
     
@@ -131,75 +143,43 @@ def extract_cash_flow_data(container, div_code):
     else:
         cap_values = [0.0] * len(valid_indexes)
 
-    # 5️⃣ 결과 정리
+    # 6️⃣ 결과 정리
     result = []
     for i, yymm in enumerate(periods):
         repurchase_val = 0.0
         cap_change = cap_values[i]
         
         if cap_change < 0:
-            repurchase_val = abs(cap_change) 
+            repurchase_val = abs(cap_change)
         
         dividend_paid_val = abs(div_values[i])
 
         result.append({
             "stac_yymm": yymm,
-            "div_code": div_code,
+            "div_code": "1", # Quarterly
             "repurchase_of_capital_stock": repurchase_val,
             "cash_dividends_paid": dividend_paid_val
         })
-        
+
     return result
-
-def fetch_dividend_and_capital_change(stock_code):
-    """
-    한경 글로벌마켓에서 해당 종목의 현금흐름표를 크롤링 (Annual & Quarterly)
-    """
-    formatted_code = stock_code.lower().replace('.', '')
-    url = f"https://www.hankyung.com/globalmarket/equities/americas/{formatted_code}"
-    
-    try:
-        res = requests.get(url, headers=HEADERS, timeout=10)
-        res.raise_for_status() 
-    except Exception as e:
-        print(f"⚠️ Failed to fetch {stock_code}: {e}")
-        return []
-
-    soup = BeautifulSoup(res.text, "html.parser")
-
-    all_data = []
-
-    # 1. Annual Data
-    year_section = soup.select_one("div.finance-statements-year")
-    if year_section:
-        annual_data = extract_cash_flow_data(year_section, "0")
-        all_data.extend(annual_data)
-
-    # 2. Quarterly Data
-    quarter_section = soup.select_one("div.finance-statements-quarter")
-    if quarter_section:
-        quarter_data = extract_cash_flow_data(quarter_section, "1")
-        all_data.extend(quarter_data)
-
-    return all_data
 
 def save_cash_flows(stock_codes):
     """
-    Hankyung -> DB Upsert
+    Hankyung -> DB Upsert (Quarterly)
     """
     try:
         connection = pymysql.connect(**DB_CONFIG)
         
-        for ticker in tqdm(stock_codes, desc="Fetching Cash Flows"):
-            # Hankyung requests
-            data_list = fetch_dividend_and_capital_change(ticker)
+        for ticker in tqdm(stock_codes, desc="Fetching Quarterly Cash Flows"):
+            data_list = fetch_dividend_and_capital_change_quarterly(ticker)
             
             if not data_list:
-                time.sleep(0.1) 
+                time.sleep(0.1)
                 continue
                 
             with connection.cursor() as cursor:
                 for row in data_list:
+                    # div_code='1' (분기)
                     sql = """
                     INSERT INTO overseas_stock_cash_flow 
                     (stock_code, stac_yymm, div_code, repurchase_of_capital_stock, cash_dividends_paid, shareholder_return_rate)
@@ -218,7 +198,7 @@ def save_cash_flows(stock_codes):
                     ))
             
             connection.commit()
-            time.sleep(0.5) 
+            time.sleep(0.5)
                 
     except Exception as e:
         print(f"❌ DB connection error: {e}")
@@ -227,7 +207,7 @@ def save_cash_flows(stock_codes):
             connection.close()
 
 if __name__ == "__main__":
-    print("🚀 Starting Shareholder Return (Cash Flow) update for US Stocks (Annual & Quarterly)...")
+    print("🚀 Starting Quarterly Shareholder Return (Cash Flow) update for US Stocks...")
     stocks = get_target_stocks()
     
     if not stocks:
@@ -235,4 +215,4 @@ if __name__ == "__main__":
     else:
         print(f"✅ Found {len(stocks)} active US stocks.")
         save_cash_flows(stocks)
-        print("\n✨ Cash Flow update complete!")
+        print("\n✨ Quarterly Cash Flow update complete!")

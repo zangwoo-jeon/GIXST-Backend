@@ -2,9 +2,13 @@ package com.AISA.AISA.kisOverseasStock.service;
 
 import com.AISA.AISA.global.exception.BusinessException;
 import com.AISA.AISA.kisOverseasStock.dto.GeminiDividendDto;
+import com.AISA.AISA.kisOverseasStock.entity.OverseasStockCashFlow;
 import com.AISA.AISA.kisOverseasStock.entity.OverseasStockDailyData;
+import com.AISA.AISA.kisOverseasStock.entity.OverseasStockFinancialStatement;
 import com.AISA.AISA.kisOverseasStock.exception.GeminiQuotaExhaustedException;
+import com.AISA.AISA.kisOverseasStock.repository.KisOverseasStockCashFlowRepository;
 import com.AISA.AISA.kisOverseasStock.repository.KisOverseasStockDailyDataRepository;
+import com.AISA.AISA.kisOverseasStock.repository.KisOverseasStockFinancialStatementRepository;
 import com.AISA.AISA.kisOverseasStock.repository.KisOverseasStockRepository;
 import com.AISA.AISA.kisStock.Entity.stock.Stock;
 import com.AISA.AISA.kisStock.Entity.stock.StockDividend;
@@ -17,6 +21,8 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -40,11 +46,13 @@ public class OverseasDividendService {
     private final StockDividendRepository stockDividendRepository;
     private final KisOverseasStockRepository overseasStockRepository;
     private final KisOverseasStockDailyDataRepository dailyDataRepository;
+    private final KisOverseasStockCashFlowRepository cashFlowRepository;
+    private final KisOverseasStockFinancialStatementRepository financialStatementRepository;
     private final KisMacroService kisMacroService;
     private final ObjectMapper objectMapper;
 
-    @org.springframework.beans.factory.annotation.Autowired
-    @org.springframework.context.annotation.Lazy
+    @Autowired
+    @Lazy
     private OverseasDividendService self;
 
     private static final DateTimeFormatter RECORD_DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyyMMdd");
@@ -423,5 +431,47 @@ public class OverseasDividendService {
         sb.append(
                 "ONLY return the JSON object, NO other text. Mandatory: Use ONLY YYYYMMDD style for recordDate (NO dashes, NO slashes). And use YYYY/MM/DD style for paymentDate (WITH slashes). Ensure you include the latest 2024/2025 records if they have been announced.");
         return sb.toString();
+    }
+
+    @Transactional
+    public void calculateAndSaveShareholderReturnRates() {
+        log.info("Starting calculation of Shareholder Return Rates (Net Income Based)...");
+
+        List<OverseasStockCashFlow> cashFlows = cashFlowRepository.findAll();
+        List<OverseasStockFinancialStatement> financialStatements = financialStatementRepository
+                .findAll();
+
+        // Map financial statements by stockCode + stacYymm + divCode for fast lookup
+        Map<String, BigDecimal> netIncomeMap = financialStatements.stream()
+                .collect(Collectors.toMap(
+                        fs -> fs.getStockCode() + "_" + fs.getStacYymm() + "_" + fs.getDivCode(),
+                        OverseasStockFinancialStatement::getNetIncome,
+                        (v1, v2) -> v1 // Duplicate key handler (take first)
+                ));
+
+        int updatedCount = 0;
+        for (OverseasStockCashFlow cf : cashFlows) {
+            String key = cf.getStockCode() + "_" + cf.getStacYymm() + "_" + cf.getDivCode();
+            BigDecimal netIncome = netIncomeMap.get(key);
+
+            if (netIncome != null && netIncome.compareTo(BigDecimal.ZERO) != 0) {
+                BigDecimal numerator = cf.getRepurchaseOfCapitalStock().add(cf.getCashDividendsPaid());
+                try {
+                    BigDecimal rate = numerator.divide(netIncome, 4, RoundingMode.HALF_UP)
+                            .multiply(new BigDecimal("100"));
+
+                    cf.updateShareholderReturnRateNetIncome(rate);
+                    updatedCount++;
+                } catch (ArithmeticException e) {
+                    // Division by zero or other math error, skip
+                }
+            }
+        }
+
+        // Batch save (JPA dirty checking might handle it, but explicit saveAll is good
+        // for clarity/performance in some configs, though dirty checking is standard)
+        // Since we are in @Transactional, dirty checking will save changes.
+        // Logic check: yes, @Transactional is on the method.
+        log.info("Completed calculation. Updated {} records.", updatedCount);
     }
 }

@@ -8,6 +8,7 @@ import com.AISA.AISA.kisOverseasStock.dto.KisOverseasStockSearchInfoApiResponse;
 import com.AISA.AISA.kisOverseasStock.dto.OverseasStockBalanceSheetDto;
 import com.AISA.AISA.kisOverseasStock.dto.OverseasStockCashFlowDto;
 import com.AISA.AISA.kisOverseasStock.dto.OverseasStockFinancialStatementDto;
+import com.AISA.AISA.kisOverseasStock.entity.OverseasStockCashFlow;
 import com.AISA.AISA.kisOverseasStock.dto.OverseasStockPriceDetailDto;
 import com.AISA.AISA.kisOverseasStock.entity.OverseasStockBalanceSheet;
 import com.AISA.AISA.kisOverseasStock.entity.OverseasStockFinancialRatio;
@@ -530,12 +531,27 @@ public class KisOverseasStockInformationService {
         /**
          * 특정 종목의 주주환원율 정보(자사주 매입, 배당금 지급)를 조회합니다.
          */
-        public List<OverseasStockCashFlowDto> getShareholderReturnInfo(
-                        String stockCode) {
-                return cashFlowRepository.findByStockCodeAndDivCodeOrderByStacYymmDesc(stockCode, "0") // 연간 데이터 기준
-                                .stream()
-                                .map(OverseasStockCashFlowDto::fromEntity)
-                                .collect(Collectors.toList());
+        public List<OverseasStockCashFlowDto> getShareholderReturnInfo(String stockCode, String divCode) {
+
+                // 1. Fetch Data based on divCode
+                List<OverseasStockCashFlow> flows = cashFlowRepository
+                                .findByStockCodeAndDivCodeOrderByStacYymmDesc(stockCode, divCode); // Descending order
+
+                List<OverseasStockCashFlowDto> result = new ArrayList<>();
+
+                for (OverseasStockCashFlow flow : flows) {
+                        result.add(OverseasStockCashFlowDto.builder()
+                                        .stockCode(flow.getStockCode())
+                                        .stacYymm(flow.getStacYymm())
+                                        .divCode(flow.getDivCode())
+                                        .repurchaseOfCapitalStock(flow.getRepurchaseOfCapitalStock())
+                                        .cashDividendsPaid(flow.getCashDividendsPaid())
+                                        .shareholderReturnRate(flow.getShareholderReturnRate())
+                                        .shareholderReturnRateNetIncome(flow.getShareholderReturnRateNetIncome())
+                                        .build());
+                }
+
+                return result;
         }
 
         /**

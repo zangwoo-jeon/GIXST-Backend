@@ -15,6 +15,7 @@ public class OverseasStockCashFlowDto {
     private BigDecimal repurchaseOfCapitalStock;
     private BigDecimal cashDividendsPaid;
     private BigDecimal shareholderReturnRate;
+    private BigDecimal shareholderReturnRateNetIncome;
 
     public static OverseasStockCashFlowDto fromEntity(OverseasStockCashFlow entity) {
         return OverseasStockCashFlowDto.builder()
@@ -24,6 +25,7 @@ public class OverseasStockCashFlowDto {
                 .repurchaseOfCapitalStock(entity.getRepurchaseOfCapitalStock())
                 .cashDividendsPaid(entity.getCashDividendsPaid())
                 .shareholderReturnRate(entity.getShareholderReturnRate())
+                // .shareholderReturnRateNetIncome() // Entity에는 없으므로 Service에서 계산해서 주입
                 .build();
     }
 }

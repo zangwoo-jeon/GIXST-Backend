@@ -50,6 +50,21 @@ public class KisOverseasStockInformationController {
         return ResponseEntity.ok(new SuccessResponse<>(true, "해외 주식 주주환원율 정보 조회 성공", result));
     }
 
+    @PostMapping("/shareholder-return/refresh-fcf-rate/{stockCode}")
+    @Operation(summary = "해외 주식 FCF 기반 주주환원율 갱신", description = "FCF 데이터를 기반으로 주주환원율((배당금+자사주매입)/FCF)을 계산하여 갱신합니다.")
+    public ResponseEntity<SuccessResponse<String>> refreshShareholderReturnRateFcf(
+            @PathVariable String stockCode) {
+        informationService.calculateAndSaveShareholderReturnRateFcf(stockCode);
+        return ResponseEntity.ok(new SuccessResponse<>(true, "해외 주식 FCF 기반 주주환원율 갱신 성공", null));
+    }
+
+    @PostMapping("/shareholder-return/refresh-all-fcf-rate")
+    @Operation(summary = "전체 해외 주식 FCF 기반 주주환원율 갱신", description = "모든 미국 주식(US_STOCK, US_ETF)의 FCF 기반 주주환원율을 일괄 계산하여 갱신합니다.")
+    public ResponseEntity<SuccessResponse<String>> refreshAllShareholderReturnRateFcf() {
+        new Thread(() -> informationService.calculateAndSaveAllShareholderReturnRateFcf()).start();
+        return ResponseEntity.ok(new SuccessResponse<>(true, "전체 해외 주식 FCF 기반 주주환원율 갱신 시작 (백그라운드)", null));
+    }
+
     @PostMapping("/suspension-status/{stockCode}")
     @Operation(summary = "해외 주식 거래정지 여부 업데이트", description = "KIS 상품 정보 조회 API를 통해 특정 종목의 거래정지 여부를 확인하고 업데이트합니다.")
     public ResponseEntity<SuccessResponse<String>> updateSuspensionStatus(

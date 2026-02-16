@@ -28,6 +28,7 @@ import com.AISA.AISA.kisStock.repository.StockMarketCapRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.annotation.Caching;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -35,6 +36,8 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.cache.annotation.CacheEvict;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -531,6 +534,7 @@ public class KisOverseasStockInformationService {
         /**
          * 특정 종목의 주주환원율 정보(자사주 매입, 배당금 지급)를 조회합니다.
          */
+        @Cacheable(value = "overseasShareholderReturn", key = "#stockCode + '-' + #divCode")
         public List<OverseasStockCashFlowDto> getShareholderReturnInfo(String stockCode, String divCode) {
 
                 // 1. Fetch Data based on divCode
@@ -548,6 +552,8 @@ public class KisOverseasStockInformationService {
                                         .cashDividendsPaid(flow.getCashDividendsPaid())
                                         .shareholderReturnRate(flow.getShareholderReturnRate())
                                         .shareholderReturnRateNetIncome(flow.getShareholderReturnRateNetIncome())
+                                        .fcf(flow.getFcf())
+                                        .shareholderReturnRateFcf(flow.getShareholderReturnRateFcf())
                                         .build());
                 }
 
@@ -631,6 +637,67 @@ public class KisOverseasStockInformationService {
                         }
                 }
                 log.info("Completed Batch Suspension Status Update");
+        }
+
+        /**
+         * FCF 기반 주주환원율을 계산하고 저장합니다.
+         * (배당금 + 자사주매입) / FCF * 100
+         */
+        @Transactional(readOnly = false)
+        @Caching(evict = {
+                        @org.springframework.cache.annotation.CacheEvict(value = "overseasShareholderReturn", key = "#stockCode + '-0'"),
+                        @org.springframework.cache.annotation.CacheEvict(value = "overseasShareholderReturn", key = "#stockCode + '-1'")
+        })
+        public void calculateAndSaveShareholderReturnRateFcf(String stockCode) {
+                // 모든 기간, 모든 divCode에 대해 조회
+                List<OverseasStockCashFlow> cashFlows = cashFlowRepository.findByStockCode(stockCode);
+
+                for (OverseasStockCashFlow flow : cashFlows) {
+                        BigDecimal fcf = flow.getFcf();
+                        if (fcf == null || fcf.compareTo(BigDecimal.ZERO) == 0) {
+                                flow.updateShareholderReturnRateFcf(BigDecimal.ZERO);
+                                continue;
+                        }
+
+                        BigDecimal dividends = flow.getCashDividendsPaid() != null ? flow.getCashDividendsPaid()
+                                        : BigDecimal.ZERO;
+                        BigDecimal repurchase = flow.getRepurchaseOfCapitalStock() != null
+                                        ? flow.getRepurchaseOfCapitalStock()
+                                        : BigDecimal.ZERO;
+
+                        BigDecimal totalReturn = dividends.add(repurchase);
+
+                        // (Total Return / FCF) * 100
+                        BigDecimal rate = totalReturn.divide(fcf, 4, RoundingMode.HALF_UP)
+                                        .multiply(new BigDecimal("100"))
+                                        .setScale(2, RoundingMode.HALF_UP);
+
+                        flow.updateShareholderReturnRateFcf(rate);
+                }
+
+        }
+
+        /**
+         * 모든 미국 주식(US_STOCK, US_ETF)의 FCF 기반 주주환원율을 일괄 갱신합니다.
+         */
+        @Transactional(propagation = Propagation.NOT_SUPPORTED)
+        @CacheEvict(value = "overseasShareholderReturn", allEntries = true)
+        public void calculateAndSaveAllShareholderReturnRateFcf() {
+                List<Stock> stocks = overseasStockRepository.findAll().stream()
+                                .filter(s -> s.getStockType() == Stock.StockType.US_STOCK
+                                                || s.getStockType() == Stock.StockType.US_ETF)
+                                .collect(Collectors.toList());
+                log.info("Starting Batch Shareholder Return Rate (FCF) Calculation for {} stocks", stocks.size());
+
+                for (Stock stock : stocks) {
+                        try {
+                                self.calculateAndSaveShareholderReturnRateFcf(stock.getStockCode());
+                        } catch (Exception e) {
+                                log.error("Failed to calculate FCF rate for {}: {}", stock.getStockCode(),
+                                                e.getMessage());
+                        }
+                }
+                log.info("Completed Batch Shareholder Return Rate (FCF) Calculation");
         }
 
 }

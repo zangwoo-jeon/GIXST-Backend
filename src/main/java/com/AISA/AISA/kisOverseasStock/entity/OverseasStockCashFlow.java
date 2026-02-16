@@ -43,7 +43,17 @@ public class OverseasStockCashFlow {
     @Column(precision = 10, scale = 2)
     private BigDecimal shareholderReturnRateNetIncome; // 주주환원율 (순이익 기준)
 
+    @Column(precision = 20, scale = 2)
+    private BigDecimal fcf; // 잉여현금흐름 (Free Cash Flow)
+
+    @Column(precision = 10, scale = 2)
+    private BigDecimal shareholderReturnRateFcf; // 주주환원율 (FCF 기준)
+
     public void updateShareholderReturnRateNetIncome(BigDecimal rate) {
         this.shareholderReturnRateNetIncome = rate;
+    }
+
+    public void updateShareholderReturnRateFcf(BigDecimal rate) {
+        this.shareholderReturnRateFcf = rate;
     }
 }

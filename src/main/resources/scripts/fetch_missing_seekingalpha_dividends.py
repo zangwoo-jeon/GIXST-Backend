@@ -33,7 +33,7 @@ def get_missing_stocks(start_id=None, end_id=None):
             FROM stock s
             LEFT JOIN stock_dividend sd ON s.stock_id = sd.stock_id
             WHERE sd.stock_id IS NULL 
-              AND s.stock_type IN ('US_STOCK', 'US_ETF')
+              AND s.stock_type IN ('US_STOCK', 'US_ETF') 
               AND (s.is_suspended IS NULL OR s.is_suspended = 0)
             """
             params = []

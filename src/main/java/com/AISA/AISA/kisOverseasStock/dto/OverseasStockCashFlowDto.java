@@ -1,13 +1,17 @@
 package com.AISA.AISA.kisOverseasStock.dto;
 
 import com.AISA.AISA.kisOverseasStock.entity.OverseasStockCashFlow;
+import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
+import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
 
 @Getter
 @Builder
+@NoArgsConstructor
+@AllArgsConstructor
 public class OverseasStockCashFlowDto {
     private String stockCode;
     private String stacYymm;

@@ -446,7 +446,7 @@ public class KisOverseasStockRankService {
             try {
                 // Latest annual cash flow
                 List<OverseasStockCashFlowDto> cashFlows = kisOverseasStockInformationService
-                        .getShareholderReturnInfo(stock.getStockCode());
+                        .getShareholderReturnInfo(stock.getStockCode(), "0");
 
                 if (cashFlows.isEmpty())
                     continue;

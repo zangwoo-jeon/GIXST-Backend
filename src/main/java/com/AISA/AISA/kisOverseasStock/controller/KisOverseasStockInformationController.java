@@ -42,10 +42,11 @@ public class KisOverseasStockInformationController {
     }
 
     @GetMapping("/shareholder-return/{stockCode}")
-    @Operation(summary = "해외 주식 주주환원율 정보 조회", description = "특정 종목의 자사주 매입 및 배당금 지급 데이터를 조회합니다. (연간 데이터 기준)")
+    @Operation(summary = "해외 주식 주주환원율 정보 조회", description = "특정 종목의 자사주 매입 및 배당금 지급 데이터를 조회합니다. (divCode: 0: 연간, 1: 분기)")
     public ResponseEntity<SuccessResponse<List<com.AISA.AISA.kisOverseasStock.dto.OverseasStockCashFlowDto>>> getShareholderReturnInfo(
-            @PathVariable String stockCode) {
-        var result = informationService.getShareholderReturnInfo(stockCode);
+            @PathVariable String stockCode,
+            @RequestParam(defaultValue = "0") String divCode) {
+        var result = informationService.getShareholderReturnInfo(stockCode, divCode);
         return ResponseEntity.ok(new SuccessResponse<>(true, "해외 주식 주주환원율 정보 조회 성공", result));
     }
 

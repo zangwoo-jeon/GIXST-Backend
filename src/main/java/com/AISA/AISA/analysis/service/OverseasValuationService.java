@@ -1130,7 +1130,7 @@ public class OverseasValuationService {
     }
 
     private String calculateShareholderReturnRate(String stockCode) {
-        List<OverseasStockCashFlowDto> returnsList = overseasService.getShareholderReturnInfo(stockCode);
+        List<OverseasStockCashFlowDto> returnsList = overseasService.getShareholderReturnInfo(stockCode, "0");
         if (returnsList.isEmpty())
             return "N/A";
         OverseasStockCashFlowDto cashFlow = returnsList.get(0);

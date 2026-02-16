@@ -38,5 +38,12 @@ public class OverseasStockCashFlow {
     private BigDecimal cashDividendsPaid; // 배당금 지급 (Cash Dividends Paid)
 
     @Column(precision = 5, scale = 2)
-    private BigDecimal shareholderReturnRate; // 주주환원율 ( (자사주매입 + 배당금) / 순이익 * 100 )
+    private BigDecimal shareholderReturnRate; // 주주환원율 ( (자사주매입 + 배당금) / 시가총액 * 100 )
+
+    @Column(precision = 10, scale = 2)
+    private BigDecimal shareholderReturnRateNetIncome; // 주주환원율 (순이익 기준)
+
+    public void updateShareholderReturnRateNetIncome(BigDecimal rate) {
+        this.shareholderReturnRateNetIncome = rate;
+    }
 }

@@ -3,6 +3,7 @@ package com.AISA.AISA.kisOverseasStock.controller;
 import com.AISA.AISA.global.response.SuccessResponse;
 import com.AISA.AISA.kisOverseasStock.service.KisOverseasStockService;
 import com.AISA.AISA.kisOverseasStock.dto.KisOverseasStockChartDto; // Import New DTO
+import com.AISA.AISA.kisOverseasStock.service.OverseasDividendService;
 import com.AISA.AISA.kisStock.dto.StockPrice.StockPriceDto; // Import StockPriceDto
 import com.AISA.AISA.kisStock.dto.StockSimpleSearchResponseDto;
 import io.swagger.v3.oas.annotations.Operation;
@@ -20,6 +21,7 @@ import java.util.List;
 public class KisOverseasStockController {
 
     private final KisOverseasStockService kisOverseasStockService;
+    private final OverseasDividendService overseasDividendService;
 
     @GetMapping("/search")
     @Operation(summary = "해외 주식 검색", description = "미국 주식(US_STOCK, US_ETF)을 종목코드 또는 종목명으로 검색합니다.")
@@ -79,5 +81,12 @@ public class KisOverseasStockController {
         new Thread(() -> kisOverseasStockService.fetchOverseasStocksHistoricalDataFromStockId(stockId, startDate))
                 .start();
         return ResponseEntity.ok(new SuccessResponse<>(true, "해외 주식 초기 데이터 구축 시작 (stockId: " + stockId + " 부터)", null));
+    }
+
+    @PostMapping("/calculate-shareholder-return")
+    @Operation(summary = "주주환원율(순이익 기준) 계산 및 저장", description = "OverseasStockCashFlow의 자사주/배당 데이터와 FinancialStatement의 순이익 데이터를 기반으로 주주환원율을 계산하여 DB에 저장합니다.")
+    public ResponseEntity<SuccessResponse<String>> calculateShareholderReturn() {
+        new Thread(() -> overseasDividendService.calculateAndSaveShareholderReturnRates()).start();
+        return ResponseEntity.ok(new SuccessResponse<>(true, "주주환원율 계산 작업 시작 (백그라운드)", null));
     }
 }

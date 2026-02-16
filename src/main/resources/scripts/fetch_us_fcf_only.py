@@ -4,9 +4,12 @@ from bs4 import BeautifulSoup
 from tqdm import tqdm
 import time
 import warnings
+import sys
 
 # Suppress warnings
 warnings.filterwarnings("ignore")
+if sys.stdout.encoding != 'utf-8':
+    sys.stdout.reconfigure(encoding='utf-8')
 
 # DB Configuration
 DB_CONFIG = {
@@ -30,7 +33,6 @@ def get_target_stocks():
     try:
         connection = pymysql.connect(**DB_CONFIG)
         with connection.cursor() as cursor:
-            # is_suspended가 0(False)이거나 NULL인 경우만 조회
             sql = "SELECT stock_code FROM stock WHERE stock_type IN ('US_STOCK') AND (is_suspended IS NULL OR is_suspended = 0)"
             cursor.execute(sql)
             result = cursor.fetchall()
@@ -43,32 +45,20 @@ def get_target_stocks():
             connection.close()
 
 def parse_number(text: str):
-    """
-    숫자 파싱:
-    - 콤마 제거
-    - '-' 또는 공백은 None 처리
-    - 괄호 (123) -> 음수 -123 처리는 한경 사이트 특성에 맞게 확인 필요 (보통 -로 표시됨)
-    """
     if not text:
         return 0.0
-
     text = text.replace(",", "").strip()
     if text in ("-", ""):
         return 0.0
-
     try:
         return float(text)
     except ValueError:
         return 0.0
 
-def extract_cash_flow_data(container, div_code):
-    """
-    Extract cash flow data from a specific container (Annual or Quarterly)
-    """
+def extract_fcf_data(container, div_code):
     if not container:
         return []
 
-    # 1️⃣ 현금흐름표 item 찾기
     cashflow_item = None
     for item in container.select("div.item"):
         title = item.select_one("strong.module-stit")
@@ -79,7 +69,6 @@ def extract_cash_flow_data(container, div_code):
     if not cashflow_item:
         return []
 
-    # 2️⃣ 헤더 (연도/분기)
     raw_periods_cols = cashflow_item.select("table.table-striped-col thead th strong")
     raw_periods = [th.text.strip() for th in raw_periods_cols]
 
@@ -89,8 +78,6 @@ def extract_cash_flow_data(container, div_code):
     for i, p in enumerate(raw_periods):
         if "기간" in p or "TTM" in p or "지난" in p or not p:
             continue
-            
-        # 날짜 파싱
         clean_date = p.replace('/', '').replace('-', '').strip()
         
         formatted_yymm = ""
@@ -103,38 +90,11 @@ def extract_cash_flow_data(container, div_code):
             valid_indexes.append(i)
             periods.append(formatted_yymm)
 
-    # 3️⃣ 배당금 지급 (Cash Dividends Paid)
-    div_row = cashflow_item.select_one("tr.div_cf")
-    div_values = []
-    
-    if div_row:
-        tds = div_row.select("td")
-        for i in valid_indexes:
-            if i < len(tds):
-                div_values.append(parse_number(tds[i].text))
-            else:
-                div_values.append(0.0)
-    else:
-        div_values = [0.0] * len(valid_indexes)
-
-    # 4️⃣ 자본금 변동 (Repurchase of Capital Stock)
-    cap_row = cashflow_item.select_one("tr.stk_chg_cf")
-    cap_values = []
-    
-    if cap_row:
-        tds = cap_row.select("td")
-        for i in valid_indexes:
-            if i < len(tds):
-                cap_values.append(parse_number(tds[i].text))
-            else:
-                cap_values.append(0.0)
-    else:
-        cap_values = [0.0] * len(valid_indexes)
-
-    # 5️⃣ 잉여현금흐름 (FCF)
+    # 잉여현금흐름 (FCF)
     fcf_values = []
-    # 텍스트로 '잉여현금흐름' 행 찾기
     fcf_row = None
+    
+    # 텍스트로 '잉여현금흐름' 행 찾기
     for tr in cashflow_item.select("tbody tr"):
         th = tr.select_one("th")
         if th and "잉여현금흐름" in th.get_text(strip=True):
@@ -142,8 +102,7 @@ def extract_cash_flow_data(container, div_code):
             if tr.select("td"):
                 fcf_row = tr
                 break
-            # td가 없으면(헤더 행이면) 계속 검색
-            
+    
     if fcf_row:
         tds = fcf_row.select("td")
         for i in valid_indexes:
@@ -154,32 +113,19 @@ def extract_cash_flow_data(container, div_code):
     else:
         fcf_values = [0.0] * len(valid_indexes)
 
-    # 6️⃣ 결과 정리
     result = []
     for i, yymm in enumerate(periods):
-        repurchase_val = 0.0
-        cap_change = cap_values[i]
-        
-        if cap_change < 0:
-            repurchase_val = abs(cap_change) 
-        
-        dividend_paid_val = abs(div_values[i])
         fcf_val = fcf_values[i]
-
+        
         result.append({
             "stac_yymm": yymm,
             "div_code": div_code,
-            "repurchase_of_capital_stock": repurchase_val,
-            "cash_dividends_paid": dividend_paid_val,
             "fcf": fcf_val
         })
         
     return result
 
-def fetch_dividend_and_capital_change(stock_code):
-    """
-    한경 글로벌마켓에서 해당 종목의 현금흐름표를 크롤링 (Annual & Quarterly)
-    """
+def fetch_fcf(stock_code):
     formatted_code = stock_code.lower().replace('.', '')
     url = f"https://www.hankyung.com/globalmarket/equities/americas/{formatted_code}"
     
@@ -191,33 +137,32 @@ def fetch_dividend_and_capital_change(stock_code):
         return []
 
     soup = BeautifulSoup(res.text, "html.parser")
-
     all_data = []
 
     # 1. Annual Data
     year_section = soup.select_one("div.finance-statements-year")
     if year_section:
-        annual_data = extract_cash_flow_data(year_section, "0")
+        annual_data = extract_fcf_data(year_section, "0")
         all_data.extend(annual_data)
 
     # 2. Quarterly Data
     quarter_section = soup.select_one("div.finance-statements-quarter")
     if quarter_section:
-        quarter_data = extract_cash_flow_data(quarter_section, "1")
+        quarter_data = extract_fcf_data(quarter_section, "1")
         all_data.extend(quarter_data)
 
     return all_data
 
-def save_cash_flows(stock_codes):
+def save_fcf(stock_codes):
     """
-    Hankyung -> DB Upsert
+    Hankyung -> DB Upsert (FCF Only)
     """
     try:
         connection = pymysql.connect(**DB_CONFIG)
         
-        for ticker in tqdm(stock_codes, desc="Fetching Cash Flows"):
+        for ticker in tqdm(stock_codes, desc="Fetching FCF Only"):
             # Hankyung requests
-            data_list = fetch_dividend_and_capital_change(ticker)
+            data_list = fetch_fcf(ticker)
             
             if not data_list:
                 time.sleep(0.1) 
@@ -225,13 +170,13 @@ def save_cash_flows(stock_codes):
                 
             with connection.cursor() as cursor:
                 for row in data_list:
+                    # FCF만 업데이트하도록 SQL 구성
+                    # 만약 새로운 행이면 나머지는 NULL 또는 기본값
                     sql = """
                     INSERT INTO overseas_stock_cash_flow 
-                    (stock_code, stac_yymm, div_code, repurchase_of_capital_stock, cash_dividends_paid, fcf, shareholder_return_rate)
-                    VALUES (%s, %s, %s, %s, %s, %s, 0)
+                    (stock_code, stac_yymm, div_code, fcf, shareholder_return_rate)
+                    VALUES (%s, %s, %s, %s, 0)
                     ON DUPLICATE KEY UPDATE
-                    repurchase_of_capital_stock = VALUES(repurchase_of_capital_stock),
-                    cash_dividends_paid = VALUES(cash_dividends_paid),
                     fcf = VALUES(fcf)
                     """
                     
@@ -239,8 +184,6 @@ def save_cash_flows(stock_codes):
                         ticker, 
                         row['stac_yymm'], 
                         row['div_code'], 
-                        row['repurchase_of_capital_stock'], 
-                        row['cash_dividends_paid'],
                         row['fcf']
                     ))
             
@@ -254,12 +197,12 @@ def save_cash_flows(stock_codes):
             connection.close()
 
 if __name__ == "__main__":
-    print("🚀 Starting Shareholder Return (Cash Flow) update for US Stocks (Annual & Quarterly)...")
+    print("🚀 Starting FCF Only update for US Stocks (Annual & Quarterly)...")
     stocks = get_target_stocks()
     
     if not stocks:
         print("❌ No active US stocks found.")
     else:
         print(f"✅ Found {len(stocks)} active US stocks.")
-        save_cash_flows(stocks)
-        print("\n✨ Cash Flow update complete!")
+        save_fcf(stocks)
+        print("\n✨ FCF update complete!")

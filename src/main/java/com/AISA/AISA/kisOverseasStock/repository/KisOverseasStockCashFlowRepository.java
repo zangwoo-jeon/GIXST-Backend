@@ -13,4 +13,6 @@ public interface KisOverseasStockCashFlowRepository extends JpaRepository<Overse
             String divCode);
 
     List<OverseasStockCashFlow> findByStockCodeAndDivCodeOrderByStacYymmDesc(String stockCode, String divCode);
+
+    List<OverseasStockCashFlow> findByStockCode(String stockCode);
 }

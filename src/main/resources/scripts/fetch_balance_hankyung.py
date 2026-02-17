@@ -26,7 +26,7 @@ def get_overseas_stock_list():
         connection = pymysql.connect(**DB_CONFIG)
         with connection.cursor() as cursor:
             # US_STOCK 전체 조회
-            sql = "SELECT stock_code FROM stock WHERE stock_type IN ('US_STOCK', 'US_ETF')"
+            sql = "SELECT stock_code FROM stock WHERE stock_type IN ('US_STOCK')"
             cursor.execute(sql)
             result = cursor.fetchall()
             return [row['stock_code'] for row in result]

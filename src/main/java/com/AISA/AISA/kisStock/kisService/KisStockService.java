@@ -28,7 +28,6 @@ import com.AISA.AISA.kisStock.repository.StockFinancialRatioRepository;
 import com.AISA.AISA.kisStock.repository.StockMarketCapRepository;
 import com.AISA.AISA.kisStock.repository.StockRepository;
 import com.AISA.AISA.kisStock.repository.StockInvestorDailyRepository; // New Repo
-import com.AISA.AISA.analysis.repository.StockStaticAnalysisRepository; // New for Cache Clear
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.CacheManager;
@@ -66,7 +65,6 @@ public class KisStockService {
     // repo
     private final CacheManager cacheManager;
     private final StockInvestorDailyRepository stockInvestorDailyRepository; // New Repo field
-    private final StockStaticAnalysisRepository stockStaticAnalysisRepository;
     private final KisMacroService kisMacroService;
     private final ObjectMapper objectMapper;
     private final KisApiClient kisApiClient;
@@ -1088,11 +1086,16 @@ public class KisStockService {
         fetchAndSaveInvestorTrend(stockCode,
                 LocalDate.now().minusYears(1),
                 LocalDate.now().minusDays(1),
-                "UN"); // 기본값 "UN"
+                "UN", false);
+    }
+
+    public void fetchAndSaveInvestorTrend(String stockCode, LocalDate startDate, LocalDate endDate, String marketCode) {
+        fetchAndSaveInvestorTrend(stockCode, startDate, endDate, marketCode, false);
     }
 
     @Transactional
-    public void fetchAndSaveInvestorTrend(String stockCode, LocalDate startDate, LocalDate endDate, String marketCode) {
+    public void fetchAndSaveInvestorTrend(String stockCode, LocalDate startDate, LocalDate endDate, String marketCode,
+            boolean forceOverwrite) {
         String url = kisApiProperties.getInvestorTrendDailyUrl();
         if (url == null || url.isEmpty()) {
             log.error("KisApiProperties.investorTrendDailyUrl is NULL. Check application.yml");
@@ -1108,7 +1111,7 @@ public class KisStockService {
             throw new BusinessException(KisApiErrorCode.INVALID_STOCK_TYPE);
         }
 
-        LocalDate targetDate = startDate;
+        LocalDate targetDate = startDate.minusDays(1); // startDate 당일도 포함하기 위해
         LocalDate currentDate = endDate;
         int consecutiveSkips = 0;
         final int MAX_CONSECUTIVE_SKIPS = 30;
@@ -1171,7 +1174,7 @@ public class KisStockService {
                         break;
                     }
 
-                    if (stockInvestorDailyRepository.existsByStockAndDate(stock, date)) {
+                    if (!forceOverwrite && stockInvestorDailyRepository.existsByStockAndDate(stock, date)) {
                         currentDate = date; // 이미 저장된 데이터 발견 → 이후는 저장됐다고 판단, 외부 루프 종료
                         break;
                     }
@@ -1185,19 +1188,28 @@ public class KisStockService {
                     Long prsnQty = parseLong(item.getPrsnNtbyQty());
                     Long orgnQty = parseLong(item.getOrgnNtbyQty());
 
-                    StockInvestorDaily entity = StockInvestorDaily.builder()
-                            .stock(stock)
-                            .date(date)
-                            .foreignerNetBuyAmount(frgn)
-                            .personalNetBuyAmount(prsn)
-                            .institutionNetBuyAmount(orgn)
-                            .etcCorporateNetBuyAmount(etc)
-                            .foreignerNetBuyQuantity(frgnQty)
-                            .personalNetBuyQuantity(prsnQty)
-                            .institutionNetBuyQuantity(orgnQty)
-                            .build();
-
-                    stockInvestorDailyRepository.save(entity);
+                    if (forceOverwrite) {
+                        StockInvestorDaily existing = stockInvestorDailyRepository.findByStockAndDate(stock, date)
+                                .orElse(null);
+                        if (existing != null) {
+                            existing.update(frgn, prsn, orgn, etc, frgnQty, prsnQty, orgnQty);
+                            stockInvestorDailyRepository.save(existing);
+                        } else {
+                            stockInvestorDailyRepository.save(StockInvestorDaily.builder()
+                                    .stock(stock).date(date)
+                                    .foreignerNetBuyAmount(frgn).personalNetBuyAmount(prsn)
+                                    .institutionNetBuyAmount(orgn).etcCorporateNetBuyAmount(etc)
+                                    .foreignerNetBuyQuantity(frgnQty).personalNetBuyQuantity(prsnQty)
+                                    .institutionNetBuyQuantity(orgnQty).build());
+                        }
+                    } else {
+                        stockInvestorDailyRepository.save(StockInvestorDaily.builder()
+                                .stock(stock).date(date)
+                                .foreignerNetBuyAmount(frgn).personalNetBuyAmount(prsn)
+                                .institutionNetBuyAmount(orgn).etcCorporateNetBuyAmount(etc)
+                                .foreignerNetBuyQuantity(frgnQty).personalNetBuyQuantity(prsnQty)
+                                .institutionNetBuyQuantity(orgnQty).build());
+                    }
                 }
 
                 // Update currentDate to the oldest date in the current response to fetch the
@@ -1256,18 +1268,7 @@ public class KisStockService {
             if (cacheManager.getCache("investorTrend") != null) {
                 cacheManager.getCache("investorTrend").evict(stockCode);
             }
-            if (cacheManager.getCache("staticAnalysis") != null) {
-                cacheManager.getCache("staticAnalysis").evict(stockCode);
-            }
-            // Also clear AI valuation report cache if any
-            if (cacheManager.getCache("valuationReport") != null) {
-                cacheManager.getCache("valuationReport").evict(stockCode);
-            }
-
-            // DB-level Cache Clear (Force AI Re-generation)
-            stockStaticAnalysisRepository.deleteByStockCode(stockCode);
-
-            log.info("Evicted Redis and DB caches for {}", stockCode);
+            log.info("Evicted investor trend cache for {}", stockCode);
         } catch (Exception e) {
             log.warn("Failed to evict caches for {}: {}", stockCode, e.getMessage());
         }
@@ -1331,18 +1332,26 @@ public class KisStockService {
     }
 
     public void updateAllInvestorTrends() {
-        updateAllInvestorTrends(
-                LocalDate.now().minusDays(7).format(DateTimeFormatter.ofPattern("yyyyMMdd")),
-                LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd")),
-                "UN");
+        String today = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
+        updateAllInvestorTrends(today, today, "UN", true);
     }
 
     public void updateAllInvestorTrends(String startDateStr, String endDateStr, String marketCode) {
+        updateAllInvestorTrends(startDateStr, endDateStr, marketCode, false);
+    }
+
+    public void updateAllInvestorTrends(String startDateStr, String endDateStr, String marketCode,
+            boolean forceOverwrite) {
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
         LocalDate startDate = LocalDate.parse(startDateStr, formatter);
         LocalDate endDate = LocalDate.parse(endDateStr, formatter);
 
-        List<Stock> stocks = stockRepository.findAll();
+        List<Stock> stocks = stockRepository.findAll().stream()
+                .filter(s -> s.getStockType() == Stock.StockType.DOMESTIC
+                        || s.getStockType() == Stock.StockType.DOMESTIC_ETF
+                        || s.getStockType() == Stock.StockType.FOREIGN_ETF)
+                .toList();
+        log.info("Filtered {} stocks for investor trend update (DOMESTIC/DOMESTIC_ETF/FOREIGN_ETF)", stocks.size());
         for (Stock stock : stocks) {
             try {
                 if (stock.isSuspended()) {
@@ -1350,7 +1359,7 @@ public class KisStockService {
                             stock.getStockName(), stock.getStockCode());
                     continue;
                 }
-                fetchAndSaveInvestorTrend(stock.getStockCode(), startDate, endDate, marketCode);
+                fetchAndSaveInvestorTrend(stock.getStockCode(), startDate, endDate, marketCode, forceOverwrite);
                 Thread.sleep(100); // Rate limit (10 req/sec safe limit is ~100ms)
             } catch (Exception e) {
                 log.error("Failed to update investor trend for {}: {}", stock.getStockCode(),

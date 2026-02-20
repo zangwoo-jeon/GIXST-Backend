@@ -36,6 +36,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
 @Service
@@ -225,27 +226,38 @@ public class KisOverseasStockRankService {
                             List.of(Stock.StockType.US_STOCK, Stock.StockType.US_ETF), pageable);
         }
 
+        // 실시간 가격을 병렬로 조회
+        List<CompletableFuture<StockPriceDto>> priceFutures = marketCaps.stream()
+                .map(smc -> CompletableFuture.supplyAsync(() -> {
+                    try {
+                        return kisOverseasStockService.getOverseasStockPrice(smc.getStock().getStockCode());
+                    } catch (Exception e) {
+                        log.warn("Failed to fetch real-time price for {}: {}", smc.getStock().getStockCode(),
+                                e.getMessage());
+                        return null;
+                    }
+                }))
+                .collect(Collectors.toList());
+
+        // 모든 가격 조회 완료 대기
+        CompletableFuture.allOf(priceFutures.toArray(new CompletableFuture[0])).join();
+
         List<OverseasStockRankDto.RankItem> rankings = new ArrayList<>();
         int rankSequence = start;
 
-        for (StockMarketCap smc : marketCaps) {
+        for (int i = 0; i < marketCaps.size(); i++) {
+            StockMarketCap smc = marketCaps.get(i);
             Stock stock = smc.getStock();
 
             String currentPrice = smc.getCurrentPrice();
             String priceChange = smc.getPriceChange();
             String changeRate = smc.getChangeRate();
 
-            // Always fetch real-time price data from KIS API
-            try {
-                StockPriceDto priceDto = kisOverseasStockService
-                        .getOverseasStockPrice(stock.getStockCode());
-                if (priceDto != null) {
-                    currentPrice = priceDto.getStockPrice();
-                    priceChange = priceDto.getPriceChange();
-                    changeRate = priceDto.getChangeRate();
-                }
-            } catch (Exception e) {
-                log.warn("Failed to fetch real-time price for {}: {}", stock.getStockCode(), e.getMessage());
+            StockPriceDto priceDto = priceFutures.get(i).join();
+            if (priceDto != null) {
+                currentPrice = priceDto.getStockPrice();
+                priceChange = priceDto.getPriceChange();
+                changeRate = priceDto.getChangeRate();
             }
 
             rankings.add(OverseasStockRankDto.RankItem.builder()

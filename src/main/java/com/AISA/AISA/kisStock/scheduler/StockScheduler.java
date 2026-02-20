@@ -1,6 +1,8 @@
 package com.AISA.AISA.kisStock.scheduler;
 
+import com.AISA.AISA.analysis.scheduler.MarketValuationScheduler;
 import com.AISA.AISA.kisOverseasStock.service.KisOverseasStockInformationService;
+import com.AISA.AISA.kisStock.kisService.KisRankService;
 import com.AISA.AISA.kisStock.enums.OverseasIndex;
 import com.AISA.AISA.kisStock.kisService.KisInvestorService;
 import com.AISA.AISA.kisStock.kisService.KisStockService;
@@ -48,6 +50,8 @@ public class StockScheduler {
     private final DataSource dataSource;
     private final KisInvestorService kisInvestorService;
     private final KisOverseasStockInformationService kisOverseasStockInformationService;
+    private final MarketValuationScheduler marketValuationScheduler;
+    private final KisRankService kisRankService;
 
     // Run at 2 AM every day
     @Scheduled(cron = "0 0 2 * * *")
@@ -333,16 +337,36 @@ public class StockScheduler {
         }
     }
 
-    // Run at 5 PM every weekday (Investor Trend Data)
+    // Run at 5 PM every weekday (Investor Trend Data - KRX 마감 후, marketCode=J)
     @Scheduled(cron = "0 0 17 * * MON-FRI")
-    public void updateInvestorTrendData() {
-        log.info("Starting scheduled investor trend data update...");
+    public void updateInvestorTrendDataJ() {
+        log.info("Starting scheduled investor trend data update (marketCode=J)...");
+        String today = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
         try {
-            kisStockService.updateAllInvestorTrends();
+            kisStockService.updateAllInvestorTrends(today, today, "J", true);
         } catch (Exception e) {
-            log.error("Failed to update investor trend data: {}", e.getMessage());
+            log.error("Failed to update investor trend data (J): {}", e.getMessage());
         }
-        log.info("Completed scheduled investor trend data update.");
+        log.info("Completed scheduled investor trend data update (J).");
+        kisRankService.evictInvestorRankingCache();
+    }
+
+    // Run at 9 PM every weekday (Investor Trend Data - NXT 마감 후, marketCode=UN으로 덮어쓰기 -> Market Valuation Full Refresh)
+    @Scheduled(cron = "0 0 21 * * MON-FRI")
+    public void updateInvestorTrendDataUN() {
+        log.info("Starting scheduled investor trend data update (marketCode=UN)...");
+        String today = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
+        try {
+            kisStockService.updateAllInvestorTrends(today, today, "UN", true);
+        } catch (Exception e) {
+            log.error("Failed to update investor trend data (UN): {}", e.getMessage());
+        }
+        log.info("Completed scheduled investor trend data update (UN).");
+        kisRankService.evictInvestorRankingCache();
+
+        // NXT 포함 최종 investor trend 저장 완료 후 MarketValuation 전체 갱신 (breadth 포함)
+        log.info("Triggering full market valuation refresh after investor trend update (UN)...");
+        marketValuationScheduler.refreshDomesticValuationFull();
     }
 
     // Run at 5:30 PM every weekday (Market Investor Trend Data)

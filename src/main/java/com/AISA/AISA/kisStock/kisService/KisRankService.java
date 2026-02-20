@@ -6,6 +6,8 @@ import com.AISA.AISA.kisStock.dto.InvestorTrend.InvestorTrendAggregationProjecti
 import com.AISA.AISA.kisStock.repository.StockInvestorDailyRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,6 +24,7 @@ public class KisRankService {
 
     private final StockInvestorDailyRepository stockInvestorDailyRepository;
 
+    @Cacheable(value = "investorRanking", key = "#period + '_' + #type + '_' + #limit")
     @Transactional(readOnly = true)
     public InvestorRankResponseDto getInvestorRanking(String period, String type, int limit) {
         LocalDate startDate;
@@ -108,5 +111,10 @@ public class KisRankService {
         }
 
         return InvestorRankResponseDto.builder().ranks(ranks).build();
+    }
+
+    @CacheEvict(value = "investorRanking", allEntries = true)
+    public void evictInvestorRankingCache() {
+        log.info("Evicting investor ranking cache");
     }
 }

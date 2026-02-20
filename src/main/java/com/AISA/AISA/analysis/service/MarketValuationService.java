@@ -23,7 +23,8 @@ import com.AISA.AISA.kisStock.dto.Index.BreadthHistoryDto;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.cache.annotation.CacheEvict;
-import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.cache.annotation.CachePut;
+
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -76,7 +77,17 @@ public class MarketValuationService {
 
     @Cacheable(value = "marketValuation", key = "#market")
     public MarketValuationDto calculateMarketValuation(MarketType market) {
-        return performCalculation(market);
+        return performCalculation(market, true);
+    }
+
+    /**
+     * 장중(10시, 13시, 16시) 갱신 시에는 includeBreadth=false로 호출하여
+     * StockDailyData 기반 breadth 계산을 건너뛰고 기본값을 사용합니다.
+     * 장 마감 후(22시) 갱신 시에는 includeBreadth=true로 전체 계산합니다.
+     */
+    @CachePut(value = "marketValuation", key = "#market")
+    public MarketValuationDto calculateMarketValuationWithOptions(MarketType market, boolean includeBreadth) {
+        return performCalculation(market, includeBreadth);
     }
 
     @CacheEvict(value = "marketValuation", key = "#market")
@@ -84,22 +95,9 @@ public class MarketValuationService {
         log.info("Evicting market valuation cache for {}", market);
     }
 
-    @Scheduled(cron = "0 10 9 * * MON-FRI", zone = "Asia/Seoul")
-    @Scheduled(cron = "0 0 12 * * MON-FRI", zone = "Asia/Seoul")
-    @Scheduled(cron = "0 30 15 * * MON-FRI", zone = "Asia/Seoul")
-    public void scheduledMarketValuationRefresh() {
-        log.info("Running scheduled market valuation refresh...");
-        refreshValuation(MarketType.KOSPI);
-        refreshValuation(MarketType.KOSDAQ);
-    }
+    // 스케줄링은 MarketValuationScheduler에서 관리합니다.
 
-    private void refreshValuation(MarketType market) {
-        evictMarketValuationCache(market);
-        calculateMarketValuation(market);
-        log.info("Successfully refreshed market valuation for {}", market);
-    }
-
-    private MarketValuationDto performCalculation(MarketType market) {
+    private MarketValuationDto performCalculation(MarketType market, boolean includeBreadth) {
         log.info("Calculating market valuation for {}", market);
         try {
             // 1. Fetch all stocks in the market
@@ -282,7 +280,7 @@ public class MarketValuationService {
             }
             valuationScore = valuationScore.min(new BigDecimal("100.0")).setScale(1, RoundingMode.HALF_UP);
 
-            InvestorTrendInfo trend = calculateInvestorTrend(market);
+            InvestorTrendInfo trend = calculateInvestorTrend(market, includeBreadth);
             TrendScoreResult trendResult = (trend != null) ? calculateTrendScore(market, trend)
                     : new TrendScoreResult(BigDecimal.ZERO, "수급 분석 불가");
 
@@ -636,16 +634,16 @@ public class MarketValuationService {
         }
     }
 
-    private InvestorTrendInfo calculateInvestorTrend(MarketType market) {
+    private InvestorTrendInfo calculateInvestorTrend(MarketType market, boolean includeBreadth) {
         String marketCode = market == MarketType.KOSPI ? "0001" : "1001";
         List<MarketInvestorDaily> history = marketInvestorDailyRepository
                 .findTop30ByMarketCodeOrderByDateDesc(marketCode);
         if (history.size() < 22)
             return null;
-        return processTrend(market, history.subList(0, 20));
+        return processTrend(market, history.subList(0, 20), includeBreadth);
     }
 
-    private InvestorTrendInfo processTrend(MarketType market, List<MarketInvestorDaily> subHistory) {
+    private InvestorTrendInfo processTrend(MarketType market, List<MarketInvestorDaily> subHistory, boolean includeBreadth) {
         long individual5d = 0, foreign5d = 0, institutional5d = 0;
         long foreign20d = 0, institutional20d = 0;
 
@@ -670,7 +668,9 @@ public class MarketValuationService {
         List<Long> institutionalDays = subHistory.stream().map(m -> m.getInstitutionNetBuy().longValue())
                 .collect(Collectors.toList());
 
-        BreadthResult breadth = calculateMarketBreadth(market, subHistory.get(0).getDate());
+        BreadthResult breadth = includeBreadth
+                ? calculateMarketBreadth(market, subHistory.get(0).getDate())
+                : new BreadthResult(0, 0, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, "장중 - 전일 기준 breadth 미포함");
 
         // VKOSPI: Only applicable for KOSPI (no equivalent index for KOSDAQ)
         BigDecimal vkospi = null;

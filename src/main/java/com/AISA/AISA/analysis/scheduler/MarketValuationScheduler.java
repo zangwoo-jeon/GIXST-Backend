@@ -15,27 +15,39 @@ public class MarketValuationScheduler {
     private final MarketValuationService marketValuationService;
 
     /**
-     * 국내 증시(KOSPI, KOSDAQ) 밸류에이션 데이터를 매일 18:00에 갱신합니다.
-     * 이 시점은 장 마감 후 투자자별 수급 및 채권 금리 등 모든 데이터 동기화가 완료된 시점입니다.
+     * 장중 갱신 (10시, 13시, 16시): PER, PBR, CAPE, Yield Gap 등 지수/금리 기반 지표만 갱신.
+     * StockDailyData에 당일 데이터가 없으므로 breadth(상승/하락 종목 수) 계산을 건너뜁니다.
      */
-    @Scheduled(cron = "0 0 18 * * MON-FRI")
-    public void refreshDomesticValuation() {
-        log.info("Starting scheduled domestic market valuation refresh...");
-
+    @Scheduled(cron = "0 0 10,13,16 * * MON-FRI")
+    public void refreshDomesticValuationIntraday() {
+        log.info("Starting scheduled intraday market valuation refresh (without breadth)...");
         try {
-            // 1. KOSPI 갱신
-            log.info("Refreshing KOSPI valuation...");
-            marketValuationService.evictMarketValuationCache(MarketType.KOSPI);
-            marketValuationService.calculateMarketValuation(MarketType.KOSPI);
-
-            // 2. KOSDAQ 갱신
-            log.info("Refreshing KOSDAQ valuation...");
-            marketValuationService.evictMarketValuationCache(MarketType.KOSDAQ);
-            marketValuationService.calculateMarketValuation(MarketType.KOSDAQ);
-
-            log.info("Successfully completed domestic market valuation refresh.");
+            refreshMarket(MarketType.KOSPI, false);
+            refreshMarket(MarketType.KOSDAQ, false);
+            log.info("Successfully completed intraday market valuation refresh.");
         } catch (Exception e) {
-            log.error("Failed to refresh domestic market valuation: {}", e.getMessage(), e);
+            log.error("Failed to refresh intraday market valuation: {}", e.getMessage(), e);
         }
+    }
+
+    /**
+     * 장 마감 후 전체 갱신: breadth 포함 전체 지표 갱신.
+     * StockScheduler에서 investor trend 저장 완료 후 호출됩니다.
+     */
+    public void refreshDomesticValuationFull() {
+        log.info("Starting scheduled full market valuation refresh (with breadth)...");
+        try {
+            refreshMarket(MarketType.KOSPI, true);
+            refreshMarket(MarketType.KOSDAQ, true);
+            log.info("Successfully completed full market valuation refresh.");
+        } catch (Exception e) {
+            log.error("Failed to refresh full market valuation: {}", e.getMessage(), e);
+        }
+    }
+
+    private void refreshMarket(MarketType market, boolean includeBreadth) {
+        log.info("Refreshing {} valuation (includeBreadth={})...", market, includeBreadth);
+        marketValuationService.evictMarketValuationCache(market);
+        marketValuationService.calculateMarketValuationWithOptions(market, includeBreadth);
     }
 }

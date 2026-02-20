@@ -25,6 +25,9 @@ public interface StockInvestorDailyRepository extends JpaRepository<StockInvesto
         // 특정 종목의 특정 날짜 데이터 존재 여부
         boolean existsByStockAndDate(Stock stock, LocalDate date);
 
+        // 특정 종목의 특정 날짜 데이터 조회
+        Optional<StockInvestorDaily> findByStockAndDate(Stock stock, LocalDate date);
+
         @Query("SELECT s.stock.stockCode as stockCode, s.stock.stockName as stockName, " +
                         "s.stock.stockType as stockType, " +
                         "SUM(s.personalNetBuyAmount) as personalNetBuyAmount, " +

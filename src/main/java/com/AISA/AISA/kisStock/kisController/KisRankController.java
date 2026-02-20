@@ -23,8 +23,8 @@ public class KisRankController {
         private final KisRankService kisRankService;
 
         @GetMapping("/investor")
-        @Operation(summary = "투자자별 수급 랭킹 조회", description = "최근 1개월/3개월/1년간 개인/외국인/기관 투자자별 순매수/순매도 랭킹을 조회합니다. "
-                        + "(period: 1m, 3m, 1y / type: personal_buy, personal_sell, foreigner_buy, foreigner_sell, institution_buy, institution_sell)")
+        @Operation(summary = "투자자별 수급 랭킹 조회", description = "최근 1주/1개월/3개월/6개월간 개인/외국인/기관 투자자별 순매수/순매도 랭킹을 조회합니다. "
+                        + "(period: 1w, 1m, 3m, 6m / type: personal_buy, personal_sell, foreigner_buy, foreigner_sell, institution_buy, institution_sell)")
         public ResponseEntity<SuccessResponse<InvestorRankResponseDto>> getInvestorRanking(
                         @RequestParam(defaultValue = "3m") String period,
                         @RequestParam(defaultValue = "foreigner_buy") String type,

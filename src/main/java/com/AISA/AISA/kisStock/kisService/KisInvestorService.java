@@ -50,12 +50,15 @@ public class KisInvestorService {
                 }
 
                 LocalDate startDate;
-                if ("1m".equalsIgnoreCase(period)) {
+                if ("1w".equalsIgnoreCase(period)) {
+                        startDate = LocalDate.now().minusWeeks(1);
+                } else if ("1m".equalsIgnoreCase(period)) {
                         startDate = LocalDate.now().minusMonths(1);
+                } else if ("6m".equalsIgnoreCase(period)) {
+                        startDate = LocalDate.now().minusMonths(6);
                 } else if ("1y".equalsIgnoreCase(period)) {
                         startDate = LocalDate.now().minusYears(1);
                 } else {
-                        // Default to 3 months if not specified or unrecognized
                         startDate = LocalDate.now().minusMonths(3);
                 }
 

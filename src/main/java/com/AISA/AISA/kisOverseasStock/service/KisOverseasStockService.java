@@ -346,30 +346,28 @@ public class KisOverseasStockService {
             try {
                 LocalDate date = LocalDate.parse(item.getDate(), formatter);
 
-                // Upsert or Ignore? Repository save will update if ID exists, but we don't have
-                // explicit ID here other than generated.
-                // We should check existence.
-                if (!overseasStockDailyDataRepository.existsByStockAndDate(stock, date)) {
-                    BigDecimal close = parseBigDecimal(item.getClose());
-                    BigDecimal open = parseBigDecimal(item.getOpen());
-                    BigDecimal high = parseBigDecimal(item.getHigh());
-                    BigDecimal low = parseBigDecimal(item.getLow());
-                    BigDecimal diff = parseBigDecimal(item.getDiff());
-                    Double rate = parseDouble(item.getRate());
+                // Find existing record or create a new one to enable overwriting
+                OverseasStockDailyData entity = overseasStockDailyDataRepository.findByStockAndDate(stock, date)
+                        .orElseGet(() -> OverseasStockDailyData.builder()
+                                .stock(stock)
+                                .date(date)
+                                .build());
 
-                    OverseasStockDailyData entity = OverseasStockDailyData.builder()
-                            .stock(stock)
-                            .date(date)
-                            .closingPrice(close)
-                            .openingPrice(open)
-                            .highPrice(high)
-                            .lowPrice(low)
-                            .priceChange(diff)
-                            .changeRate(rate)
-                            .build();
+                BigDecimal close = parseBigDecimal(item.getClose());
+                BigDecimal open = parseBigDecimal(item.getOpen());
+                BigDecimal high = parseBigDecimal(item.getHigh());
+                BigDecimal low = parseBigDecimal(item.getLow());
+                BigDecimal diff = parseBigDecimal(item.getDiff());
+                Double rate = parseDouble(item.getRate());
 
-                    overseasStockDailyDataRepository.save(entity);
-                }
+                entity.setClosingPrice(close);
+                entity.setOpeningPrice(open);
+                entity.setHighPrice(high);
+                entity.setLowPrice(low);
+                entity.setPriceChange(diff);
+                entity.setChangeRate(rate);
+
+                overseasStockDailyDataRepository.save(entity);
             } catch (Exception e) {
                 log.warn("Error processing item date {}: {}", item.getDate(), e.getMessage());
             }

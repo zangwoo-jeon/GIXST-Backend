@@ -455,7 +455,10 @@ public class OverseasDividendService {
             BigDecimal netIncome = netIncomeMap.get(key);
 
             if (netIncome != null && netIncome.compareTo(BigDecimal.ZERO) != 0) {
-                BigDecimal numerator = cf.getRepurchaseOfCapitalStock().add(cf.getCashDividendsPaid());
+                BigDecimal repurchase = cf.getRepurchaseOfCapitalStock() != null ? cf.getRepurchaseOfCapitalStock()
+                        : BigDecimal.ZERO;
+                BigDecimal dividends = cf.getCashDividendsPaid() != null ? cf.getCashDividendsPaid() : BigDecimal.ZERO;
+                BigDecimal numerator = repurchase.add(dividends);
                 try {
                     BigDecimal rate = numerator.divide(netIncome, 4, RoundingMode.HALF_UP)
                             .multiply(new BigDecimal("100"));

@@ -1,10 +1,7 @@
 package com.AISA.AISA.kisStock.Entity.stock;
 
 import jakarta.persistence.*;
-import lombok.AccessLevel;
-import lombok.Builder;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
+import lombok.*;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -12,6 +9,8 @@ import java.time.LocalDate;
 @Entity
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
+@AllArgsConstructor
+@Builder(toBuilder = true)
 @Table(name = "stock_investor_daily", uniqueConstraints = {
         @UniqueConstraint(columnNames = { "stock_id", "date" })
 })
@@ -52,13 +51,15 @@ public class StockInvestorDaily {
     // 기관계 순매수 수량 (orgn_ntby_qty) [NEW]
     private Long institutionNetBuyQuantity;
 
-    @Builder
-    public StockInvestorDaily(Stock stock, LocalDate date, BigDecimal foreignerNetBuyAmount,
-            BigDecimal personalNetBuyAmount, BigDecimal institutionNetBuyAmount,
-            BigDecimal etcCorporateNetBuyAmount,
-            Long foreignerNetBuyQuantity, Long personalNetBuyQuantity, Long institutionNetBuyQuantity) {
-        this.stock = stock;
-        this.date = date;
+
+    // StockInvestorDaily.java 엔티티에 추가
+    public void update(BigDecimal foreignerNetBuyAmount,
+                       BigDecimal personalNetBuyAmount,
+                       BigDecimal institutionNetBuyAmount,
+                       BigDecimal etcCorporateNetBuyAmount,
+                       Long foreignerNetBuyQuantity,
+                       Long personalNetBuyQuantity,
+                       Long institutionNetBuyQuantity) {
         this.foreignerNetBuyAmount = foreignerNetBuyAmount;
         this.personalNetBuyAmount = personalNetBuyAmount;
         this.institutionNetBuyAmount = institutionNetBuyAmount;

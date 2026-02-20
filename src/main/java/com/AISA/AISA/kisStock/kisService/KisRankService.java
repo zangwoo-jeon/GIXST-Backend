@@ -25,10 +25,12 @@ public class KisRankService {
     @Transactional(readOnly = true)
     public InvestorRankResponseDto getInvestorRanking(String period, String type, int limit) {
         LocalDate startDate;
-        if ("1m".equalsIgnoreCase(period)) {
+        if ("1w".equalsIgnoreCase(period)) {
+            startDate = LocalDate.now().minusWeeks(1);
+        } else if ("1m".equalsIgnoreCase(period)) {
             startDate = LocalDate.now().minusMonths(1);
-        } else if ("1y".equalsIgnoreCase(period)) {
-            startDate = LocalDate.now().minusYears(1);
+        } else if ("6m".equalsIgnoreCase(period)) {
+            startDate = LocalDate.now().minusMonths(6);
         } else {
             startDate = LocalDate.now().minusMonths(3);
         }

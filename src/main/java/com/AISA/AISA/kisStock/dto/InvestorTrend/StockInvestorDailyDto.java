@@ -3,6 +3,7 @@ package com.AISA.AISA.kisStock.dto.InvestorTrend;
 import lombok.Builder;
 import lombok.Getter;
 
+
 @Getter
 @Builder
 public class StockInvestorDailyDto {

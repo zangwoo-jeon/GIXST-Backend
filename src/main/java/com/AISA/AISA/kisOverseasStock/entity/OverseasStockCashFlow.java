@@ -49,6 +49,9 @@ public class OverseasStockCashFlow {
     @Column(precision = 10, scale = 2)
     private BigDecimal shareholderReturnRateFcf; // 주주환원율 (FCF 기준)
 
+    @Column(precision = 20, scale = 2)
+    private BigDecimal depreciationAmortization; // 감가상각비 (Depreciation & Amortization)
+
     public void updateShareholderReturnRateNetIncome(BigDecimal rate) {
         this.shareholderReturnRateNetIncome = rate;
     }

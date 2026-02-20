@@ -40,6 +40,15 @@ public class OverseasStockFinancialStatement {
     @Column(precision = 20, scale = 2)
     private BigDecimal netIncome; // 당기순이익 (Net Income)
 
+    @Column(precision = 20, scale = 2)
+    private BigDecimal pretaxIncome; // 법인세 차감 전 이익 (Pretax Income)
+
+    @Column(precision = 20, scale = 2)
+    private BigDecimal incomeTax; // 법인세 (Income Tax)
+
+    @Column(precision = 20, scale = 2)
+    private BigDecimal interestExpense; // 이자비용 (Interest Expense)
+
     @Column(nullable = false)
     @Builder.Default
     private Boolean isSuspended = false; // 거래 정지 여부

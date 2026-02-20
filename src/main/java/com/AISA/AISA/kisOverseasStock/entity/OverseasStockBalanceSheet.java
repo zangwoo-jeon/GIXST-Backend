@@ -35,7 +35,16 @@ public class OverseasStockBalanceSheet {
     private BigDecimal totalAssets; // 자산총계 (Total Assets)
 
     @Column(precision = 20, scale = 2)
+    private BigDecimal currentAssets; // 유동자산 (Current Assets)
+
+    @Column(precision = 20, scale = 2)
+    private BigDecimal cashAndEquivalents; // 현금성자산 (Cash & Equivalents)
+
+    @Column(precision = 20, scale = 2)
     private BigDecimal totalLiabilities; // 부채총계 (Total Liabilities)
+
+    @Column(precision = 20, scale = 2)
+    private BigDecimal currentLiabilities; // 유동부채 (Current Liabilities)
 
     @Column(precision = 20, scale = 2)
     private BigDecimal totalCapital; // 자본총계 (Total Equity)

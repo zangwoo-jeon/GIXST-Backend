@@ -54,7 +54,8 @@ public class MarketValuationDto {
         private BigDecimal distributionPercentile; // 0-100% (Statistical Rank: % of data points below current)
         private BigDecimal yieldGapScore; // 40 max
         private BigDecimal deviationScore; // 20 max
-        private Boolean yieldGapInversion; // Flag for negative yield gap
+        private Boolean yieldGapInversion; // Flag: current YG below market's own historical median
+        private BigDecimal yieldGapPercentile; // 0-100% (Position within market's own YG distribution)
         private Boolean dataDistortionWarning; // Flag for structural change
         private ValuationSignal valuationSignal;
         private TrendSignal trendSignal;

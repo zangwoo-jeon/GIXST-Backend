@@ -114,6 +114,7 @@ public class MarketValuationService {
             List<StockMarketCap> allMarketCaps = stockMarketCapRepository.findByStockIn(stocks);
             Map<String, StockMarketCap> marketCapMap = allMarketCaps.stream()
                     .filter(mc -> mc.getStock() != null)
+                    .filter(mc -> mc.getMarketCap() != null && mc.getMarketCap().compareTo(BigDecimal.ZERO) > 0)
                     .collect(Collectors.toMap(mc -> mc.getStock().getStockCode(), mc -> mc, (mc1, mc2) -> mc1));
             List<StockMarketCap> marketCaps = new ArrayList<>(marketCapMap.values());
 
@@ -197,12 +198,15 @@ public class MarketValuationService {
             for (StockFinancialStatement s : histEarnings) {
                 try {
                     int year = Integer.parseInt(s.getStacYymm().substring(0, 4));
-                    if (year >= currentYear - 10 && year < currentYear) {
+                    // Expand range to support rolling 10-year average for historical CAPE time series
+                    if (year >= currentYear - 20 && year < currentYear) {
                         BigDecimal cpiPast = cpiMap.getOrDefault(year, currentCpi);
                         BigDecimal adj = s.getNetIncome().multiply(new BigDecimal("100000000"))
                                 .multiply(currentCpi).divide(cpiPast, 0, RoundingMode.HALF_UP);
                         annualAdjSums.merge(year, adj, BigDecimal::add);
-                        stockYears.computeIfAbsent(s.getStockCode(), k -> new HashSet<>()).add(year);
+                        if (year >= currentYear - 10) {
+                            stockYears.computeIfAbsent(s.getStockCode(), k -> new HashSet<>()).add(year);
+                        }
                     }
                 } catch (Exception e) {
                 }
@@ -213,15 +217,25 @@ public class MarketValuationService {
                     stocksWithHistory.add(code);
             }
 
-            BigDecimal avgEarnings10Y = annualAdjSums.isEmpty() ? BigDecimal.ZERO
-                    : annualAdjSums.values().stream().reduce(BigDecimal.ZERO, BigDecimal::add)
-                            .divide(new BigDecimal(annualAdjSums.size()), 0, RoundingMode.HALF_UP);
+            // Use only the recent 10 years for current CAPE (annualAdjSums has up to 20 years for historical rolling)
+            BigDecimal avgEarnings10Y = BigDecimal.ZERO;
+            {
+                List<BigDecimal> recent10YEarnings = new ArrayList<>();
+                for (int y = currentYear - 10; y < currentYear; y++) {
+                    BigDecimal earnings = annualAdjSums.get(y);
+                    if (earnings != null) recent10YEarnings.add(earnings);
+                }
+                if (!recent10YEarnings.isEmpty()) {
+                    avgEarnings10Y = recent10YEarnings.stream().reduce(BigDecimal.ZERO, BigDecimal::add)
+                            .divide(new BigDecimal(recent10YEarnings.size()), 0, RoundingMode.HALF_UP);
+                }
+            }
 
             BigDecimal currentCape = BigDecimal.ZERO;
             if (avgEarnings10Y.compareTo(BigDecimal.ZERO) > 0) {
                 BigDecimal mCapForCape = marketCaps.stream()
                         .filter(mc -> stocksWithHistory.contains(mc.getStock().getStockCode()))
-                        .map(mc -> mc.getMarketCap() != null ? mc.getMarketCap() : BigDecimal.ZERO)
+                        .map(StockMarketCap::getMarketCap)
                         .reduce(BigDecimal.ZERO, BigDecimal::add)
                         .multiply(new BigDecimal("100000000"));
                 currentCape = mCapForCape.divide(avgEarnings10Y, 2, RoundingMode.HALF_UP);
@@ -233,7 +247,8 @@ public class MarketValuationService {
                     : null;
 
             // 7. Scoring and Time Series
-            List<MarketValuationDto.TimeSeriesPoint> timeSeries = generateTimeSeries(market, currentCape, bondYield);
+            List<MarketValuationDto.TimeSeriesPoint> timeSeries = generateTimeSeries(market, currentCape, bondYield,
+                    annualAdjSums, marketCaps, stocksWithHistory, cpiMap, currentCpi);
             List<BigDecimal> sortedCapes = timeSeries.stream().map(MarketValuationDto.TimeSeriesPoint::getCape)
                     .filter(Objects::nonNull).sorted().collect(Collectors.toList());
             List<BigDecimal> chronCapes = timeSeries.stream().map(MarketValuationDto.TimeSeriesPoint::getCape)
@@ -252,12 +267,19 @@ public class MarketValuationService {
                     avg, median, timeSeries);
 
             // 8. Trend and Sentiment
+            // YG Score (40 max) + Deviation Score (20 max) = 60 base
             BigDecimal valuationScore = scoreDetails.getYieldGapScore().add(scoreDetails.getDeviationScore());
+            // CAPE range position bonus (max 10)
             BigDecimal bonus = scoreDetails.getCapeRangePosition().subtract(new BigDecimal("50"))
                     .multiply(new BigDecimal("0.2")).max(BigDecimal.ZERO);
             valuationScore = valuationScore.add(bonus);
-            if (Boolean.TRUE.equals(scoreDetails.getYieldGapInversion()))
-                valuationScore = valuationScore.add(new BigDecimal("25"));
+            // YG inversion penalty: relative to market's own distribution (max 25)
+            // Uses YG percentile: 50% median → 0 pts, 100% extreme → 25 pts
+            if (Boolean.TRUE.equals(scoreDetails.getYieldGapInversion()) && scoreDetails.getYieldGapPercentile() != null) {
+                double ygPct = scoreDetails.getYieldGapPercentile().doubleValue();
+                double inversionPenalty = Math.max(0, (ygPct - 50.0) / 50.0) * 25.0;
+                valuationScore = valuationScore.add(new BigDecimal(inversionPenalty));
+            }
             valuationScore = valuationScore.min(new BigDecimal("100.0")).setScale(1, RoundingMode.HALF_UP);
 
             InvestorTrendInfo trend = calculateInvestorTrend(market);
@@ -329,7 +351,7 @@ public class MarketValuationService {
 
     private Map<Integer, BigDecimal> getAnnualCpiMap() {
         LocalDate end = LocalDate.now();
-        LocalDate start = end.minusYears(11);
+        LocalDate start = end.minusYears(21);
         DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyyMMdd");
 
         try {
@@ -359,7 +381,9 @@ public class MarketValuationService {
     }
 
     private List<MarketValuationDto.TimeSeriesPoint> generateTimeSeries(MarketType market, BigDecimal currentCape,
-            BigDecimal currentBondYield) {
+            BigDecimal currentBondYield, Map<Integer, BigDecimal> annualAdjSums,
+            List<StockMarketCap> marketCaps, Set<String> stocksWithHistory,
+            Map<Integer, BigDecimal> cpiMap, BigDecimal currentCpi) {
         List<MarketValuationDto.TimeSeriesPoint> points = new ArrayList<>();
         LocalDate end = LocalDate.now();
         LocalDate start = end.minusYears(10);
@@ -382,23 +406,44 @@ public class MarketValuationService {
             monthlyBondYields.put(b.getDate().format(monthFmt), b.getValue());
         }
 
+        // Pre-calculate current market cap for CAPE stocks (for proportional scaling)
+        BigDecimal currentMCapForCape = marketCaps.stream()
+                .filter(mc -> stocksWithHistory.contains(mc.getStock().getStockCode()))
+                .map(StockMarketCap::getMarketCap)
+                .reduce(BigDecimal.ZERO, BigDecimal::add)
+                .multiply(new BigDecimal("100000000"));
+
         Map<String, IndexDailyData> monthlySamples = new TreeMap<>();
         for (IndexDailyData d : indexData) {
             DateTimeFormatter yyyyMM = DateTimeFormatter.ofPattern("yyyy-MM");
             String key = d.getDate().format(yyyyMM);
-            monthlySamples.putIfAbsent(key, d); // TreeMap ensures sorted by key (yyyy-MM)
+            monthlySamples.putIfAbsent(key, d);
         }
 
         for (Map.Entry<String, IndexDailyData> entry : monthlySamples.entrySet()) {
             IndexDailyData d = entry.getValue();
-            String fullDate = d.getDate().toString(); // Use full date logic
+            String fullDate = d.getDate().toString();
             String monthKey = entry.getKey();
+            int pointYear = d.getDate().getYear();
 
             BigDecimal indexPrice = d.getClosingPrice();
-            BigDecimal historicalCape = indexPrice.multiply(currentCape).divide(currentIndexPrice, 2,
-                    RoundingMode.HALF_UP);
-            BigDecimal historicalYieldGap = null;
 
+            // Calculate rolling 10-year average CPI-adjusted earnings for this point
+            BigDecimal rollingAvgEarnings = calculateRollingAvgEarnings(pointYear, annualAdjSums, cpiMap, currentCpi);
+
+            BigDecimal historicalCape;
+            if (rollingAvgEarnings != null && rollingAvgEarnings.compareTo(BigDecimal.ZERO) > 0
+                    && currentIndexPrice.compareTo(BigDecimal.ZERO) > 0) {
+                // Proportional market cap at historical point
+                BigDecimal historicalMCap = currentMCapForCape.multiply(indexPrice)
+                        .divide(currentIndexPrice, 0, RoundingMode.HALF_UP);
+                historicalCape = historicalMCap.divide(rollingAvgEarnings, 2, RoundingMode.HALF_UP);
+            } else {
+                // Fallback: proportional scaling from current CAPE
+                historicalCape = indexPrice.multiply(currentCape).divide(currentIndexPrice, 2, RoundingMode.HALF_UP);
+            }
+
+            BigDecimal historicalYieldGap = null;
             if (historicalCape.compareTo(BigDecimal.ZERO) > 0) {
                 BigDecimal monthBondYield = monthlyBondYields.getOrDefault(monthKey, currentBondYield);
                 if (monthBondYield != null) {
@@ -417,15 +462,35 @@ public class MarketValuationService {
         return points;
     }
 
+    /**
+     * Calculate rolling 10-year average CPI-adjusted earnings for a given year.
+     * Uses the annualAdjSums map (already CPI-adjusted to current year's CPI).
+     */
+    private BigDecimal calculateRollingAvgEarnings(int pointYear, Map<Integer, BigDecimal> annualAdjSums,
+            Map<Integer, BigDecimal> cpiMap, BigDecimal currentCpi) {
+        List<BigDecimal> earningsInWindow = new ArrayList<>();
+        for (int y = pointYear - 10; y < pointYear; y++) {
+            BigDecimal earnings = annualAdjSums.get(y);
+            if (earnings != null) {
+                earningsInWindow.add(earnings);
+            }
+        }
+        if (earningsInWindow.size() < 5) {
+            return null; // Not enough data for reliable rolling average
+        }
+        return earningsInWindow.stream().reduce(BigDecimal.ZERO, BigDecimal::add)
+                .divide(new BigDecimal(earningsInWindow.size()), 0, RoundingMode.HALF_UP);
+    }
+
     private MarketValuationDto.ScoreDetails calculateScoresRefined(BigDecimal currentCape, BigDecimal yieldGap,
             List<BigDecimal> sortedCapes, List<BigDecimal> chronologicalCapes, BigDecimal avgCape10Y,
             BigDecimal medianCape10Y, List<MarketValuationDto.TimeSeriesPoint> timeSeries) {
 
         BigDecimal ygScoreValue = BigDecimal.ZERO;
         boolean inversion = false;
+        BigDecimal ygDeviationFromMedian = BigDecimal.ZERO;
 
         if (yieldGap != null) {
-            inversion = yieldGap.compareTo(BigDecimal.ZERO) < 0;
             List<BigDecimal> historicalYGs = timeSeries.stream()
                     .map(MarketValuationDto.TimeSeriesPoint::getYieldGap)
                     .filter(Objects::nonNull)
@@ -433,10 +498,18 @@ public class MarketValuationService {
                     .collect(Collectors.toList());
 
             if (!historicalYGs.isEmpty()) {
+                BigDecimal medianYg = historicalYGs.get(historicalYGs.size() / 2);
                 BigDecimal minYg = historicalYGs.get(0);
                 BigDecimal maxYg = historicalYGs.get(historicalYGs.size() - 1);
                 BigDecimal range = maxYg.subtract(minYg);
+
+                // Inversion: current YG is below its own market's historical median
+                inversion = yieldGap.compareTo(medianYg) < 0;
+                ygDeviationFromMedian = medianYg.subtract(yieldGap);
+
                 if (range.compareTo(BigDecimal.ZERO) > 0) {
+                    // YG Score: percentile-based (where current YG sits in its own distribution)
+                    // Lower YG relative to history = higher score (more overvalued)
                     BigDecimal score = maxYg.subtract(yieldGap).divide(range, 4, RoundingMode.HALF_UP)
                             .multiply(new BigDecimal("40"));
                     ygScoreValue = score.max(BigDecimal.ZERO).min(new BigDecimal("40"));
@@ -472,12 +545,29 @@ public class MarketValuationService {
                     .divide(new BigDecimal(sortedCapes.size()), 1, RoundingMode.HALF_UP);
         }
 
+        // Calculate YG percentile (how overvalued relative to own market history)
+        // Higher percentile = current YG is lower than most historical points = more overvalued
+        BigDecimal ygPercentile = BigDecimal.ZERO;
+        {
+            List<BigDecimal> historicalYGs = timeSeries.stream()
+                    .map(MarketValuationDto.TimeSeriesPoint::getYieldGap)
+                    .filter(Objects::nonNull)
+                    .sorted()
+                    .collect(Collectors.toList());
+            if (!historicalYGs.isEmpty() && yieldGap != null) {
+                long countHigherYg = historicalYGs.stream().filter(yg -> yg.compareTo(yieldGap) > 0).count();
+                ygPercentile = new BigDecimal(countHigherYg).multiply(new BigDecimal("100"))
+                        .divide(new BigDecimal(historicalYGs.size()), 1, RoundingMode.HALF_UP);
+            }
+        }
+
         return MarketValuationDto.ScoreDetails.builder()
                 .capeRangePosition(rangePosition.setScale(1, RoundingMode.HALF_UP))
                 .distributionPercentile(percentile)
                 .yieldGapScore(ygScoreValue.setScale(1, RoundingMode.HALF_UP))
                 .deviationScore(devScoreValue.setScale(1, RoundingMode.HALF_UP))
                 .yieldGapInversion(inversion)
+                .yieldGapPercentile(ygPercentile)
                 .dataDistortionWarning(distortion)
                 .build();
     }
@@ -582,20 +672,22 @@ public class MarketValuationService {
 
         BreadthResult breadth = calculateMarketBreadth(market, subHistory.get(0).getDate());
 
-        // Use Real-time VKOSPI from API primarily, fallback to DB
+        // VKOSPI: Only applicable for KOSPI (no equivalent index for KOSDAQ)
         BigDecimal vkospi = null;
-        try {
-            IndexChartInfoDto vkospiStatus = kisIndexService.getIndexStatus("VKOSPI");
-            if (vkospiStatus != null && vkospiStatus.getCurrentIndices() != null) {
-                vkospi = new BigDecimal(vkospiStatus.getCurrentIndices());
+        if (market == MarketType.KOSPI) {
+            try {
+                IndexChartInfoDto vkospiStatus = kisIndexService.getIndexStatus("VKOSPI");
+                if (vkospiStatus != null && vkospiStatus.getCurrentIndices() != null) {
+                    vkospi = new BigDecimal(vkospiStatus.getCurrentIndices());
+                }
+            } catch (Exception e) {
+                log.warn("Failed to fetch real-time VKOSPI, falling back to DB: {}", e.getMessage());
             }
-        } catch (Exception e) {
-            log.warn("Failed to fetch real-time VKOSPI, falling back to DB: {}", e.getMessage());
-        }
 
-        if (vkospi == null) {
-            vkospi = indexDailyDataRepository.findFirstByMarketNameOrderByDateDesc("VKOSPI")
-                    .map(IndexDailyData::getClosingPrice).orElse(null);
+            if (vkospi == null) {
+                vkospi = indexDailyDataRepository.findFirstByMarketNameOrderByDateDesc("VKOSPI")
+                        .map(IndexDailyData::getClosingPrice).orElse(null);
+            }
         }
 
         // Futures Integration
@@ -1029,10 +1121,24 @@ public class MarketValuationService {
             double pMedium = (energyScore * 0.4 + (weightedWinRate / 100.0) * 0.6) * 100.0;
 
             // Long-term (3m): Fundamental (Valuation) dominant
-            // If YieldGap > 5% -> Bullish, < 1% -> Bearish
-            double yieldGapVal = currentYieldGap != null ? currentYieldGap.doubleValue() : 3.0;
-            double pLong = Math.min(100.0, Math.max(0.0, (yieldGapVal + 2.0) * 10.0)); // Simple linear model: -2% => 0,
-                                                                                       // 8% => 100
+            // Market-relative: use YG percentile within own market's distribution
+            double pLong = 50.0; // default neutral
+            if (currentYieldGap != null && timeSeries != null) {
+                List<BigDecimal> historicalYGs = timeSeries.stream()
+                        .map(MarketValuationDto.TimeSeriesPoint::getYieldGap)
+                        .filter(Objects::nonNull)
+                        .sorted()
+                        .collect(Collectors.toList());
+                if (!historicalYGs.isEmpty()) {
+                    // Count how many historical YGs are lower (worse) than current
+                    long countLower = historicalYGs.stream()
+                            .filter(yg -> yg.compareTo(currentYieldGap) < 0).count();
+                    // Higher current YG relative to history = more bullish
+                    // Clamp to 5~95% to account for monthly sampling resolution limits
+                    pLong = Math.max(5.0, Math.min(95.0,
+                            (double) countLower / historicalYGs.size() * 100.0));
+                }
+            }
 
             return PredictionReport.builder()
                     .shortTerm(ProbabilityInfo.builder()
@@ -1049,7 +1155,6 @@ public class MarketValuationService {
 
         } catch (Exception e) {
             log.error("Error calculating trend probability: {}", e.getMessage(), e);
-            e.printStackTrace(); // Keep this for test output visibility
             return PredictionReport.builder()
                     .shortTerm(ProbabilityInfo.builder().upProbability(50).downProbability(50).primaryReason("N/A")
                             .build())

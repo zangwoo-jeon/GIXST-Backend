@@ -148,28 +148,39 @@ public class DomesticShortTermAnalysisService {
                 institutionNetBuy5Day);
         String compositeSignal = determineCompositeSignal(trendScore, volumeFilterMet, trendAlignment);
 
-        // 8. Construct DTO
+        // 8. Support/Resistance & Technical Indicators (action 판정에 필요)
+        DomesticMomentumAnalysisDto.SupportResistance supportResistance = calculateSupportResistance(highs, lows);
+        DomesticMomentumAnalysisDto.TechnicalIndicators technicalIndicators = DomesticMomentumAnalysisDto.TechnicalIndicators.builder()
+                .rsi(rsiResult.getRsi())
+                .rsiSignal(rsiResult.getSignal())
+                .rsiStatus(determineRsiStatus(rsiResult.getRsi()))
+                .macd(DomesticMomentumAnalysisDto.MACD.builder()
+                        .macdLine(macd.getMacdLine())
+                        .signalLine(macd.getSignalLine())
+                        .histogram(macd.getHistogram())
+                        .status(determineMacdStatus(macd.getMacdLine(), macd.getHistogram()))
+                        .build())
+                .stochastic(DomesticMomentumAnalysisDto.Stochastic.builder()
+                        .k(stochastic.getK())
+                        .d(stochastic.getD())
+                        .status(determineStochasticStatus(stochastic.getK(), stochastic.getD()))
+                        .build())
+                .build();
+
+        // 9. Action — 3계층 의사결정 (Signal → Risk → Decision)
+        BigDecimal currentPriceBd = new BigDecimal(priceDto.getStockPrice().replaceAll(",", ""));
+        double resistanceProximity = calculateResistanceProximity(currentPriceBd, supportResistance.getResistanceLevel());
+        String action = determineAction(compositeSignal, trendScore, momentum,
+                technicalIndicators, resistanceProximity, trendAlignment,
+                closes, volumeRatio);
+
+        // 10. Construct DTO
         DomesticMomentumAnalysisDto.ShortTermVerdict verdict = DomesticMomentumAnalysisDto.ShortTermVerdict.builder()
                 .trendScore(trendScore)
                 .trendDirection(trendDirection)
                 .momentum(momentum)
                 .volatility(determineVolatility(closes))
-                .technicalIndicators(DomesticMomentumAnalysisDto.TechnicalIndicators.builder()
-                        .rsi(rsiResult.getRsi())
-                        .rsiSignal(rsiResult.getSignal())
-                        .rsiStatus(determineRsiStatus(rsiResult.getRsi()))
-                        .macd(DomesticMomentumAnalysisDto.MACD.builder()
-                                .macdLine(macd.getMacdLine())
-                                .signalLine(macd.getSignalLine())
-                                .histogram(macd.getHistogram())
-                                .status(determineMacdStatus(macd.getMacdLine(), macd.getHistogram()))
-                                .build())
-                        .stochastic(DomesticMomentumAnalysisDto.Stochastic.builder()
-                                .k(stochastic.getK())
-                                .d(stochastic.getD())
-                                .status(determineStochasticStatus(stochastic.getK(), stochastic.getD()))
-                                .build())
-                        .build())
+                .technicalIndicators(technicalIndicators)
                 .investorTrend(DomesticMomentumAnalysisDto.InvestorTrend.builder()
                         .foreigner5DayNetBuy(foreignerNetBuy5Day)
                         .institution5DayNetBuy(institutionNetBuy5Day)
@@ -185,9 +196,9 @@ public class DomesticShortTermAnalysisService {
                 .compositeSignal(compositeSignal)
                 .rationale(generateRationale(compositeSignal, volumeFilterMet, trendAlignment))
                 .investmentAttractiveness(determineAttractiveness(compositeSignal))
-                .action(determineAction(compositeSignal))
+                .action(action)
                 .holdingHorizon("1~3개월")
-                .supportResistance(calculateSupportResistance(highs, lows))
+                .supportResistance(supportResistance)
                 .build();
 
         DomesticMomentumAnalysisDto result = DomesticMomentumAnalysisDto.builder()
@@ -385,12 +396,101 @@ public class DomesticShortTermAnalysisService {
         return "Neutral";
     }
 
-    private String determineAction(String signal) {
-        if (signal.contains("Buy"))
-            return "Buy";
-        if (signal.contains("Sell"))
-            return "Sell";
-        return "Wait";
+    // === Action 3계층 의사결정 엔진 ===
+
+    private static final List<String> ACTION_LEVELS = List.of("Sell", "Reduce", "Wait", "Buy", "Strong Buy");
+    private static final int MAX_DEMOTION = 2;
+    private static final int MAX_PROMOTION = 1;
+
+    private String determineAction(String compositeSignal, int trendScore,
+            DomesticMomentumAnalysisDto.Momentum momentum,
+            DomesticMomentumAnalysisDto.TechnicalIndicators indicators,
+            double resistanceProximity, String trendAlignment,
+            List<BigDecimal> closes, double volumeRatio) {
+
+        // 1. Signal Layer — compositeSignal 기반 base action
+        String base;
+        if (compositeSignal.contains("Strong Buy")) base = "Strong Buy";
+        else if (compositeSignal.contains("Buy")) base = "Buy";
+        else if (compositeSignal.contains("Sell")) base = "Sell";
+        else base = "Wait";
+
+        int baseIdx = ACTION_LEVELS.indexOf(base);
+
+        // 2. Risk Layer — 강등
+        int demotions = 0;
+
+        if ("둔화".equals(momentum.getTrend()) && momentum.getConfidence() >= 75)
+            demotions++;
+
+        if (resistanceProximity >= 97.0)
+            demotions++;
+
+        // 과매수 + histogram 음수일 때만 강등 (histogram 양수면 강한 추세)
+        if (indicators.getRsi() >= 75 && indicators.getStochastic().getK() >= 80
+                && indicators.getMacd().getHistogram().signum() < 0)
+            demotions++;
+
+        boolean trendCollapse = isTrendCollapse(indicators, closes, volumeRatio);
+        int maxDemotion = trendCollapse ? 4 : MAX_DEMOTION;
+        demotions = Math.min(demotions, maxDemotion);
+
+        // 3. Promotion Layer — 승격 (비대칭: 최대 1단계)
+        int promotions = 0;
+
+        if ("가속".equals(momentum.getTrend()) && momentum.getConfidence() >= 75
+                && "일치 (매수 우위)".equals(trendAlignment))
+            promotions++;
+
+        if (indicators.getRsi() <= 25 && indicators.getStochastic().getK() <= 20)
+            promotions++;
+
+        promotions = Math.min(promotions, MAX_PROMOTION);
+
+        // 4. Decision Layer — 최종 계산
+        int finalIdx = Math.max(0, Math.min(ACTION_LEVELS.size() - 1,
+                baseIdx - demotions + promotions));
+
+        // 5. 하한 안전장치: 추세 붕괴가 아니면 Sell까지 직행 불가 (Reduce가 최저)
+        if (!trendCollapse && finalIdx < ACTION_LEVELS.indexOf("Reduce")) {
+            finalIdx = ACTION_LEVELS.indexOf("Reduce");
+        }
+
+        return ACTION_LEVELS.get(finalIdx);
+    }
+
+    /**
+     * 추세 붕괴 판정 (수치 기반)
+     * 3가지 조건 중 2개 이상 충족 시 추세 붕괴로 판정
+     * - MACD line < 0 (추세 하향)
+     * - 현재가 < MA20 (20일선 하향 이탈)
+     * - volumeRatio >= 120 (5일 평균 거래량이 20일 대비 급증 — 투매 가능성)
+     */
+    private boolean isTrendCollapse(DomesticMomentumAnalysisDto.TechnicalIndicators indicators,
+            List<BigDecimal> closes, double volumeRatio) {
+        int collapseSignals = 0;
+
+        if (indicators.getMacd().getMacdLine().signum() < 0)
+            collapseSignals++;
+
+        if (closes.size() >= 20) {
+            BigDecimal ma20 = closes.subList(closes.size() - 20, closes.size()).stream()
+                    .reduce(BigDecimal.ZERO, BigDecimal::add)
+                    .divide(BigDecimal.valueOf(20), 4, RoundingMode.HALF_UP);
+            if (closes.get(closes.size() - 1).compareTo(ma20) < 0)
+                collapseSignals++;
+        }
+
+        if (volumeRatio >= 120.0)
+            collapseSignals++;
+
+        return collapseSignals >= 2;
+    }
+
+    private double calculateResistanceProximity(BigDecimal currentPrice, BigDecimal resistance) {
+        if (resistance == null || resistance.compareTo(BigDecimal.ZERO) == 0) return 0.0;
+        return currentPrice.divide(resistance, 6, RoundingMode.HALF_UP)
+                .multiply(BigDecimal.valueOf(100)).doubleValue();
     }
 
     private int adjustTrendScoreByMomentum(int score, DomesticMomentumAnalysisDto.Momentum momentum) {

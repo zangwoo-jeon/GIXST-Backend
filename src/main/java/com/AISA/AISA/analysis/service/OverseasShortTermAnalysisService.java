@@ -111,8 +111,18 @@ public class OverseasShortTermAnalysisService {
                 .technicalIndicators(TechnicalIndicators.builder()
                         .rsi(rsi)
                         .rsiSignal(rsiSignal)
-                        .macd(macd)
-                        .stochastic(stochastic)
+                        .rsiStatus(determineRsiStatus(rsi))
+                        .macd(MACD.builder()
+                                .macdLine(macd.getMacdLine())
+                                .signalLine(macd.getSignalLine())
+                                .histogram(macd.getHistogram())
+                                .status(determineMacdStatus(macd.getMacdLine(), macd.getHistogram()))
+                                .build())
+                        .stochastic(Stochastic.builder()
+                                .k(stochastic.getK())
+                                .d(stochastic.getD())
+                                .status(determineStochasticStatus(stochastic.getK(), stochastic.getD()))
+                                .build())
                         .build())
                 .valuationSignal(valuationSignal)
                 .investmentAttractiveness(attractiveness)
@@ -437,7 +447,7 @@ public class OverseasShortTermAnalysisService {
         // Need enough data: kPeriod + slowK + slowD - 2
         int minRequired = kPeriod + slowK + slowD - 2;
         if (history.size() < minRequired) {
-            return new Stochastic(50, 50);
+            return Stochastic.builder().k(50).d(50).build();
         }
 
         // Step 1: Calculate all Fast %K values
@@ -487,9 +497,10 @@ public class OverseasShortTermAnalysisService {
             latestSlowD = latestSlowK;
         }
 
-        return new Stochastic(
-                latestSlowK.setScale(2, RoundingMode.HALF_UP).doubleValue(),
-                latestSlowD.setScale(2, RoundingMode.HALF_UP).doubleValue());
+        return Stochastic.builder()
+                .k(latestSlowK.setScale(2, RoundingMode.HALF_UP).doubleValue())
+                .d(latestSlowD.setScale(2, RoundingMode.HALF_UP).doubleValue())
+                .build();
     }
 
     private int calculateTrendScore(List<BigDecimal> prices) {
@@ -607,6 +618,35 @@ public class OverseasShortTermAnalysisService {
         if ("Attractive".equals(attr)) return "Buy";
         if ("Caution".equals(attr)) return "Reduce";
         return "Wait";
+    }
+
+    private String determineRsiStatus(double rsi) {
+        if (rsi >= 70) return "과매수";
+        if (rsi <= 30) return "과매도";
+        if (rsi > 50) return "상승 우세";
+        if (rsi < 50) return "하락 우세";
+        return "중립";
+    }
+
+    private String determineMacdStatus(BigDecimal macdLine, BigDecimal histogram) {
+        if (macdLine == null || histogram == null) return "중립";
+        boolean macdPositive = macdLine.compareTo(BigDecimal.ZERO) > 0;
+        boolean histPositive = histogram.compareTo(BigDecimal.ZERO) > 0;
+        if (macdPositive && histPositive) return "강한 상승";
+        if (macdPositive && !histPositive) return "상승 추세 조정";
+        if (!macdPositive && histPositive) return "하락 추세 반등";
+        if (!macdPositive && !histPositive) return "강한 하락";
+        return "중립";
+    }
+
+    private String determineStochasticStatus(double k, double d) {
+        if (k >= 80 && k < d) return "과매수 둔화";
+        if (k >= 80) return "과매수";
+        if (k <= 20 && k > d) return "과매도 반등";
+        if (k <= 20) return "과매도";
+        if (k > d) return "상승 우세";
+        if (k < d) return "하락 우세";
+        return "중립";
     }
 
     @Transactional

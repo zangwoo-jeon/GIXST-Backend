@@ -310,6 +310,8 @@ public class AnalysisService {
             double[] w1 = returns1.subList(i, i + windowSize).stream().mapToDouble(Double::doubleValue).toArray();
             double[] w2 = returns2.subList(i, i + windowSize).stream().mapToDouble(Double::doubleValue).toArray();
             double corr = pc.correlation(w1, w2);
+            if (Double.isNaN(corr))
+                corr = 0.0;
 
             String dateStr = commonDates.get(i + windowSize).format(FORMATTER);
             rollingData.add(new RollingCorrelationDto.RollingDataPoint(dateStr, corr));
@@ -357,7 +359,7 @@ public class AnalysisService {
             double[] w2 = returns2.subList(totalPoints - window, totalPoints).stream().mapToDouble(Double::doubleValue)
                     .toArray();
             double corr = pc.correlation(w1, w2);
-            result.put(window, corr);
+            result.put(window, Double.isNaN(corr) ? 0.0 : corr);
         }
         return result;
     }
@@ -445,40 +447,62 @@ public class AnalysisService {
             }
         } else if ("INDEX".equalsIgnoreCase(type)) {
             if ("KOSPI".equalsIgnoreCase(code) || "KOSDAQ".equalsIgnoreCase(code)) {
-                // Domestic Index
                 var response = kisIndexService.getIndexChart(code, startDate, endDate, "D");
                 for (var priceDto : response.getPriceList()) {
-                    dataMap.put(LocalDate.parse(priceDto.getDate(), FORMATTER),
-                            Double.parseDouble(priceDto.getPrice()));
+                    try {
+                        dataMap.put(LocalDate.parse(priceDto.getDate(), FORMATTER),
+                                Double.parseDouble(priceDto.getPrice()));
+                    } catch (NumberFormatException e) {
+                        log.warn("Skipping invalid price data for {} on {}", code, priceDto.getDate());
+                    }
                 }
             } else {
-                // Overseas Index
                 OverseasIndex index = OverseasIndex.valueOf(code);
                 List<IndexChartPriceDto> data = kisIndexService.fetchOverseasIndex(index, startDate, endDate);
                 for (IndexChartPriceDto d : data) {
-                    dataMap.put(LocalDate.parse(d.getDate(), FORMATTER), Double.parseDouble(d.getPrice()));
+                    try {
+                        dataMap.put(LocalDate.parse(d.getDate(), FORMATTER), Double.parseDouble(d.getPrice()));
+                    } catch (NumberFormatException e) {
+                        log.warn("Skipping invalid price data for {} on {}", code, d.getDate());
+                    }
                 }
             }
         } else if ("EXCHANGE".equalsIgnoreCase(type)) {
             List<MacroIndicatorDto> data = kisMacroService.fetchExchangeRate(code, startDate, endDate);
             for (MacroIndicatorDto d : data) {
-                dataMap.put(LocalDate.parse(d.getDate(), FORMATTER), Double.parseDouble(d.getValue()));
+                try {
+                    dataMap.put(LocalDate.parse(d.getDate(), FORMATTER), Double.parseDouble(d.getValue()));
+                } catch (NumberFormatException e) {
+                    log.warn("Skipping invalid exchange rate data on {}", d.getDate());
+                }
             }
         } else if ("BOND".equalsIgnoreCase(type)) {
             BondYield bond = BondYield.valueOf(code);
             List<MacroIndicatorDto> data = kisMacroService.fetchBondYield(bond, startDate, endDate);
             for (MacroIndicatorDto d : data) {
-                dataMap.put(LocalDate.parse(d.getDate(), FORMATTER), Double.parseDouble(d.getValue()));
+                try {
+                    dataMap.put(LocalDate.parse(d.getDate(), FORMATTER), Double.parseDouble(d.getValue()));
+                } catch (NumberFormatException e) {
+                    log.warn("Skipping invalid bond yield data on {}", d.getDate());
+                }
             }
         } else if ("BASE_RATE".equalsIgnoreCase(type)) {
             List<MacroIndicatorDto> data = ecosService.fetchBaseRate(startDate, endDate);
             for (MacroIndicatorDto d : data) {
-                dataMap.put(LocalDate.parse(d.getDate(), FORMATTER), Double.parseDouble(d.getValue()));
+                try {
+                    dataMap.put(LocalDate.parse(d.getDate(), FORMATTER), Double.parseDouble(d.getValue()));
+                } catch (NumberFormatException e) {
+                    log.warn("Skipping invalid base rate data on {}", d.getDate());
+                }
             }
         } else if ("CPI".equalsIgnoreCase(type)) {
             List<MacroIndicatorDto> data = ecosService.fetchCPI(startDate, endDate);
             for (MacroIndicatorDto d : data) {
-                dataMap.put(LocalDate.parse(d.getDate(), FORMATTER), Double.parseDouble(d.getValue()));
+                try {
+                    dataMap.put(LocalDate.parse(d.getDate(), FORMATTER), Double.parseDouble(d.getValue()));
+                } catch (NumberFormatException e) {
+                    log.warn("Skipping invalid CPI data on {}", d.getDate());
+                }
             }
         }
 
@@ -506,7 +530,11 @@ public class AnalysisService {
             double current = series.get(months.get(i));
             double previous = series.get(months.get(i - lag));
             // Percentage Change: (Current / Previous) - 1
-            returns.add((current / previous) - 1.0);
+            if (previous == 0) {
+                returns.add(0.0);
+            } else {
+                returns.add((current / previous) - 1.0);
+            }
         }
         return returns;
     }
@@ -517,7 +545,11 @@ public class AnalysisService {
             double p_t = series.get(dates.get(i));
             double p_t_1 = series.get(dates.get(i - 1));
             // Log Return: ln(P_t / P_{t-1})
-            returns.add(Math.log(p_t / p_t_1));
+            if (p_t_1 <= 0 || p_t <= 0) {
+                returns.add(0.0);
+            } else {
+                returns.add(Math.log(p_t / p_t_1));
+            }
         }
         return returns;
     }
@@ -525,9 +557,13 @@ public class AnalysisService {
     private double calculatePValue(double r, int n) {
         if (n < 3)
             return 1.0;
-        double t = r * Math.sqrt((n - 2) / (1 - r * r));
-        TDistribution tDist = new TDistribution(
-                n - 2);
+        if (Double.isNaN(r) || Double.isInfinite(r))
+            return 1.0;
+        double rSquared = r * r;
+        if (rSquared >= 1.0)
+            return 0.0; // Perfect correlation
+        double t = r * Math.sqrt((n - 2) / (1 - rSquared));
+        TDistribution tDist = new TDistribution(n - 2);
         return 2.0 * (1.0 - tDist.cumulativeProbability(Math.abs(t)));
     }
 
@@ -633,6 +669,8 @@ public class AnalysisService {
         double years = java.time.temporal.ChronoUnit.DAYS.between(startDate, endDate) / 365.25;
         if (years < 0.1)
             return 0.0; // Too short period
+        if (startValue <= 0)
+            return 0.0;
 
         return Math.pow(endValue / startValue, 1.0 / years) - 1.0;
     }

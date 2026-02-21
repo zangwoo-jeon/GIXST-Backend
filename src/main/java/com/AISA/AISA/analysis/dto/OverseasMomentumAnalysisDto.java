@@ -49,6 +49,7 @@ public class OverseasMomentumAnalysisDto {
     public static class TechnicalIndicators {
         private double rsi; // RSI(14) with Wilder's smoothing
         private double rsiSignal; // RSI Signal (6-period SMA of RSI)
+        private String rsiStatus; // 과매수 / 과매도 / 상승 우세 / 하락 우세 / 중립
         private MACD macd;
         private Stochastic stochastic;
     }
@@ -61,6 +62,7 @@ public class OverseasMomentumAnalysisDto {
         private BigDecimal macdLine;
         private BigDecimal signalLine;
         private BigDecimal histogram;
+        private String status; // 상승 우세 / 하락 우세 / 중립
     }
 
     @Data
@@ -70,5 +72,6 @@ public class OverseasMomentumAnalysisDto {
     public static class Stochastic {
         private double k;
         private double d;
+        private String status; // 과매수 / 과매도 / 상승 우세 / 하락 우세 / 중립
     }
 }

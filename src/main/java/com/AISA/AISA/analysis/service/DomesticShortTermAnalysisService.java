@@ -149,8 +149,18 @@ public class DomesticShortTermAnalysisService {
                 .technicalIndicators(DomesticMomentumAnalysisDto.TechnicalIndicators.builder()
                         .rsi(rsiResult.getRsi())
                         .rsiSignal(rsiResult.getSignal())
-                        .macd(macd)
-                        .stochastic(stochastic)
+                        .rsiStatus(determineRsiStatus(rsiResult.getRsi()))
+                        .macd(DomesticMomentumAnalysisDto.MACD.builder()
+                                .macdLine(macd.getMacdLine())
+                                .signalLine(macd.getSignalLine())
+                                .histogram(macd.getHistogram())
+                                .status(determineMacdStatus(macd.getMacdLine(), macd.getHistogram()))
+                                .build())
+                        .stochastic(DomesticMomentumAnalysisDto.Stochastic.builder()
+                                .k(stochastic.getK())
+                                .d(stochastic.getD())
+                                .status(determineStochasticStatus(stochastic.getK(), stochastic.getD()))
+                                .build())
                         .build())
                 .investorTrend(DomesticMomentumAnalysisDto.InvestorTrend.builder()
                         .foreigner5DayNetBuy(foreignerNetBuy5Day)
@@ -440,6 +450,35 @@ public class DomesticShortTermAnalysisService {
             result.add(s.trim());
         }
         return result;
+    }
+
+    private String determineRsiStatus(double rsi) {
+        if (rsi >= 70) return "과매수";
+        if (rsi <= 30) return "과매도";
+        if (rsi > 50) return "상승 우세";
+        if (rsi < 50) return "하락 우세";
+        return "중립";
+    }
+
+    private String determineMacdStatus(BigDecimal macdLine, BigDecimal histogram) {
+        if (macdLine == null || histogram == null) return "중립";
+        boolean macdPositive = macdLine.compareTo(BigDecimal.ZERO) > 0;
+        boolean histPositive = histogram.compareTo(BigDecimal.ZERO) > 0;
+        if (macdPositive && histPositive) return "강한 상승";
+        if (macdPositive && !histPositive) return "상승 추세 조정";
+        if (!macdPositive && histPositive) return "하락 추세 반등";
+        if (!macdPositive && !histPositive) return "강한 하락";
+        return "중립";
+    }
+
+    private String determineStochasticStatus(double k, double d) {
+        if (k >= 80 && k < d) return "과매수 둔화";
+        if (k >= 80) return "과매수";
+        if (k <= 20 && k > d) return "과매도 반등";
+        if (k <= 20) return "과매도";
+        if (k > d) return "상승 우세";
+        if (k < d) return "하락 우세";
+        return "중립";
     }
 
     @Transactional

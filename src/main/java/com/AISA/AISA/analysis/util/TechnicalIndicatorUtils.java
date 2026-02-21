@@ -125,7 +125,7 @@ public class TechnicalIndicatorUtils {
     public static DomesticMomentumAnalysisDto.Stochastic calculateStochastic(List<BigDecimal> highs,
             List<BigDecimal> lows, List<BigDecimal> closes, int kPeriod, int dPeriod) {
         if (closes.size() < kPeriod + dPeriod) {
-            return new DomesticMomentumAnalysisDto.Stochastic(50.0, 50.0);
+            return DomesticMomentumAnalysisDto.Stochastic.builder().k(50.0).d(50.0).build();
         }
 
         List<Double> fastKValues = new ArrayList<>();
@@ -150,9 +150,10 @@ public class TechnicalIndicatorUtils {
         double latestK = fastKValues.get(fastKValues.size() - 1);
         double latestD = fastKValues.stream().mapToDouble(Double::doubleValue).average().orElse(50.0);
 
-        return new DomesticMomentumAnalysisDto.Stochastic(
-                Math.round(latestK * 100.0) / 100.0,
-                Math.round(latestD * 100.0) / 100.0);
+        return DomesticMomentumAnalysisDto.Stochastic.builder()
+                .k(Math.round(latestK * 100.0) / 100.0)
+                .d(Math.round(latestD * 100.0) / 100.0)
+                .build();
     }
 
     @Getter

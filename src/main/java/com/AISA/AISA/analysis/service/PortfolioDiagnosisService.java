@@ -48,12 +48,26 @@ public class PortfolioDiagnosisService {
 
         BacktestResultDto backtestResult = backtestService.calculatePortfolioBacktest(portfolioId, startDate, endDate,
                 null);
+
+        if (backtestResult == null || backtestResult.getDailyValues() == null
+                || backtestResult.getDailyValues().isEmpty()) {
+            return DiagnosisResultDto.builder()
+                    .portfolioId(portfolioId.toString())
+                    .diagnosisDate(endVal.format(FORMATTER))
+                    .factorAnalysis(new ArrayList<>())
+                    .adviceList(List.of("백테스트 데이터가 부족하여 진단을 수행할 수 없습니다."))
+                    .build();
+        }
+
         PortfolioReturnResponse portfolioComposition = portStockService.getPortStocks(portfolioId);
 
         // Extract Stock Codes for Interpretation Layer
-        Set<String> portfolioStockCodes = portfolioComposition.getPortStocks().stream()
-                .map(PortStockResponse::getStockCode)
-                .collect(Collectors.toSet());
+        Set<String> portfolioStockCodes = (portfolioComposition != null
+                && portfolioComposition.getPortStocks() != null)
+                        ? portfolioComposition.getPortStocks().stream()
+                                .map(PortStockResponse::getStockCode)
+                                .collect(Collectors.toSet())
+                        : Set.of();
 
         Map<LocalDate, Double> portfolioSeries = new TreeMap<>();
         for (DailyPortfolioValueDto daily : backtestResult.getDailyValues()) {
@@ -126,7 +140,7 @@ public class PortfolioDiagnosisService {
 
         return DiagnosisResultDto.builder()
                 .portfolioId(portfolioId.toString())
-                .diagnosisDate(LocalDate.now().format(FORMATTER))
+                .diagnosisDate(endVal.format(FORMATTER))
                 .factorAnalysis(factorResults)
                 .adviceList(adviceList)
                 .build();
@@ -238,22 +252,25 @@ public class PortfolioDiagnosisService {
 
                         if (isEtf) {
                             if ("KOSPI".equals(factorCode)
-                                    && (name.contains("KOSPI") || name.contains("코스피") || name.contains("200"))) {
+                                    && (name.contains("KOSPI") || name.contains("코스피")
+                                            || name.contains("KOSPI200") || name.contains("코스피200"))) {
                                 isHeldInPortfolio = true;
                                 break;
                             }
                             if ("KOSDAQ".equals(factorCode)
-                                    && (name.contains("KOSDAQ") || name.contains("코스닥") || name.contains("150"))) {
+                                    && (name.contains("KOSDAQ") || name.contains("코스닥")
+                                            || name.contains("KOSDAQ150") || name.contains("코스닥150"))) {
                                 isHeldInPortfolio = true;
                                 break;
                             }
                             if ("NASDAQ".equals(factorCode)
-                                    && (name.contains("NASDAQ") || name.contains("나스닥") || name.contains("100"))) {
+                                    && (name.contains("NASDAQ") || name.contains("나스닥") || name.contains("QQQ"))) {
                                 isHeldInPortfolio = true;
                                 break;
                             }
                             if ("SP500".equals(factorCode)
-                                    && (name.contains("S&P") || name.contains("SP500") || name.contains("500"))) {
+                                    && (name.contains("S&P") || name.contains("SP500")
+                                            || name.contains("SPY") || name.contains("VOO"))) {
                                 isHeldInPortfolio = true;
                                 break;
                             }
@@ -353,16 +370,12 @@ public class PortfolioDiagnosisService {
                     double newVariance = analysisService.calculatePortfolioVariance(w1, var1, w2, var2, correlation);
                     double newVol = Math.sqrt(newVariance);
                     if (newVol < portfolioVol) {
-                        if (hasScenario)
-                            scenarioBuilder.append(" | ");
                         double reduction = (portfolioVol - newVol) * 100;
                         scenarioBuilder.append(String.format("5%% 편입 시 변동성 %.2f%%p 감소", reduction));
                         hasScenario = true;
                     }
                 }
-                if (hasScenario && !scenarioAnalysis.contains(performanceDesc)) { // Check if we already added
-                                                                                  // performance note
-                    // ... existing uplift logic ...
+                if (hasScenario && !scenarioAnalysis.contains(performanceDesc)) {
                     if (factorCAGR > portfolioCAGR) {
                         double simulatedReturn = (portfolioCAGR * 0.95) + (factorCAGR * 0.05);
                         double uplift = (simulatedReturn - portfolioCAGR) * 100;
@@ -383,22 +396,20 @@ public class PortfolioDiagnosisService {
                     String exposureMsg = "";
                     String indirectTarget = "Indirect (via " + controlName + ")";
                     if (indirectTarget.equals(exposureType)) {
-                        exposureMsg = String.format(" [진단] %s 경유 간접 노출 (Partial Corr: %.2f)", controlName,
+                        exposureMsg = String.format("[진단] %s 경유 간접 노출 (Partial Corr: %.2f)", controlName,
                                 partialCorrelation);
                     } else if ("Direct".equals(exposureType)) {
-                        exposureMsg = String.format(" [진단] 독립적 직접 노출 (Partial Corr: %.2f)", partialCorrelation);
+                        exposureMsg = String.format("[진단] 독립적 직접 노출 (Partial Corr: %.2f)", partialCorrelation);
                     }
 
                     if (!exposureMsg.isEmpty()) {
                         if ("N/A".equals(scenarioAnalysis))
-                            scenarioAnalysis = exposureMsg.trim();
+                            scenarioAnalysis = exposureMsg;
                         else
                             scenarioAnalysis += " | " + exposureMsg;
+                        hasScenario = true;
                     }
                 }
-
-                if (!hasScenario && exposureType == null)
-                    scenarioAnalysis = "N/A";
             }
 
             String description = interpretFactorResult(factorName, correlation, trend, factorVol, isInvestable);
@@ -525,6 +536,8 @@ public class PortfolioDiagnosisService {
     }
 
     private String determinesSensitivity(double correlation) {
+        if (Double.isNaN(correlation) || Double.isInfinite(correlation))
+            return "측정 불가 (데이터 부족)";
         if (correlation >= 0.7)
             return "매우 높음 (양의 상관)";
         if (correlation >= 0.5)
@@ -575,6 +588,17 @@ public class PortfolioDiagnosisService {
             String benchmarkType, String benchmarkCode, String startDate, String endDate, int windowSize) {
         BacktestResultDto backtestResult = backtestService.calculatePortfolioBacktest(portfolioId, startDate, endDate,
                 null);
+
+        if (backtestResult == null || backtestResult.getDailyValues() == null
+                || backtestResult.getDailyValues().isEmpty()) {
+            return RollingCorrelationDto.builder()
+                    .asset1Name("MyPortfolio")
+                    .asset2Name(benchmarkCode)
+                    .windowSize(windowSize)
+                    .rollingData(new ArrayList<>())
+                    .build();
+        }
+
         Map<LocalDate, Double> portfolioSeries = new TreeMap<>();
         for (DailyPortfolioValueDto daily : backtestResult.getDailyValues()) {
             if (daily.getAdjustedValue() != null) {

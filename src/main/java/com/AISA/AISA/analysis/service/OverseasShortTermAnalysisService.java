@@ -69,7 +69,9 @@ public class OverseasShortTermAnalysisService {
         RsiResult rsiResult = calculateRSI(prices, 14, 6);
         double rsi = rsiResult.rsi;
         double rsiSignal = rsiResult.signal;
-        MACD macd = calculateMACD(prices);
+        double prevRsi = rsiResult.prevRsi;
+        MacdResult macdResult = calculateMACD(prices);
+        MACD macd = macdResult.getMacd();
 
         // 3. Check if refresh is needed
         if (!forceRefresh) {
@@ -89,16 +91,23 @@ public class OverseasShortTermAnalysisService {
         Stochastic stochastic = calculateStochastic(priceHistory);
         int trendScore = calculateTrendScore(prices);
         String trendDirection = determineTrendDirection(prices);
-        String momentum = determineMomentum(rsi, macd);
+        Momentum momentum = buildMomentum(rsi, prevRsi, macd.getMacdLine(), macd.getHistogram(),
+                macdResult.getRecentHistograms(), stochastic.getK(), stochastic.getD());
+
+        // 모멘텀 추세에 따른 trendScore 보정
+        trendScore = adjustTrendScoreByMomentum(trendScore, momentum);
 
         String volatility = determineVolatility(prices);
 
         String valuationSignal = rsi > RSI_OVERBOUGHT ? "Overbought" : rsi < RSI_OVERSOLD ? "Oversold" : "Fair";
-        String attractiveness = determineAttractiveness(momentum, valuationSignal);
+        String attractiveness = determineAttractiveness(momentum.getStrength(), valuationSignal);
 
         // 5. Generate AI Explanation
+        String momentumDesc = String.format("%s (방향: %s, 강도: %s, 추세: %s, 신뢰도: %d%%)",
+                momentum.getSummary(), momentum.getDirection(),
+                momentum.getStrength(), momentum.getTrend(), momentum.getConfidence());
         String aiPrompt = generateShortTermPrompt(stock, rsi, rsiSignal, macd, stochastic, trendScore, trendDirection,
-                momentum, volatility, currentPriceStr);
+                momentumDesc, volatility, currentPriceStr);
         String aiExplanation = geminiService.generateAdvice(aiPrompt);
         List<String> explanations = parseExplanation(aiExplanation);
 
@@ -263,9 +272,10 @@ public class OverseasShortTermAnalysisService {
 
         sb.append("\n### [분석 작성 가이드]\n");
         sb.append("1. **현재 추세 진단**: 기술적 데이터를 바탕으로 현재 단기 추세를 진단하라.\n");
-        sb.append("2. **매매 타이밍**: 현재 시점의 진입/관망/청산 적합성을 판단하라.\n");
-        sb.append("3. **리스크 포인트**: 주의할 기술적 리스크를 2~3가지 제시하라.\n");
-        sb.append("4. **핵심 모니터링 지표**: 향후 추적해야 할 지표와 기준을 제시하라.\n\n");
+        sb.append("2. **모멘텀 평가**: 모멘텀 둔화/가속 여부를 반드시 반영하라.\n");
+        sb.append("3. **매매 타이밍**: 현재 시점의 진입/관망/청산 적합성을 판단하라.\n");
+        sb.append("4. **리스크 포인트**: 주의할 기술적 리스크를 2~3가지 제시하라.\n");
+        sb.append("5. **핵심 모니터링 지표**: 향후 추적해야 할 지표와 기준을 제시하라.\n\n");
 
         sb.append("[OUTPUT FORMAT]\n");
         sb.append("한글로 작성. 각 항목을 '|' 구분자로 연결하여 단일 문장으로 반환.\n");
@@ -307,7 +317,7 @@ public class OverseasShortTermAnalysisService {
      */
     private RsiResult calculateRSI(List<BigDecimal> prices, int period, int signalPeriod) {
         if (prices.size() <= period)
-            return new RsiResult(50.0, 50.0);
+            return new RsiResult(50.0, 50.0, 50.0);
 
         // Calculate price changes
         List<BigDecimal> gains = new ArrayList<>();
@@ -346,6 +356,9 @@ public class OverseasShortTermAnalysisService {
 
         // Latest RSI
         double latestRsi = rsiValues.get(rsiValues.size() - 1);
+        double prevRsi = rsiValues.size() >= 2
+                ? rsiValues.get(rsiValues.size() - 2)
+                : latestRsi;
 
         // Signal = SMA of last signalPeriod RSI values
         double signal = latestRsi;
@@ -359,7 +372,8 @@ public class OverseasShortTermAnalysisService {
 
         return new RsiResult(
                 Math.round(latestRsi * 100.0) / 100.0,
-                Math.round(signal * 100.0) / 100.0);
+                Math.round(signal * 100.0) / 100.0,
+                Math.round(prevRsi * 100.0) / 100.0);
     }
 
     @lombok.Getter
@@ -367,15 +381,24 @@ public class OverseasShortTermAnalysisService {
     private static class RsiResult {
         private final double rsi;
         private final double signal;
+        private final double prevRsi;
     }
 
-    private MACD calculateMACD(List<BigDecimal> prices) {
+    @lombok.Getter
+    @lombok.AllArgsConstructor
+    private static class MacdResult {
+        private final MACD macd;
+        private final List<BigDecimal> recentHistograms;
+    }
+
+    private MacdResult calculateMACD(List<BigDecimal> prices) {
         if (prices.size() < 35) {
-            return MACD.builder()
+            MACD macd = MACD.builder()
                     .macdLine(BigDecimal.ZERO)
                     .signalLine(BigDecimal.ZERO)
                     .histogram(BigDecimal.ZERO)
                     .build();
+            return new MacdResult(macd, List.of());
         }
 
         // EMA12, EMA26 시계열 계산
@@ -383,7 +406,7 @@ public class OverseasShortTermAnalysisService {
         List<BigDecimal> ema26Values = calculateEMAValues(prices, 26);
 
         // MACD Line = EMA12 - EMA26 (EMA26 기준으로 정렬)
-        int ema12Offset = ema12Values.size() - ema26Values.size(); // = 26 - 12 = 14
+        int ema12Offset = ema12Values.size() - ema26Values.size();
         List<BigDecimal> macdLineValues = new ArrayList<>();
         for (int i = 0; i < ema26Values.size(); i++) {
             macdLineValues.add(ema12Values.get(i + ema12Offset).subtract(ema26Values.get(i)));
@@ -392,15 +415,29 @@ public class OverseasShortTermAnalysisService {
         // Signal Line = EMA(9) of MACD Line values
         List<BigDecimal> signalValues = calculateEMAValues(macdLineValues, 9);
 
+        // histogram 시계열 생성 (signalValues 기준으로 정렬)
+        int macdOffset = macdLineValues.size() - signalValues.size();
+        List<BigDecimal> histogramSeries = new ArrayList<>();
+        for (int i = 0; i < signalValues.size(); i++) {
+            histogramSeries.add(macdLineValues.get(i + macdOffset).subtract(signalValues.get(i)));
+        }
+
         BigDecimal macdLine = macdLineValues.get(macdLineValues.size() - 1);
         BigDecimal signalLine = signalValues.get(signalValues.size() - 1);
         BigDecimal histogram = macdLine.subtract(signalLine);
 
-        return MACD.builder()
+        MACD macd = MACD.builder()
                 .macdLine(macdLine.setScale(2, RoundingMode.HALF_UP))
                 .signalLine(signalLine.setScale(2, RoundingMode.HALF_UP))
                 .histogram(histogram.setScale(2, RoundingMode.HALF_UP))
                 .build();
+
+        // 최근 5일 histogram 반환
+        int recentCount = Math.min(5, histogramSeries.size());
+        List<BigDecimal> recentHistograms = new ArrayList<>(
+                histogramSeries.subList(histogramSeries.size() - recentCount, histogramSeries.size()));
+
+        return new MacdResult(macd, recentHistograms);
     }
 
     /**
@@ -557,12 +594,116 @@ public class OverseasShortTermAnalysisService {
         return "Sideways";
     }
 
-    private String determineMomentum(double rsi, MACD macd) {
-        if (rsi > 60 && macd.getHistogram().compareTo(BigDecimal.ZERO) > 0)
-            return "강함";
-        if (rsi < 40)
-            return "약함";
+    private int adjustTrendScoreByMomentum(int score, Momentum momentum) {
+        String trend = momentum.getTrend();
+        int confidence = momentum.getConfidence();
+
+        if ("둔화".equals(trend)) {
+            int penalty = (int) (confidence * 0.11);
+            score -= penalty;
+        } else if ("가속".equals(trend)) {
+            int bonus = (int) (confidence * 0.08);
+            score += bonus;
+        }
+
+        return Math.max(0, Math.min(100, score));
+    }
+
+    private Momentum buildMomentum(double rsi, double prevRsi,
+            BigDecimal macdLine, BigDecimal histogram, List<BigDecimal> recentHistograms,
+            double stochK, double stochD) {
+        String direction = determineMomentumDirection(rsi, macdLine, histogram);
+        String strength = determineMomentumStrength(rsi, histogram);
+        int[] signals = determineMomentumTrendSignals(recentHistograms, rsi, prevRsi, stochK, stochD);
+        int accelSignals = signals[0];
+        int decelSignals = signals[1];
+
+        String trend;
+        int confidence;
+        if (decelSignals >= 2) {
+            trend = "둔화";
+            confidence = decelSignals >= 3 ? 90 : 75;
+        } else if (accelSignals >= 2) {
+            trend = "가속";
+            confidence = accelSignals >= 3 ? 90 : 75;
+        } else {
+            trend = "유지";
+            confidence = 50;
+        }
+
+        String summary = buildMomentumSummary(direction, strength, trend);
+
+        return Momentum.builder()
+                .direction(direction)
+                .strength(strength)
+                .trend(trend)
+                .confidence(confidence)
+                .summary(summary)
+                .build();
+    }
+
+    private String determineMomentumDirection(double rsi, BigDecimal macdLine, BigDecimal histogram) {
+        boolean macdPositive = macdLine != null && macdLine.compareTo(BigDecimal.ZERO) > 0;
+        boolean histPositive = histogram != null && histogram.compareTo(BigDecimal.ZERO) > 0;
+        if (rsi > 50 && (macdPositive || histPositive)) return "상승";
+        if (rsi < 50 && (!macdPositive || !histPositive)) return "하락";
+        return "횡보";
+    }
+
+    private String determineMomentumStrength(double rsi, BigDecimal histogram) {
+        boolean histPositive = histogram != null && histogram.compareTo(BigDecimal.ZERO) > 0;
+        boolean histNegative = histogram != null && histogram.compareTo(BigDecimal.ZERO) < 0;
+        if (rsi >= 70 && histPositive) return "강함";
+        if (rsi <= 30 && histNegative) return "강함";
+        if ((rsi >= 60 && histPositive) || (rsi <= 40 && histNegative)) return "보통";
+        if (rsi >= 45 && rsi <= 55) return "약함";
         return "보통";
+    }
+
+    private int[] determineMomentumTrendSignals(List<BigDecimal> recentHistograms,
+            double rsi, double prevRsi, double stochK, double stochD) {
+        int accelSignals = 0;
+        int decelSignals = 0;
+
+        // 1. histogram 분석: slope + 부호 전환
+        if (recentHistograms != null && recentHistograms.size() >= 2) {
+            BigDecimal prev = recentHistograms.get(recentHistograms.size() - 2);
+            BigDecimal curr = recentHistograms.get(recentHistograms.size() - 1);
+
+            // 부호 전환 감지 (가중치 2): 양→음 or 음→양
+            boolean signChanged = prev.signum() != curr.signum() && prev.signum() != 0 && curr.signum() != 0;
+            if (signChanged) {
+                if (curr.signum() < 0) decelSignals += 2;
+                else accelSignals += 2;
+            }
+
+            // slope: 최근 3일 절대값 기울기
+            if (recentHistograms.size() >= 3) {
+                List<BigDecimal> last3 = recentHistograms.subList(recentHistograms.size() - 3, recentHistograms.size());
+                BigDecimal absFirst = last3.get(0).abs();
+                BigDecimal absLast = last3.get(2).abs();
+                if (absLast.compareTo(absFirst) > 0) accelSignals++;
+                else if (absLast.compareTo(absFirst) < 0) decelSignals++;
+            }
+        }
+
+        // 2. RSI 변화: 현재 vs 이전
+        if (rsi > prevRsi) accelSignals++;
+        else if (rsi < prevRsi) decelSignals++;
+
+        // 3. Stochastic: 극단 구간 교차
+        if (stochK >= 80 && stochK < stochD) decelSignals++;
+        else if (stochK <= 20 && stochK > stochD) decelSignals++;
+        else if (Math.abs(stochK - stochD) > 10) accelSignals++;
+
+        return new int[]{accelSignals, decelSignals};
+    }
+
+    private String buildMomentumSummary(String direction, String strength, String trend) {
+        String base = "강함".equals(strength) ? "강한 " : "약함".equals(strength) ? "약한 " : "";
+        String dirStr = "상승".equals(direction) ? "상승" : "하락".equals(direction) ? "하락" : "횡보";
+        String trendStr = "둔화".equals(trend) ? "이나 둔화 조짐" : "가속".equals(trend) ? ", 가속 중" : "";
+        return base + dirStr + " 모멘텀" + trendStr;
     }
 
     private String determineVolatility(List<BigDecimal> prices) {
@@ -607,10 +748,10 @@ public class OverseasShortTermAnalysisService {
                 .build();
     }
 
-    private String determineAttractiveness(String momentum, String valSignal) {
+    private String determineAttractiveness(String strength, String valSignal) {
         if ("Overbought".equals(valSignal)) return "Caution";
-        if ("강함".equals(momentum) && !"Overbought".equals(valSignal)) return "Attractive";
-        if ("Oversold".equals(valSignal) && !"약함".equals(momentum)) return "Attractive";
+        if ("강함".equals(strength) && !"Overbought".equals(valSignal)) return "Attractive";
+        if ("Oversold".equals(valSignal) && !"약함".equals(strength)) return "Attractive";
         return "Neutral";
     }
 

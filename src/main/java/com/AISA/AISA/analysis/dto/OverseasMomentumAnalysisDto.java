@@ -22,7 +22,7 @@ public class OverseasMomentumAnalysisDto {
     public static class ShortTermVerdict {
         private int trendScore; // 종합 추세 점수 (0-100)
         private String trendDirection; // Bullish / Bearish / Sideways
-        private String momentum; // 강함 / 보통 / 약함
+        private Momentum momentum;
         private String volatility; // 높음 / 보통 / 낮음
         private SupportResistance supportResistance;
         private TechnicalIndicators technicalIndicators;
@@ -73,5 +73,17 @@ public class OverseasMomentumAnalysisDto {
         private double k;
         private double d;
         private String status; // 과매수 / 과매도 / 상승 우세 / 하락 우세 / 중립
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class Momentum {
+        private String direction;   // 상승 / 하락 / 횡보
+        private String strength;    // 강함 / 보통 / 약함
+        private String trend;       // 가속 / 유지 / 둔화
+        private int confidence;     // 0~100
+        private String summary;     // 한 줄 요약
     }
 }

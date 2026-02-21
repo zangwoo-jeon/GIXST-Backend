@@ -101,7 +101,8 @@ public class DomesticShortTermAnalysisService {
 
         // 4. Calculate Indicators (Shortened settings: RSI 9, Stoch 5/3, MACD 6/13/2)
         TechnicalIndicatorUtils.RsiResult rsiResult = TechnicalIndicatorUtils.calculateRSI(closes, 9, 6);
-        DomesticMomentumAnalysisDto.MACD macd = TechnicalIndicatorUtils.calculateMACD(closes, 6, 13, 2);
+        TechnicalIndicatorUtils.MacdResult macdResult = TechnicalIndicatorUtils.calculateMACD(closes, 6, 13, 2);
+        DomesticMomentumAnalysisDto.MACD macd = macdResult.getMacd();
         DomesticMomentumAnalysisDto.Stochastic stochastic = TechnicalIndicatorUtils.calculateStochastic(highs, lows,
                 closes, 5, 3);
 
@@ -136,6 +137,13 @@ public class DomesticShortTermAnalysisService {
         int netBuyScore = calculateNetBuyScore(last5DaysInvestor, avgVol5Day);
         int trendScore = calculateTrendScore(rsiResult.getRsi(), macd.getHistogram(), netBuyScore, volumeFilterMet);
 
+        DomesticMomentumAnalysisDto.Momentum momentum = buildMomentum(rsiResult.getRsi(), rsiResult.getPrevRsi(),
+                macd.getMacdLine(), macd.getHistogram(), macdResult.getRecentHistograms(),
+                stochastic.getK(), stochastic.getD());
+
+        // 모멘텀 추세에 따른 trendScore 보정
+        trendScore = adjustTrendScoreByMomentum(trendScore, momentum);
+
         String trendAlignment = determineTrendAlignment(rsiResult.getRsi(), macd.getHistogram(), foreignerNetBuy5Day,
                 institutionNetBuy5Day);
         String compositeSignal = determineCompositeSignal(trendScore, volumeFilterMet, trendAlignment);
@@ -144,7 +152,7 @@ public class DomesticShortTermAnalysisService {
         DomesticMomentumAnalysisDto.ShortTermVerdict verdict = DomesticMomentumAnalysisDto.ShortTermVerdict.builder()
                 .trendScore(trendScore)
                 .trendDirection(trendDirection)
-                .momentum(determineMomentum(rsiResult.getRsi(), macd.getHistogram()))
+                .momentum(momentum)
                 .volatility(determineVolatility(closes))
                 .technicalIndicators(DomesticMomentumAnalysisDto.TechnicalIndicators.builder()
                         .rsi(rsiResult.getRsi())
@@ -385,16 +393,119 @@ public class DomesticShortTermAnalysisService {
         return "Wait";
     }
 
-    private String determineMomentum(double rsi, BigDecimal macdHist) {
-        if (rsi > 65 && macdHist.compareTo(BigDecimal.ZERO) > 0)
-            return "강한 상승 모멘텀";
-        if (rsi < 35 && macdHist.compareTo(BigDecimal.ZERO) < 0)
-            return "강한 하락 모멘텀";
-        if (rsi > 55 && macdHist.compareTo(BigDecimal.ZERO) > 0)
-            return "상승 모멘텀";
-        if (rsi < 45 && macdHist.compareTo(BigDecimal.ZERO) < 0)
-            return "하락 모멘텀";
+    private int adjustTrendScoreByMomentum(int score, DomesticMomentumAnalysisDto.Momentum momentum) {
+        String trend = momentum.getTrend();
+        int confidence = momentum.getConfidence();
+
+        if ("둔화".equals(trend)) {
+            // confidence에 비례하여 감점: 90→-10, 75→-8, 55→-5
+            int penalty = (int) (confidence * 0.11);
+            score -= penalty;
+        } else if ("가속".equals(trend)) {
+            // confidence에 비례하여 가점: 90→+7, 75→+5
+            int bonus = (int) (confidence * 0.08);
+            score += bonus;
+        }
+
+        return Math.max(0, Math.min(100, score));
+    }
+
+    private DomesticMomentumAnalysisDto.Momentum buildMomentum(double rsi, double prevRsi,
+            BigDecimal macdLine, BigDecimal histogram, List<BigDecimal> recentHistograms,
+            double stochK, double stochD) {
+        String direction = determineMomentumDirection(rsi, macdLine, histogram);
+        String strength = determineMomentumStrength(rsi, histogram);
+        int[] signals = determineMomentumTrendSignals(recentHistograms, rsi, prevRsi, stochK, stochD);
+        int accelSignals = signals[0];
+        int decelSignals = signals[1];
+
+        String trend;
+        int confidence;
+        if (decelSignals >= 2) {
+            trend = "둔화";
+            confidence = decelSignals >= 3 ? 90 : 75;
+        } else if (accelSignals >= 2) {
+            trend = "가속";
+            confidence = accelSignals >= 3 ? 90 : 75;
+        } else {
+            trend = "유지";
+            confidence = 50;
+        }
+
+        String summary = buildMomentumSummary(direction, strength, trend);
+
+        return DomesticMomentumAnalysisDto.Momentum.builder()
+                .direction(direction)
+                .strength(strength)
+                .trend(trend)
+                .confidence(confidence)
+                .summary(summary)
+                .build();
+    }
+
+    private String determineMomentumDirection(double rsi, BigDecimal macdLine, BigDecimal histogram) {
+        boolean macdPositive = macdLine != null && macdLine.compareTo(BigDecimal.ZERO) > 0;
+        boolean histPositive = histogram != null && histogram.compareTo(BigDecimal.ZERO) > 0;
+        if (rsi > 50 && (macdPositive || histPositive)) return "상승";
+        if (rsi < 50 && (!macdPositive || !histPositive)) return "하락";
+        return "횡보";
+    }
+
+    private String determineMomentumStrength(double rsi, BigDecimal histogram) {
+        boolean histPositive = histogram != null && histogram.compareTo(BigDecimal.ZERO) > 0;
+        boolean histNegative = histogram != null && histogram.compareTo(BigDecimal.ZERO) < 0;
+        if (rsi >= 70 && histPositive) return "강함";
+        if (rsi <= 30 && histNegative) return "강함";
+        if ((rsi >= 60 && histPositive) || (rsi <= 40 && histNegative)) return "보통";
+        if (rsi >= 45 && rsi <= 55) return "약함";
         return "보통";
+    }
+
+    private int[] determineMomentumTrendSignals(List<BigDecimal> recentHistograms,
+            double rsi, double prevRsi, double stochK, double stochD) {
+        int accelSignals = 0;
+        int decelSignals = 0;
+
+        // 1. histogram 분석: slope + 부호 전환
+        if (recentHistograms != null && recentHistograms.size() >= 2) {
+            BigDecimal prev = recentHistograms.get(recentHistograms.size() - 2);
+            BigDecimal curr = recentHistograms.get(recentHistograms.size() - 1);
+
+            // 부호 전환 감지 (가중치 2): 양→음 or 음→양
+            boolean signChanged = prev.signum() != curr.signum() && prev.signum() != 0 && curr.signum() != 0;
+            if (signChanged) {
+                // 양→음: 상승 둔화, 음→양: 하락 둔화(반등)
+                if (curr.signum() < 0) decelSignals += 2;
+                else accelSignals += 2;
+            }
+
+            // slope: 최근 3일 절대값 기울기
+            if (recentHistograms.size() >= 3) {
+                List<BigDecimal> last3 = recentHistograms.subList(recentHistograms.size() - 3, recentHistograms.size());
+                BigDecimal absFirst = last3.get(0).abs();
+                BigDecimal absLast = last3.get(2).abs();
+                if (absLast.compareTo(absFirst) > 0) accelSignals++;
+                else if (absLast.compareTo(absFirst) < 0) decelSignals++;
+            }
+        }
+
+        // 2. RSI 변화: 현재 vs 이전
+        if (rsi > prevRsi) accelSignals++;
+        else if (rsi < prevRsi) decelSignals++;
+
+        // 3. Stochastic: 극단 구간 교차
+        if (stochK >= 80 && stochK < stochD) decelSignals++;
+        else if (stochK <= 20 && stochK > stochD) decelSignals++;
+        else if (Math.abs(stochK - stochD) > 10) accelSignals++;
+
+        return new int[]{accelSignals, decelSignals};
+    }
+
+    private String buildMomentumSummary(String direction, String strength, String trend) {
+        String base = "강함".equals(strength) ? "강한 " : "약함".equals(strength) ? "약한 " : "";
+        String dirStr = "상승".equals(direction) ? "상승" : "하락".equals(direction) ? "하락" : "횡보";
+        String trendStr = "둔화".equals(trend) ? "이나 둔화 조짐" : "가속".equals(trend) ? ", 가속 중" : "";
+        return base + dirStr + " 모멘텀" + trendStr;
     }
 
     private DomesticMomentumAnalysisDto.SupportResistance calculateSupportResistance(List<BigDecimal> highs,
@@ -421,9 +532,13 @@ public class DomesticShortTermAnalysisService {
         sb.append(String.format("- 수급 동향: 외국인 %s, 기관 %s (최근 5일 누적)\n",
                 formatAmount(v.getInvestorTrend().getForeigner5DayNetBuy()),
                 formatAmount(v.getInvestorTrend().getInstitution5DayNetBuy())));
+        sb.append(String.format("- 모멘텀: %s (방향: %s, 강도: %s, 추세: %s, 신뢰도: %d%%)\n",
+                v.getMomentum().getSummary(), v.getMomentum().getDirection(),
+                v.getMomentum().getStrength(), v.getMomentum().getTrend(),
+                v.getMomentum().getConfidence()));
         sb.append(String.format("- 종합 신호: %s (추세 점수: %d)\n\n", v.getCompositeSignal(), v.getTrendScore()));
         sb.append(
-                "작성 가이드:\n1. 지표 신호와 수급의 일치 여부를 중심으로 해설하라.\n2. 거래량이 부족할 경우 강력한 주의를 부여하라.\n3. 핵심 매매 타이밍을 1문장으로 요약하라.\n\n");
+                "작성 가이드:\n1. 지표 신호와 수급의 일치 여부를 중심으로 해설하라.\n2. 모멘텀 둔화/가속 여부를 반드시 반영하라.\n3. 거래량이 부족할 경우 강력한 주의를 부여하라.\n4. 핵심 매매 타이밍을 1문장으로 요약하라.\n\n");
         sb.append("형식: 한글 작성. 각 항목을 '|'로 구분하여 단일 문장으로 반환.");
         return sb.toString();
     }

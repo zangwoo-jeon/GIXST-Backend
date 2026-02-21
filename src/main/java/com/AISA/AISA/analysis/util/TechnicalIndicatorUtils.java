@@ -18,7 +18,7 @@ public class TechnicalIndicatorUtils {
      */
     public static RsiResult calculateRSI(List<BigDecimal> prices, int period, int signalPeriod) {
         if (prices.size() <= period)
-            return new RsiResult(50.0, 50.0);
+            return new RsiResult(50.0, 50.0, 50.0);
 
         List<BigDecimal> gains = new ArrayList<>();
         List<BigDecimal> losses = new ArrayList<>();
@@ -53,6 +53,9 @@ public class TechnicalIndicatorUtils {
         }
 
         double latestRsi = rsiValues.get(rsiValues.size() - 1);
+        double prevRsi = rsiValues.size() >= 2
+                ? rsiValues.get(rsiValues.size() - 2)
+                : latestRsi;
         double signal = latestRsi;
         if (rsiValues.size() >= signalPeriod) {
             double sum = 0;
@@ -64,22 +67,22 @@ public class TechnicalIndicatorUtils {
 
         return new RsiResult(
                 Math.round(latestRsi * 100.0) / 100.0,
-                Math.round(signal * 100.0) / 100.0);
+                Math.round(signal * 100.0) / 100.0,
+                Math.round(prevRsi * 100.0) / 100.0);
     }
 
-    public static DomesticMomentumAnalysisDto.MACD calculateMACD(List<BigDecimal> prices, int shortPeriod,
+    public static MacdResult calculateMACD(List<BigDecimal> prices, int shortPeriod,
             int longPeriod, int signalPeriod) {
         if (prices.size() < longPeriod) {
-            return DomesticMomentumAnalysisDto.MACD.builder()
+            DomesticMomentumAnalysisDto.MACD macd = DomesticMomentumAnalysisDto.MACD.builder()
                     .macdLine(BigDecimal.ZERO)
                     .signalLine(BigDecimal.ZERO)
                     .histogram(BigDecimal.ZERO)
                     .build();
+            return new MacdResult(macd, List.of());
         }
 
         List<BigDecimal> macdLines = new ArrayList<>();
-        // To get a proper signal, we need multiple MACD values to average.
-        // We'll calculate MACD for the last 'signalPeriod' days.
         int iterations = Math.min(prices.size() - longPeriod + 1, signalPeriod + 10);
 
         for (int i = prices.size() - iterations; i < prices.size(); i++) {
@@ -89,25 +92,43 @@ public class TechnicalIndicatorUtils {
             macdLines.add(emaShort.subtract(emaLong));
         }
 
-        BigDecimal latestMacd = macdLines.get(macdLines.size() - 1);
+        // histogram 시계열 생성: 각 시점의 MACD - Signal(SMA)
+        List<BigDecimal> histogramSeries = new ArrayList<>();
+        for (int i = 0; i < macdLines.size(); i++) {
+            BigDecimal sig = BigDecimal.ZERO;
+            int cnt = 0;
+            for (int j = i; j >= 0 && cnt < signalPeriod; j--, cnt++) {
+                sig = sig.add(macdLines.get(j));
+            }
+            if (cnt > 0) {
+                sig = sig.divide(BigDecimal.valueOf(cnt), 4, RoundingMode.HALF_UP);
+            }
+            histogramSeries.add(macdLines.get(i).subtract(sig));
+        }
 
-        // Signal = Simple Moving Average of MACD Line
-        BigDecimal signalLine = BigDecimal.ZERO;
+        BigDecimal latestMacd = macdLines.get(macdLines.size() - 1);
+        BigDecimal latestSignal = BigDecimal.ZERO;
         int count = 0;
         for (int i = macdLines.size() - 1; i >= 0 && count < signalPeriod; i--, count++) {
-            signalLine = signalLine.add(macdLines.get(i));
+            latestSignal = latestSignal.add(macdLines.get(i));
         }
         if (count > 0) {
-            signalLine = signalLine.divide(BigDecimal.valueOf(count), 4, RoundingMode.HALF_UP);
+            latestSignal = latestSignal.divide(BigDecimal.valueOf(count), 4, RoundingMode.HALF_UP);
         }
+        BigDecimal histogram = latestMacd.subtract(latestSignal);
 
-        BigDecimal histogram = latestMacd.subtract(signalLine);
-
-        return DomesticMomentumAnalysisDto.MACD.builder()
+        DomesticMomentumAnalysisDto.MACD macd = DomesticMomentumAnalysisDto.MACD.builder()
                 .macdLine(latestMacd.setScale(4, RoundingMode.HALF_UP))
-                .signalLine(signalLine.setScale(4, RoundingMode.HALF_UP))
+                .signalLine(latestSignal.setScale(4, RoundingMode.HALF_UP))
                 .histogram(histogram.setScale(4, RoundingMode.HALF_UP))
                 .build();
+
+        // 최근 5일 histogram 반환
+        int recentCount = Math.min(5, histogramSeries.size());
+        List<BigDecimal> recentHistograms = histogramSeries.subList(
+                histogramSeries.size() - recentCount, histogramSeries.size());
+
+        return new MacdResult(macd, new ArrayList<>(recentHistograms));
     }
 
     public static BigDecimal calculateEMA(List<BigDecimal> prices, int period) {
@@ -161,5 +182,13 @@ public class TechnicalIndicatorUtils {
     public static class RsiResult {
         private final double rsi;
         private final double signal;
+        private final double prevRsi;
+    }
+
+    @Getter
+    @AllArgsConstructor
+    public static class MacdResult {
+        private final DomesticMomentumAnalysisDto.MACD macd;
+        private final List<BigDecimal> recentHistograms;
     }
 }

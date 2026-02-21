@@ -86,7 +86,7 @@ public class KisStockService {
             apiResponse = kisApiClient.fetch(token -> webClient.get()
                     .uri(uriBuilder -> uriBuilder
                             .path(kisApiProperties.getPriceUrl())
-                            .queryParam("fid_cond_mrkt_div_code", "J")
+                            .queryParam("fid_cond_mrkt_div_code", "UN")
                             .queryParam("fid_input_iscd", stockCode)
                             .build())
                     .header("Authorization", token)
@@ -188,7 +188,7 @@ public class KisStockService {
         // 2. Fetch Today's Data (Cached JSON)
         String todayJson = "[]";
         if (!targetEndDate.isBefore(today) && "D".equals(dateType)) {
-            todayJson = getTodayStockChartJson(stockCode);
+            todayJson = getTodayStockChartJson(stockCode, pastEndDate);
         }
 
         // 3. Merge JSON Strings directly (Zero-Copy)
@@ -246,7 +246,7 @@ public class KisStockService {
             String apiStartDateStr = apiStartDate.format(formatter);
 
             StockChartResponseDto apiResponse = fetchStockChartFromApi(stockCode, apiStartDateStr, endDate,
-                    dateType);
+                    dateType, "UN");
 
             if (apiResponse.getPriceList() != null && !apiResponse.getPriceList().isEmpty()) {
                 saveDailyDataWithCalculation(stock, apiResponse.getPriceList());
@@ -367,7 +367,12 @@ public class KisStockService {
                     parsedDate);
             if (existingOpt.isPresent()) {
                 StockDailyData existing = existingOpt.get();
-                existing.updateChangeInfo(priceChange, changeRate);
+                existing.updateAllFields(closePrice,
+                        new BigDecimal(priceDto.getOpenPrice()),
+                        new BigDecimal(priceDto.getHighPrice()),
+                        new BigDecimal(priceDto.getLowPrice()),
+                        new BigDecimal(priceDto.getVolume()),
+                        priceChange, changeRate);
                 stockDailyDataRepository.save(existing);
             } else {
                 StockDailyData entity = StockDailyData.builder()
@@ -387,13 +392,21 @@ public class KisStockService {
     }
 
     @Cacheable(value = "stockChartTodayJson", key = "#stockCode", sync = true)
-    public String getTodayStockChartJson(String stockCode) {
+    public String getTodayStockChartJson(String stockCode, LocalDate pastEndDate) {
         String today = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
         try {
-            StockChartResponseDto response = fetchStockChartFromApi(stockCode, today, today, "D");
+            StockChartResponseDto response = fetchStockChartFromApi(stockCode, today, today, "D", "UN");
             if (response.getPriceList() != null && !response.getPriceList().isEmpty()) {
+                StockChartPriceDto todayData = response.getPriceList().get(0);
+                // 비거래일(주말/공휴일)에는 직전 거래일 데이터가 반환됨
+                // pastJson에 이미 포함된 날짜면 중복이므로 skip
+                LocalDate dataDate = LocalDate.parse(todayData.getDate(), formatter);
+                if (!dataDate.isAfter(pastEndDate)) {
+                    return "[]";
+                }
                 List<StockChartPriceDto> singleList = new ArrayList<>();
-                singleList.add(response.getPriceList().get(0));
+                singleList.add(todayData);
                 List<StockChartPriceDto> converted = applyUsdConversion(singleList, today, today);
                 return objectMapper.writeValueAsString(converted);
             }
@@ -404,13 +417,13 @@ public class KisStockService {
     }
 
     private StockChartResponseDto fetchStockChartFromApi(String stockCode, String startDate, String endDate,
-                                                         String dateType) {
+                                                         String dateType, String marketDivCode) {
         StockChartResponseDto apiResponse;
         try {
             apiResponse = kisApiClient.fetch(token -> webClient.get()
                     .uri(uriBuilder -> uriBuilder
                             .path(kisApiProperties.getStockChartUrl())
-                            .queryParam("FID_COND_MRKT_DIV_CODE", "J")
+                            .queryParam("FID_COND_MRKT_DIV_CODE", marketDivCode)
                             .queryParam("FID_INPUT_ISCD", stockCode)
                             .queryParam("FID_INPUT_DATE_1", startDate)
                             .queryParam("FID_INPUT_DATE_2", endDate)
@@ -438,13 +451,13 @@ public class KisStockService {
     }
 
     @Transactional
-    public void fetchAndSaveHistoricalStockData(String stockCode, String startDateStr) {
+    public void fetchAndSaveHistoricalStockData(String stockCode, String startDateStr, String marketCode) {
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
         LocalDate targetStartDate = LocalDate.parse(startDateStr, formatter);
         LocalDate currentDate = LocalDate.now();
 
-        log.info("Starting historical stock data fetch for {} from {} to {}", stockCode, currentDate,
-                targetStartDate);
+        log.info("Starting historical stock data fetch for {} from {} to {} (marketCode={})",
+                stockCode, currentDate, targetStartDate, marketCode);
 
         Stock stock = stockRepository.findByStockCode(stockCode)
                 .orElseThrow(() -> new BusinessException(KisApiErrorCode.STOCK_NOT_FOUND));
@@ -457,6 +470,9 @@ public class KisStockService {
 
         int consecutiveFailures = 0;
         final int MAX_CONSECUTIVE_FAILURES = 5;
+        final int FALLBACK_THRESHOLD = 3;
+        final String[] effectiveMarketCode = {marketCode};
+        boolean fallbackAttempted = false;
 
         while (currentDate.isAfter(targetStartDate)) {
             String currentDateStr = currentDate.format(formatter);
@@ -466,17 +482,30 @@ public class KisStockService {
             }
             String queryStartDateStr = queryStartDate.format(formatter);
 
-            log.info("Fetching data for {} from {} to {}", stockCode, queryStartDateStr, currentDateStr);
+            log.info("Fetching data for {} from {} to {} (market={})",
+                    stockCode, queryStartDateStr, currentDateStr, effectiveMarketCode[0]);
 
             try {
                 StockChartResponseDto response = fetchStockChartFromApi(stockCode, queryStartDateStr,
-                        currentDateStr, "D");
+                        currentDateStr, "D", effectiveMarketCode[0]);
 
                 if (response.getPriceList() == null || response.getPriceList().isEmpty()) {
                     log.warn("No data returned for {} from {} to {}. Retrying with previous period.",
                             stockCode, queryStartDateStr, currentDateStr);
                     currentDate = queryStartDate.minusDays(1);
                     consecutiveFailures++;
+
+                    // UN으로 연속 빈 응답 시 J로 자동 전환 (NXT 미상장 종목)
+                    if (!fallbackAttempted && "UN".equals(marketCode)
+                            && consecutiveFailures >= FALLBACK_THRESHOLD) {
+                        log.info("[{}] UN → J 자동 전환 (연속 {}회 빈 응답)", stockCode, consecutiveFailures);
+                        effectiveMarketCode[0] = "J";
+                        fallbackAttempted = true;
+                        currentDate = LocalDate.now();
+                        consecutiveFailures = 0;
+                        continue;
+                    }
+
                     if (consecutiveFailures > MAX_CONSECUTIVE_FAILURES) {
                         log.error("Too many consecutive failures ({}). Stopping.",
                                 consecutiveFailures);
@@ -507,16 +536,28 @@ public class KisStockService {
                 log.error("Error fetching historical data for {}: {}", stockCode, e.getMessage());
                 currentDate = currentDate.minusDays(1);
                 consecutiveFailures++;
+
+                // UN으로 연속 오류 시 J로 자동 전환
+                if (!fallbackAttempted && "UN".equals(marketCode)
+                        && consecutiveFailures >= FALLBACK_THRESHOLD) {
+                    log.info("[{}] UN → J 자동 전환 (연속 {}회 오류)", stockCode, consecutiveFailures);
+                    effectiveMarketCode[0] = "J";
+                    fallbackAttempted = true;
+                    currentDate = LocalDate.now();
+                    consecutiveFailures = 0;
+                    continue;
+                }
+
                 if (consecutiveFailures > MAX_CONSECUTIVE_FAILURES) {
                     break;
                 }
             }
         }
-        log.info("Finished historical stock data fetch for {}", stockCode);
+        log.info("Finished historical stock data fetch for {} (finalMarket={})", stockCode, effectiveMarketCode[0]);
     }
 
-    public void fetchAllStocksHistoricalData(String startDateStr) {
-        log.info("Starting batch historical stock data fetch from {}", startDateStr);
+    public void fetchAllStocksHistoricalData(String startDateStr, String marketCode) {
+        log.info("Starting batch historical stock data fetch from {} (marketCode={})", startDateStr, marketCode);
         List<Stock> allStocks = stockRepository.findAll().stream()
                 .filter(s -> s.getStockType() == Stock.StockType.DOMESTIC
                         || s.getStockType() == Stock.StockType.DOMESTIC_ETF
@@ -527,7 +568,7 @@ public class KisStockService {
             try {
                 log.info("Updating data for stock: {} ({})", stock.getStockName(),
                         stock.getStockCode());
-                fetchAndSaveHistoricalStockData(stock.getStockCode(), startDateStr);
+                fetchAndSaveHistoricalStockData(stock.getStockCode(), startDateStr, marketCode);
                 Thread.sleep(500);
             } catch (Exception e) {
                 log.error("Failed to update stock: {} ({}) - {}", stock.getStockName(),
@@ -537,16 +578,16 @@ public class KisStockService {
         log.info("Completed batch historical stock data fetch.");
     }
 
-    public void fetchStocksHistoricalDataByRange(Long startId, Long endId, String startDateStr) {
-        log.info("Starting historical stock data fetch for stock_id range {} to {} from {}", startId, endId,
-                startDateStr);
+    public void fetchStocksHistoricalDataByRange(Long startId, Long endId, String startDateStr, String marketCode) {
+        log.info("Starting historical stock data fetch for stock_id range {} to {} from {} (marketCode={})",
+                startId, endId, startDateStr, marketCode);
         List<Stock> stocks = stockRepository.findAllByStockIdBetween(startId, endId);
 
         for (Stock stock : stocks) {
             try {
                 log.info("Updating data for stock: {} ({}) - ID: {}", stock.getStockName(),
                         stock.getStockCode(), stock.getStockId());
-                fetchAndSaveHistoricalStockData(stock.getStockCode(), startDateStr);
+                fetchAndSaveHistoricalStockData(stock.getStockCode(), startDateStr, marketCode);
                 Thread.sleep(500);
             } catch (Exception e) {
                 log.error("Failed to update stock: {} ({}) - {}", stock.getStockName(),
@@ -1418,7 +1459,7 @@ public class KisStockService {
                     token -> webClient.get()
                             .uri(uriBuilder -> uriBuilder
                                     .path(kisApiProperties.getOtherMajorRatiosUrl())
-                                    .queryParam("fid_cond_mrkt_div_code", "J")
+                                    .queryParam("fid_cond_mrkt_div_code", "UN")
                                     .queryParam("fid_input_iscd", stockCode)
                                     .queryParam("fid_div_cls_code", divCode)
                                     .build())

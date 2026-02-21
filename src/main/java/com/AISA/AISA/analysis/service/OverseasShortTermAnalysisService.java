@@ -641,6 +641,13 @@ public class OverseasShortTermAnalysisService {
             confidence = 50;
         }
 
+        // 3축 교차 검증: 가속 중이면 strength 최소 "보통", 둔화 중이면 최대 "보통"
+        if ("가속".equals(trend) && "약함".equals(strength)) {
+            strength = "보통";
+        } else if ("둔화".equals(trend) && "강함".equals(strength)) {
+            strength = "보통";
+        }
+
         String summary = buildMomentumSummary(direction, strength, trend);
 
         return Momentum.builder()
@@ -661,12 +668,20 @@ public class OverseasShortTermAnalysisService {
     }
 
     private String determineMomentumStrength(double rsi, BigDecimal histogram) {
+        double histAbs = histogram != null ? histogram.abs().doubleValue() : 0;
         boolean histPositive = histogram != null && histogram.compareTo(BigDecimal.ZERO) > 0;
         boolean histNegative = histogram != null && histogram.compareTo(BigDecimal.ZERO) < 0;
-        if (rsi >= 70 && histPositive) return "강함";
-        if (rsi <= 30 && histNegative) return "강함";
-        if ((rsi >= 60 && histPositive) || (rsi <= 40 && histNegative)) return "보통";
-        if (rsi >= 45 && rsi <= 55) return "약함";
+
+        // RSI 60% + histogram 크기 40% 결합 판정
+        // 강함: histogram 강하고 RSI도 방향 확인
+        if (histAbs >= 0.3 && ((rsi > 55 && histPositive) || (rsi < 45 && histNegative)))
+            return "강함";
+        // 보통: histogram 양수 + RSI 50 이상, 또는 histogram 음수 + RSI 50 이하
+        if ((histPositive && rsi >= 50) || (histNegative && rsi <= 50))
+            return "보통";
+        // 약함: histogram과 RSI가 엇갈리거나 histogram이 0에 가까움
+        if (histAbs < 0.1 || (rsi >= 45 && rsi <= 55 && histAbs < 0.3))
+            return "약함";
         return "보통";
     }
 
@@ -702,8 +717,8 @@ public class OverseasShortTermAnalysisService {
         else if (rsi < prevRsi) decelSignals++;
 
         // 3. Stochastic: 극단 구간 교차
-        if (stochK >= 80 && stochK < stochD) decelSignals++;
-        else if (stochK <= 20 && stochK > stochD) decelSignals++;
+        if (stochK >= 80 && stochK < stochD) decelSignals++;       // 과매수 둔화 → 감속
+        else if (stochK <= 20 && stochK > stochD) accelSignals++;  // 과매도 반등 → 가속
         else if (Math.abs(stochK - stochD) > 10) accelSignals++;
 
         return new int[]{accelSignals, decelSignals};
@@ -776,11 +791,16 @@ public class OverseasShortTermAnalysisService {
             TechnicalIndicators technicalIndicators,
             double resistanceProximity, List<BigDecimal> prices) {
 
-        // 1. Signal Layer — attractiveness 기반 base action
+        // 1. Signal Layer — attractiveness 기반 base action + trendScore 보정
         String base;
         if ("Attractive".equals(attractiveness)) base = "Buy";
         else if ("Caution".equals(attractiveness)) base = "Reduce";
         else base = "Wait";
+
+        // trendScore ≥ 90 + strength가 약함이 아니면 base를 Buy로 승격
+        if (trendScore >= 90 && !"약함".equals(momentum.getStrength()) && "Wait".equals(base)) {
+            base = "Buy";
+        }
 
         int baseIdx = ACTION_LEVELS.indexOf(base);
 
@@ -805,7 +825,9 @@ public class OverseasShortTermAnalysisService {
         // 3. Promotion Layer — 승격 (비대칭: 최대 1단계)
         int promotions = 0;
 
-        if ("가속".equals(momentum.getTrend()) && momentum.getConfidence() >= 75)
+        // 상승 가속일 때만 승격 (하락 가속은 승격 금지)
+        if ("상승".equals(momentum.getDirection())
+                && "가속".equals(momentum.getTrend()) && momentum.getConfidence() >= 75)
             promotions++;
 
         if (technicalIndicators.getRsi() <= 25 && technicalIndicators.getStochastic().getK() <= 20)
@@ -820,6 +842,11 @@ public class OverseasShortTermAnalysisService {
         // 5. 하한 안전장치: 추세 붕괴가 아니면 Sell까지 직행 불가 (Reduce가 최저)
         if (!trendCollapse && finalIdx < ACTION_LEVELS.indexOf("Reduce")) {
             finalIdx = ACTION_LEVELS.indexOf("Reduce");
+        }
+
+        // 6. trendScore 하한 보호: trendScore ≥ 80이면 최소 Wait 이상
+        if (trendScore >= 80 && finalIdx < ACTION_LEVELS.indexOf("Wait")) {
+            finalIdx = ACTION_LEVELS.indexOf("Wait");
         }
 
         return ACTION_LEVELS.get(finalIdx);

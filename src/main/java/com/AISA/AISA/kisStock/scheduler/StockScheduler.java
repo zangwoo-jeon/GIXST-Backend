@@ -62,7 +62,7 @@ public class StockScheduler {
         LocalDate targetStartDate = LocalDate.now().minusWeeks(1);
         String targetStartDateStr = targetStartDate.format(DateTimeFormatter.ofPattern("yyyyMMdd"));
 
-        kisStockService.fetchAllStocksHistoricalData(targetStartDateStr);
+        kisStockService.fetchAllStocksHistoricalData(targetStartDateStr, "UN");
 
         log.info("Completed scheduled stock data update.");
     }

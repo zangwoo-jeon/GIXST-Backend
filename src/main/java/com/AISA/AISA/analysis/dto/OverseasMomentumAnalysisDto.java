@@ -28,7 +28,7 @@ public class OverseasMomentumAnalysisDto {
         private TechnicalIndicators technicalIndicators;
         private String valuationSignal; // Cheap / Fair / Expensive (Relative to history)
         private String investmentAttractiveness; // Strong / Attractive / Neutral / Low / Avoid
-        private String action; // Buy / Wait / Watch / Sell
+        private String action; // Strong Buy / Buy / Wait / Reduce / Sell
         private String reEntryCondition; // 단기 재진입 조건
         private String holdingHorizon; // 1~3개월
     }

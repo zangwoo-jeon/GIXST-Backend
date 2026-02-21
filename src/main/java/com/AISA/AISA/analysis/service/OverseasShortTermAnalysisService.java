@@ -111,31 +111,41 @@ public class OverseasShortTermAnalysisService {
         String aiExplanation = geminiService.generateAdvice(aiPrompt);
         List<String> explanations = parseExplanation(aiExplanation);
 
+        // 6. Support/Resistance & Technical Indicators (action 판정에 필요)
+        SupportResistance supportResistance = calculateSupportResistance(priceHistory);
+        TechnicalIndicators technicalIndicators = TechnicalIndicators.builder()
+                .rsi(rsi)
+                .rsiSignal(rsiSignal)
+                .rsiStatus(determineRsiStatus(rsi))
+                .macd(MACD.builder()
+                        .macdLine(macd.getMacdLine())
+                        .signalLine(macd.getSignalLine())
+                        .histogram(macd.getHistogram())
+                        .status(determineMacdStatus(macd.getMacdLine(), macd.getHistogram()))
+                        .build())
+                .stochastic(Stochastic.builder()
+                        .k(stochastic.getK())
+                        .d(stochastic.getD())
+                        .status(determineStochasticStatus(stochastic.getK(), stochastic.getD()))
+                        .build())
+                .build();
+
+        // 7. Action — 3계층 의사결정 (Signal → Risk → Decision)
+        BigDecimal currentPriceBd = new BigDecimal(currentPriceStr.replaceAll(",", ""));
+        double resistanceProximity = calculateResistanceProximity(currentPriceBd, supportResistance.getResistanceLevel());
+        String action = determineAction(attractiveness, trendScore, momentum,
+                technicalIndicators, resistanceProximity, prices);
+
         ShortTermVerdict verdict = ShortTermVerdict.builder()
                 .trendScore(trendScore)
                 .trendDirection(trendDirection)
                 .momentum(momentum)
                 .volatility(volatility)
-                .supportResistance(calculateSupportResistance(priceHistory))
-                .technicalIndicators(TechnicalIndicators.builder()
-                        .rsi(rsi)
-                        .rsiSignal(rsiSignal)
-                        .rsiStatus(determineRsiStatus(rsi))
-                        .macd(MACD.builder()
-                                .macdLine(macd.getMacdLine())
-                                .signalLine(macd.getSignalLine())
-                                .histogram(macd.getHistogram())
-                                .status(determineMacdStatus(macd.getMacdLine(), macd.getHistogram()))
-                                .build())
-                        .stochastic(Stochastic.builder()
-                                .k(stochastic.getK())
-                                .d(stochastic.getD())
-                                .status(determineStochasticStatus(stochastic.getK(), stochastic.getD()))
-                                .build())
-                        .build())
+                .supportResistance(supportResistance)
+                .technicalIndicators(technicalIndicators)
                 .valuationSignal(valuationSignal)
                 .investmentAttractiveness(attractiveness)
-                .action(determineAction(attractiveness))
+                .action(action)
                 .reEntryCondition("RSI 50~60 조정 및 MACD 골든크로스 대기")
                 .holdingHorizon("1~3개월")
                 .build();
@@ -755,10 +765,92 @@ public class OverseasShortTermAnalysisService {
         return "Neutral";
     }
 
-    private String determineAction(String attr) {
-        if ("Attractive".equals(attr)) return "Buy";
-        if ("Caution".equals(attr)) return "Reduce";
-        return "Wait";
+    // === Action 3계층 의사결정 엔진 ===
+
+    private static final List<String> ACTION_LEVELS = List.of("Sell", "Reduce", "Wait", "Buy", "Strong Buy");
+    private static final int MAX_DEMOTION = 2;
+    private static final int MAX_PROMOTION = 1;
+
+    private String determineAction(String attractiveness, int trendScore,
+            OverseasMomentumAnalysisDto.Momentum momentum,
+            TechnicalIndicators technicalIndicators,
+            double resistanceProximity, List<BigDecimal> prices) {
+
+        // 1. Signal Layer — attractiveness 기반 base action
+        String base;
+        if ("Attractive".equals(attractiveness)) base = "Buy";
+        else if ("Caution".equals(attractiveness)) base = "Reduce";
+        else base = "Wait";
+
+        int baseIdx = ACTION_LEVELS.indexOf(base);
+
+        // 2. Risk Layer — 강등
+        int demotions = 0;
+
+        if ("둔화".equals(momentum.getTrend()) && momentum.getConfidence() >= 75)
+            demotions++;
+
+        if (resistanceProximity >= 97.0)
+            demotions++;
+
+        // 과매수 + histogram 음수일 때만 강등 (histogram 양수면 강한 추세)
+        if (technicalIndicators.getRsi() >= 75 && technicalIndicators.getStochastic().getK() >= 80
+                && technicalIndicators.getMacd().getHistogram().signum() < 0)
+            demotions++;
+
+        boolean trendCollapse = isTrendCollapse(technicalIndicators, prices);
+        int maxDemotion = trendCollapse ? 4 : MAX_DEMOTION;
+        demotions = Math.min(demotions, maxDemotion);
+
+        // 3. Promotion Layer — 승격 (비대칭: 최대 1단계)
+        int promotions = 0;
+
+        if ("가속".equals(momentum.getTrend()) && momentum.getConfidence() >= 75)
+            promotions++;
+
+        if (technicalIndicators.getRsi() <= 25 && technicalIndicators.getStochastic().getK() <= 20)
+            promotions++;
+
+        promotions = Math.min(promotions, MAX_PROMOTION);
+
+        // 4. Decision Layer — 최종 계산
+        int finalIdx = Math.max(0, Math.min(ACTION_LEVELS.size() - 1,
+                baseIdx - demotions + promotions));
+
+        // 5. 하한 안전장치: 추세 붕괴가 아니면 Sell까지 직행 불가 (Reduce가 최저)
+        if (!trendCollapse && finalIdx < ACTION_LEVELS.indexOf("Reduce")) {
+            finalIdx = ACTION_LEVELS.indexOf("Reduce");
+        }
+
+        return ACTION_LEVELS.get(finalIdx);
+    }
+
+    /**
+     * 추세 붕괴 판정 (수치 기반)
+     * 해외는 거래량 데이터 없으므로 3가지 조건 모두 충족 시 추세 붕괴
+     * - MACD line < 0 (추세 하향)
+     * - MACD histogram < 0 (하락 압력 지속 — false signal 방지)
+     * - 현재가 < MA20 (20일선 하향 이탈)
+     */
+    private boolean isTrendCollapse(TechnicalIndicators indicators, List<BigDecimal> prices) {
+        boolean macdNegative = indicators.getMacd().getMacdLine().signum() < 0;
+        boolean histNegative = indicators.getMacd().getHistogram().signum() < 0;
+
+        boolean belowMa20 = false;
+        if (prices.size() >= 20) {
+            BigDecimal ma20 = prices.subList(prices.size() - 20, prices.size()).stream()
+                    .reduce(BigDecimal.ZERO, BigDecimal::add)
+                    .divide(BigDecimal.valueOf(20), 4, RoundingMode.HALF_UP);
+            belowMa20 = prices.get(prices.size() - 1).compareTo(ma20) < 0;
+        }
+
+        return macdNegative && histNegative && belowMa20;
+    }
+
+    private double calculateResistanceProximity(BigDecimal currentPrice, BigDecimal resistance) {
+        if (resistance == null || resistance.compareTo(BigDecimal.ZERO) == 0) return 0.0;
+        return currentPrice.divide(resistance, 6, RoundingMode.HALF_UP)
+                .multiply(BigDecimal.valueOf(100)).doubleValue();
     }
 
     private String determineRsiStatus(double rsi) {

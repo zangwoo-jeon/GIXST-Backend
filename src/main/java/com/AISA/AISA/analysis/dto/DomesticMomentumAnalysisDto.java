@@ -34,7 +34,7 @@ public class DomesticMomentumAnalysisDto {
         private String rationale; // 핵심 근거 요약
 
         private String investmentAttractiveness; // Attractive / Neutral / Low
-        private String action; // Buy / Wait / Watch / Sell
+        private String action; // Strong Buy / Buy / Wait / Reduce / Sell
         private String reEntryCondition;
         private String holdingHorizon; // 1~3개월
     }

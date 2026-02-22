@@ -44,8 +44,8 @@ public class KisIndexController {
             MarketType marketType = MarketType.valueOf(marketCode.toUpperCase());
             if (marketType == MarketType.KOSPI || marketType == MarketType.KOSDAQ) {
                 var valuation = marketValuationService.calculateMarketValuation(marketType);
-                if (valuation != null) {
-                    statusData.setGrade(valuation.getGrade());
+                if (valuation != null && valuation.getValuationAnalysis() != null) {
+                    statusData.setGrade(valuation.getValuationAnalysis().getState());
                 }
             }
         } catch (Exception e) {

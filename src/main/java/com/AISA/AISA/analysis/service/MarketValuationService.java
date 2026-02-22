@@ -196,7 +196,8 @@ public class MarketValuationService {
             for (StockFinancialStatement s : histEarnings) {
                 try {
                     int year = Integer.parseInt(s.getStacYymm().substring(0, 4));
-                    // Expand range to support rolling 10-year average for historical CAPE time series
+                    // Expand range to support rolling 10-year average for historical CAPE time
+                    // series
                     if (year >= currentYear - 20 && year < currentYear) {
                         BigDecimal cpiPast = cpiMap.getOrDefault(year, currentCpi);
                         BigDecimal adj = s.getNetIncome().multiply(new BigDecimal("100000000"))
@@ -215,13 +216,15 @@ public class MarketValuationService {
                     stocksWithHistory.add(code);
             }
 
-            // Use only the recent 10 years for current CAPE (annualAdjSums has up to 20 years for historical rolling)
+            // Use only the recent 10 years for current CAPE (annualAdjSums has up to 20
+            // years for historical rolling)
             BigDecimal avgEarnings10Y = BigDecimal.ZERO;
             {
                 List<BigDecimal> recent10YEarnings = new ArrayList<>();
                 for (int y = currentYear - 10; y < currentYear; y++) {
                     BigDecimal earnings = annualAdjSums.get(y);
-                    if (earnings != null) recent10YEarnings.add(earnings);
+                    if (earnings != null)
+                        recent10YEarnings.add(earnings);
                 }
                 if (!recent10YEarnings.isEmpty()) {
                     avgEarnings10Y = recent10YEarnings.stream().reduce(BigDecimal.ZERO, BigDecimal::add)
@@ -271,11 +274,12 @@ public class MarketValuationService {
             BigDecimal bonus = scoreDetails.getCapeRangePosition().subtract(new BigDecimal("50"))
                     .multiply(new BigDecimal("0.2")).max(BigDecimal.ZERO);
             valuationScore = valuationScore.add(bonus);
-            // YG inversion penalty: relative to market's own distribution (max 25)
-            // Uses YG percentile: 50% median → 0 pts, 100% extreme → 25 pts
-            if (Boolean.TRUE.equals(scoreDetails.getYieldGapInversion()) && scoreDetails.getYieldGapPercentile() != null) {
+            // YG inversion penalty: ygScore에 이미 분포 위치가 반영되므로 추가 보정은 축소
+            // 극단적 inversion (상위 75% 이상)일 때만 최대 10점 추가
+            if (Boolean.TRUE.equals(scoreDetails.getYieldGapInversion())
+                    && scoreDetails.getYieldGapPercentile() != null) {
                 double ygPct = scoreDetails.getYieldGapPercentile().doubleValue();
-                double inversionPenalty = Math.max(0, (ygPct - 50.0) / 50.0) * 25.0;
+                double inversionPenalty = Math.max(0, (ygPct - 75.0) / 25.0) * 10.0;
                 valuationScore = valuationScore.add(new BigDecimal(inversionPenalty));
             }
             valuationScore = valuationScore.min(new BigDecimal("100.0")).setScale(1, RoundingMode.HALF_UP);
@@ -284,14 +288,29 @@ public class MarketValuationService {
             TrendScoreResult trendResult = (trend != null) ? calculateTrendScore(market, trend)
                     : new TrendScoreResult(BigDecimal.ZERO, "수급 분석 불가");
 
-            ValuationSignal vSignal = (trend != null) ? determineValuationSignal(valuationScore, trend)
-                    : ValuationSignal.NEUTRAL;
+            ValuationSignal vSignal = determineValuationSignal(valuationScore);
             TrendSignal tSignal = (trend != null) ? determineTrendSignal(trendResult.score, trend)
                     : TrendSignal.NEUTRAL;
 
+            ValuationAnalysis vAnalysis = ValuationAnalysis.builder()
+                    .score(valuationScore)
+                    .state(determineGrade(valuationScore))
+                    .actionSignal(vSignal)
+                    .build();
+
+            TrendAnalysis tAnalysis = TrendAnalysis.builder()
+                    .score(trendResult.score)
+                    .state(trendResult.description)
+                    .actionSignal(tSignal)
+                    .build();
+
+            CombinedSignal cSignal = determineCombinedSignal(vSignal, tSignal);
+            InvestmentStrategy invStrategy = InvestmentStrategy.builder()
+                    .finalActionSignal(cSignal)
+                    .combinedStrategyText("")
+                    .build();
+
             scoreDetails = scoreDetails.toBuilder()
-                    .valuationSignal(vSignal)
-                    .trendSignal(tSignal)
                     .build();
 
             BigDecimal coverage = rawTotalMarketCapUnits.compareTo(BigDecimal.ZERO) > 0
@@ -303,10 +322,9 @@ public class MarketValuationService {
             MarketValuationDto dto = MarketValuationDto.builder()
                     .market(market)
                     .marketDescription(market.getDescription())
-                    .valuationScore(valuationScore)
-                    .grade(determineGrade(valuationScore))
-                    .trendScore(trendResult.score)
-                    .trendDescription(trendResult.description)
+                    .valuationAnalysis(vAnalysis)
+                    .trendAnalysis(tAnalysis)
+                    .investmentStrategy(invStrategy)
                     .valuation(MarketValuationDto.ValuationInfo.builder()
                             .per(per).pbr(pbr).cape(currentCape).yieldGap(yieldGap).bondYield(bondYield).build())
                     .scoreDetails(scoreDetails)
@@ -332,10 +350,30 @@ public class MarketValuationService {
                     + " " + getValuationSentimentContext(vSignal)
                     + " " + getTrendSentimentContext(tSignal);
 
+            String finalValuationStrategy = aiRes != null && aiRes.valuationStrategy() != null
+                    ? aiRes.valuationStrategy()
+                    : fallbackV;
+            String finalTrendStrategy = aiRes != null ? aiRes.trendStrategy() : null;
+            String finalCombinedStrategy = aiRes != null && aiRes.combinedStrategy() != null
+                    ? aiRes.combinedStrategy()
+                    : "데이터를 종합 분석 중입니다.";
+
+            ValuationAnalysis finalVAnalysis = dto.getValuationAnalysis().toBuilder()
+                    .strategyText(finalValuationStrategy)
+                    .build();
+
+            TrendAnalysis finalTAnalysis = dto.getTrendAnalysis().toBuilder()
+                    .strategyText(finalTrendStrategy)
+                    .build();
+
+            InvestmentStrategy finalInvStrategy = dto.getInvestmentStrategy().toBuilder()
+                    .combinedStrategyText(finalCombinedStrategy)
+                    .build();
+
             return dto.toBuilder()
-                    .valuationStrategy(
-                            aiRes != null && aiRes.valuationStrategy() != null ? aiRes.valuationStrategy() : fallbackV)
-                    .trendStrategy(aiRes != null ? aiRes.trendStrategy() : null)
+                    .valuationAnalysis(finalVAnalysis)
+                    .trendAnalysis(finalTAnalysis)
+                    .investmentStrategy(finalInvStrategy)
                     .build();
 
         } catch (Exception e) {
@@ -544,7 +582,8 @@ public class MarketValuationService {
         }
 
         // Calculate YG percentile (how overvalued relative to own market history)
-        // Higher percentile = current YG is lower than most historical points = more overvalued
+        // Higher percentile = current YG is lower than most historical points = more
+        // overvalued
         BigDecimal ygPercentile = BigDecimal.ZERO;
         {
             List<BigDecimal> historicalYGs = timeSeries.stream()
@@ -572,13 +611,15 @@ public class MarketValuationService {
 
     private String determineGrade(BigDecimal valuationScore) {
         double score = valuationScore.doubleValue();
-        if (score >= 80)
+        if (score >= 90)
             return "EXTREME_GREED";
+        if (score >= 75)
+            return "STRONG_OVERHEATED";
         if (score >= 60)
             return "OVERHEATED";
-        if (score >= 35)
+        if (score >= 40)
             return "FAIR";
-        if (score >= 15)
+        if (score >= 20)
             return "UNDERVALUED";
         return "EXTREME_FEAR";
     }
@@ -586,30 +627,34 @@ public class MarketValuationService {
     private String determineStrategy(BigDecimal valuationScore) {
         double score = valuationScore.doubleValue();
         if (score >= 90)
-            return "극심한 과열: 수익실현 권고";
-        if (score >= 80)
-            return "상당한 과열: 비중 축소";
+            return "투자 심리 과열, 고평가 수준 극심";
+        if (score >= 75)
+            return "명확히 고평가, 단기 조정 가능성 높음";
         if (score >= 60)
-            return "주의: 보수적 대응";
-        if (score >= 35)
-            return "적정: 종목별 장세";
-        if (score >= 15)
-            return "저평가: 분할 매수";
-        return "과매도: 비중 확대 고려";
+            return "과열 구간 진입, 주의 필요";
+        if (score >= 40)
+            return "내재가치 대비 적정, 특별한 행동 불필요";
+        if (score >= 20)
+            return "매수 기회 가능, 다만 모멘텀/금리 고려 필요";
+        return "매우 저평가, 위험과 기회 공존";
     }
 
     private String getValuationSentimentContext(ValuationSignal signal) {
-        if (signal == null || signal == ValuationSignal.NEUTRAL)
+        if (signal == null)
             return "";
         switch (signal) {
-            case UNDERVALUED_BUY:
-                return "[저평가 매수] 스마트 머니 유입 신호";
-            case OVERVALUED_CAUTION:
-                return "[고평가 경계] 메이저 자금 이탈 관찰";
-            case VALUE_TRAP:
-                return "[가치 함정] 저평가에도 불구하고 수급 부재";
+            case EXTREME_FEAR:
+                return "[극도의 공포] 역사적 저평가 매력 부각";
+            case UNDERVALUED:
+                return "[저평가] 밸류에이션 매력 부각";
             case FAIR_VALUE:
                 return "[적정 가치] 시장 균형 상태";
+            case OVERHEATED:
+                return "[과열] 밸류에이션 부담 확대";
+            case STRONG_OVERHEATED:
+                return "[극심한 과열] 명확한 고평가로 단기 조정 주의";
+            case EXTREME_GREED:
+                return "[극도의 탐욕] 역사적 고평가 부담 경계";
             default:
                 return "";
         }
@@ -643,14 +688,21 @@ public class MarketValuationService {
         return processTrend(market, history.subList(0, 20), includeBreadth);
     }
 
-    private InvestorTrendInfo processTrend(MarketType market, List<MarketInvestorDaily> subHistory, boolean includeBreadth) {
+    private InvestorTrendInfo processTrend(MarketType market, List<MarketInvestorDaily> subHistory,
+            boolean includeBreadth) {
         long individual5d = 0, foreign5d = 0, institutional5d = 0;
+        long individual3d = 0, foreign3d = 0, institutional3d = 0;
         long foreign20d = 0, institutional20d = 0;
 
         for (int i = 0; i < 5; i++) {
             individual5d += subHistory.get(i).getPersonalNetBuy().longValue();
             foreign5d += subHistory.get(i).getForeignerNetBuy().longValue();
             institutional5d += subHistory.get(i).getInstitutionNetBuy().longValue();
+            if (i < 3) {
+                individual3d += subHistory.get(i).getPersonalNetBuy().longValue();
+                foreign3d += subHistory.get(i).getForeignerNetBuy().longValue();
+                institutional3d += subHistory.get(i).getInstitutionNetBuy().longValue();
+            }
         }
 
         for (int i = 0; i < 20; i++) {
@@ -670,7 +722,8 @@ public class MarketValuationService {
 
         BreadthResult breadth = includeBreadth
                 ? calculateMarketBreadth(market, subHistory.get(0).getDate())
-                : new BreadthResult(0, 0, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, "장중 - 전일 기준 breadth 미포함");
+                : new BreadthResult(0, 0, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO,
+                        "장중 - 전일 기준 breadth 미포함");
 
         // VKOSPI: Only applicable for KOSPI (no equivalent index for KOSDAQ)
         BigDecimal vkospi = null;
@@ -714,6 +767,9 @@ public class MarketValuationService {
                 .individualNet5d(individual5d)
                 .foreignNet5d(foreign5d)
                 .institutionalNet5d(institutional5d)
+                .individualNet3d(individual3d)
+                .foreignNet3d(foreign3d)
+                .institutionalNet3d(institutional3d)
                 .foreignRelativeStrength(BigDecimal.valueOf(foreignRS).setScale(2, RoundingMode.HALF_UP).doubleValue())
                 .institutionalRelativeStrength(
                         BigDecimal.valueOf(instRS).setScale(2, RoundingMode.HALF_UP).doubleValue())
@@ -759,6 +815,47 @@ public class MarketValuationService {
             return BigDecimal.ZERO;
         double sum = history.stream().limit(count).mapToDouble(BreadthHistoryDto::getBreadthIndex).sum();
         return BigDecimal.valueOf(sum / count).setScale(2, RoundingMode.HALF_UP);
+    }
+
+    /**
+     * 실현 변동성 기반 안정성 점수 (VKOSPI 없는 시장용)
+     * 20일 실현 변동성을 연환산하여 VKOSPI와 동일 척도로 변환
+     * 낮은 변동성 = 높은 점수 (안정적), 높은 변동성 = 낮은 점수 (불안정)
+     */
+    private double calculateRealizedVolScore(MarketType market) {
+        try {
+            LocalDate end = LocalDate.now();
+            LocalDate start = end.minusDays(30);
+            List<IndexDailyData> indexData = indexDailyDataRepository
+                    .findAllByMarketNameAndDateBetweenOrderByDateDesc(market.name(), start, end);
+            if (indexData.size() < 21)
+                return 5.0;
+
+            // 최근 20일 일별 수익률의 표준편차 → 연환산
+            List<Double> returns = new ArrayList<>();
+            for (int i = 0; i < 20 && i + 1 < indexData.size(); i++) {
+                double close = indexData.get(i).getClosingPrice().doubleValue();
+                double prevClose = indexData.get(i + 1).getClosingPrice().doubleValue();
+                if (prevClose > 0)
+                    returns.add((close - prevClose) / prevClose);
+            }
+            if (returns.isEmpty())
+                return 5.0;
+
+            double mean = returns.stream().mapToDouble(r -> r).average().orElse(0);
+            double variance = returns.stream().mapToDouble(r -> Math.pow(r - mean, 2)).average().orElse(0);
+            double annualizedVol = Math.sqrt(variance) * Math.sqrt(252) * 100; // %로 변환
+
+            // VKOSPI와 동일 척도: 15% 이하 = 10점, 25% 이상 = 0점
+            if (annualizedVol <= 15.0)
+                return 10.0;
+            if (annualizedVol >= 25.0)
+                return 0.0;
+            return 10.0 - (annualizedVol - 15.0);
+        } catch (Exception e) {
+            log.warn("Failed to calculate realized vol for {}: {}", market, e.getMessage());
+            return 5.0;
+        }
     }
 
     private TrendScoreResult calculateTrendScore(MarketType market, InvestorTrendInfo trend) {
@@ -813,18 +910,23 @@ public class MarketValuationService {
         double futuresScoreRaw = (Math.max(-1.0, Math.min(1.0, futuresRatio)) + 1.0) / 2.0 * 20.0;
         score = score.add(new BigDecimal(futuresScoreRaw));
 
-        // 5. VKOSPI Stability Score (10 pts)
-        double vkospiScoreRaw = 5.0;
+        // 5. Volatility Stability Score (10 pts)
+        // KOSPI: VKOSPI 사용, KOSDAQ: 20일 실현 변동성으로 대체
+        double volScoreRaw = 5.0;
         if (trend.getVkospi() != null) {
+            // VKOSPI 기반 (KOSPI)
             double v = trend.getVkospi().doubleValue();
             if (v <= 15.0)
-                vkospiScoreRaw = 10.0;
+                volScoreRaw = 10.0;
             else if (v >= 25.0)
-                vkospiScoreRaw = 0.0;
+                volScoreRaw = 0.0;
             else
-                vkospiScoreRaw = 10.0 - (v - 15.0);
+                volScoreRaw = 10.0 - (v - 15.0);
+        } else {
+            // 실현 변동성 기반 (KOSDAQ 등 VKOSPI 없는 시장)
+            volScoreRaw = calculateRealizedVolScore(market);
         }
-        score = score.add(new BigDecimal(vkospiScoreRaw));
+        score = score.add(new BigDecimal(volScoreRaw));
 
         score = score.max(BigDecimal.ZERO).setScale(1, RoundingMode.HALF_UP);
         return new TrendScoreResult(score, determineTrendDescription(score, trend));
@@ -855,10 +957,11 @@ public class MarketValuationService {
     }
 
     private TrendDirection calculateDirection(List<Long> values) {
-        if (values.size() < 5)
+        if (values.size() < 6)
             return TrendDirection.NEUTRAL;
+        // 최근 3일 vs 이전 3일 (overlap 없이 분리)
         long currentAvg = (values.get(0) + values.get(1) + values.get(2)) / 3;
-        long prevAvg = (values.get(2) + values.get(3) + values.get(4)) / 3;
+        long prevAvg = (values.get(3) + values.get(4) + values.get(5)) / 3;
         if (currentAvg > 0)
             return currentAvg > prevAvg ? TrendDirection.BUYING_ACCELERATED : TrendDirection.BUYING_SLOWED;
         if (currentAvg < 0)
@@ -866,49 +969,87 @@ public class MarketValuationService {
         return TrendDirection.NEUTRAL;
     }
 
-    private ValuationSignal determineValuationSignal(BigDecimal valuationScore, InvestorTrendInfo trend) {
+    private ValuationSignal determineValuationSignal(BigDecimal valuationScore) {
         double score = valuationScore.doubleValue();
-        if (score < 40) {
-            // Low score (Fear/Value)
-            if (trend.getForeignNet5d() > 0 || trend.getInstitutionalNet5d() > 0) {
-                return ValuationSignal.UNDERVALUED_BUY;
-            } else if (trend.getCommonMarketBreadthIndex().doubleValue() < -20) {
-                return ValuationSignal.VALUE_TRAP;
-            }
-        } else if (score > 80) {
-            // High score (Greed/Overvalued)
-            if (trend.getForeignNet5d() < 0 && trend.getInstitutionalNet5d() < 0) {
-                return ValuationSignal.OVERVALUED_CAUTION;
-            }
-        } else if (score >= 45 && score <= 55) {
+        if (score >= 90) {
+            return ValuationSignal.EXTREME_GREED;
+        } else if (score >= 75) {
+            return ValuationSignal.STRONG_OVERHEATED;
+        } else if (score >= 60) {
+            return ValuationSignal.OVERHEATED;
+        } else if (score >= 40) {
             return ValuationSignal.FAIR_VALUE;
+        } else if (score >= 20) {
+            return ValuationSignal.UNDERVALUED;
         }
-        return ValuationSignal.NEUTRAL;
+        return ValuationSignal.EXTREME_FEAR;
+    }
+
+    private CombinedSignal determineCombinedSignal(ValuationSignal valuation, TrendSignal trend) {
+        if (valuation == null || trend == null)
+            return CombinedSignal.HOLD;
+
+        if (valuation == ValuationSignal.UNDERVALUED || valuation == ValuationSignal.EXTREME_FEAR) {
+            if (trend == TrendSignal.HEALTHY_BULL || trend == TrendSignal.OVERSOLD_REBOUND)
+                return CombinedSignal.STRONG_BUY;
+            if (trend == TrendSignal.PANIC_SELLING)
+                return CombinedSignal.HOLD;
+            return CombinedSignal.ACCUMULATE;
+        }
+
+        if (valuation == ValuationSignal.OVERHEATED || valuation == ValuationSignal.STRONG_OVERHEATED
+                || valuation == ValuationSignal.EXTREME_GREED) {
+            if (trend == TrendSignal.PANIC_SELLING || trend == TrendSignal.BULL_TRAP)
+                return CombinedSignal.AGGRESSIVE_SELL;
+            if (trend == TrendSignal.HEALTHY_BULL)
+                return CombinedSignal.HOLD;
+            return CombinedSignal.CAUTION;
+        }
+
+        if (trend == TrendSignal.HEALTHY_BULL)
+            return CombinedSignal.ACCUMULATE;
+        if (trend == TrendSignal.PANIC_SELLING || trend == TrendSignal.BULL_TRAP)
+            return CombinedSignal.CAUTION;
+
+        return CombinedSignal.HOLD;
     }
 
     private TrendSignal determineTrendSignal(BigDecimal trendScore, InvestorTrendInfo trend) {
         double score = trendScore.doubleValue();
         double breadth = trend.getCommonMarketBreadthIndex().doubleValue();
+        double avg5d = trend.getBreadth5dAvg().doubleValue();
+        double avg20d = trend.getBreadth20dAvg().doubleValue();
+        double avg60d = trend.getBreadth60dAvg().doubleValue();
 
-        if (score > 70) {
-            if (trend.getForeignNet5d() > 0 && breadth > trend.getBreadth5dAvg().doubleValue()) {
-                return TrendSignal.HEALTHY_BULL;
-            }
-        } else if (score < 30) {
-            if (breadth < -40 && trend.getForeignNet5d() < -500000) {
-                return TrendSignal.PANIC_SELLING;
-            }
-            if (breadth < trend.getBreadth60dAvg().doubleValue() - 20) {
-                return TrendSignal.OVERSOLD_REBOUND; // Potential for rebound if extreme
-            }
+        // 상대 기준: breadth의 Z-score (20d 평균 대비 편차를 5d-20d 갭으로 정규화)
+        double breadthSpread = Math.max(Math.abs(avg5d - avg60d), 3.0); // 최소 3으로 0-div 방지
+        double breadthZ = (breadth - avg20d) / breadthSpread;
+
+        // 외국인 상대 강도: relativeStrength가 이미 (5d*4/20d) → 1.0이 중립
+        double foreignRS = trend.getForeignRelativeStrength();
+
+        // 1. HEALTHY_BULL: 추세 우위 + 외국인 가속 매수 + breadth 상승
+        if (score >= 60 && foreignRS > 1.2 && breadthZ > 0.5) {
+            return TrendSignal.HEALTHY_BULL;
         }
 
-        // Divergence Check for Bull Trap
-        if (score > 50 && breadth < trend.getBreadth5dAvg().doubleValue() - 15) {
+        // 2. PANIC_SELLING: 추세 약세 + breadth 급락 + 외국인 가속 매도
+        if (score < 35 && breadthZ < -1.2 && foreignRS < 0.6) {
+            return TrendSignal.PANIC_SELLING;
+        }
+
+        // 3. OVERSOLD_REBOUND: breadth가 60d 대비 극단적 저점 + 반등 조짐
+        if (score < 40 && breadth < avg60d && breadthZ < -0.8 && breadth > avg5d) {
+            return TrendSignal.OVERSOLD_REBOUND;
+        }
+
+        // 4. BULL_TRAP: 점수 우위이나 breadth 하락 다이버전스
+        if (score > 50 && breadthZ < -0.5 && breadth < avg5d) {
             return TrendSignal.BULL_TRAP;
         }
 
-        if (Math.abs(breadth) < 5 && Math.abs(trend.getBreadth5dAvg().doubleValue()) < 5) {
+        // 5. STAGNANT: breadth 변동폭이 매우 낮음
+        if (Math.abs(breadthZ) < 0.3 && Math.abs(avg5d - avg20d) < 3.0) {
             return TrendSignal.STAGNANT;
         }
 
@@ -963,7 +1104,6 @@ public class MarketValuationService {
 
             // KNN parameters
             final int K = 30;
-            final int FORWARD_DAYS = 20; // 1 month approx
 
             if (timeSeries != null && indexDailyDataRepository != null && currentCape != null
                     && currentYieldGap != null) {
@@ -1084,12 +1224,16 @@ public class MarketValuationService {
             // 2. Energy Score (Pup)
             // Feature Normalization
             double normTrend = (trendScore != null) ? trendScore.doubleValue() / 100.0 : 0.0; // 0~1
+            // normForeign: 시장별 기준값 대비 sigmoid 정규화 (0~1 연속값)
             double normForeign = 0.5;
             if (trendInfo != null) {
                 Long fNet = trendInfo.getForeignNet5d();
                 Long fFutNet = trendInfo.getFuturesForeignNet5d();
                 long net = (fNet != null ? fNet : 0L) + (fFutNet != null ? fFutNet : 0L);
-                normForeign = (net > 0) ? 0.8 : 0.2; // Simplified directional
+                // 시장별 기준값으로 정규화 후 sigmoid
+                long foreignTarget = (market == MarketType.KOSPI) ? 500000L : 100000L;
+                double ratio = (double) net / foreignTarget; // -1 ~ +1 범위 (대부분)
+                normForeign = 1.0 / (1.0 + Math.exp(-2.5 * ratio)); // sigmoid: 0~1 연속값
             }
 
             double normBreadth = 0.5;
@@ -1114,8 +1258,10 @@ public class MarketValuationService {
             energyScore = Math.max(0.0, Math.min(1.0, energyScore));
 
             // 4. Combine for Time Horizons
-            // Short-term (1w): Heavily dependent on Energy
-            double pShort = energyScore * 100.0;
+            // Short-term (1w): Energy 주도 + KNN 보조 (유사 국면이 있으면 반영)
+            double pShort = (matches > 5)
+                    ? (energyScore * 0.7 + (weightedWinRate / 100.0) * 0.3) * 100.0
+                    : energyScore * 100.0;
 
             // Medium-term (1m): Blend of Energy and Backtesting (Weighted KNN)
             double pMedium = (energyScore * 0.4 + (weightedWinRate / 100.0) * 0.6) * 100.0;

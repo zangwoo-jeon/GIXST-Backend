@@ -106,7 +106,8 @@ public class MarketValuationServiceTest {
                 when(marketInvestorDailyRepository.findTop30ByMarketCodeOrderByDateDesc(anyString()))
                                 .thenReturn(List.of());
                 when(geminiService.generateMarketStrategy(any()))
-                                .thenReturn(new GeminiService.StrategyResult("AI Valuation", "AI Trend"));
+                                .thenReturn(new GeminiService.StrategyResult("AI Valuation", "AI Trend",
+                                                "AI Combined"));
                 when(kisMacroService.fetchMacroData(anyString(), anyString(), anyString(), anyString(), anyString(),
                                 anyString())).thenReturn(List.of());
                 when(kisMacroService.getLatestBondYield(any())).thenReturn(new BigDecimal("3.50"));
@@ -144,8 +145,10 @@ public class MarketValuationServiceTest {
                 // Re-run to test CAPE and Signals
                 result = marketValuationService.calculateMarketValuation(market);
                 assertNotNull(result.getValuation().getCape());
-                assertNotNull(result.getScoreDetails().getValuationSignal());
-                assertNotNull(result.getScoreDetails().getTrendSignal());
+                assertNotNull(result.getValuationAnalysis().getActionSignal());
+                assertNotNull(result.getTrendAnalysis().getActionSignal());
+                assertNotNull(result.getInvestmentStrategy());
+                assertNotNull(result.getInvestmentStrategy().getFinalActionSignal());
                 assertNotNull(result.getPredictionReport());
                 assertNotNull(result.getPredictionReport().getShortTerm());
                 assertNotNull(result.getPredictionReport().getMediumTerm());

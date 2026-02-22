@@ -47,7 +47,7 @@ public class IsaServiceTest {
         // Mock Stocks
         Stock domesticStock = Stock.create("005930", "삼성전자", MarketType.KOSPI);
 
-        Stock overseasStock = Stock.createOverseas("AAPL", "Apple", MarketType.NASDAQ);
+        Stock overseasStock = Stock.createOverseas("AAPL", "Apple", MarketType.NAS);
         // Note: createOverseas sets type to US_STOCK, but let's be explicit if needed.
         // stock.updateStockType(StockType.US_STOCK) is already called in
         // createOverseas.

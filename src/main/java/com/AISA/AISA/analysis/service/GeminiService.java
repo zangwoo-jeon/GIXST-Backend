@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 
@@ -25,7 +26,7 @@ public class GeminiService {
      * Generates a context-aware market strategy based on the valuation data.
      * Returns null if generation fails (to allow fallback to static strategy).
      */
-    public static record StrategyResult(String valuationStrategy, String trendStrategy) {
+    public static record StrategyResult(String valuationStrategy, String trendStrategy, String combinedStrategy) {
     }
 
     /**
@@ -40,20 +41,27 @@ public class GeminiService {
             return parseSplitResponse(response);
         } catch (Exception e) {
             log.warn("Failed to generate AI strategy: {}", e.getMessage());
-            return new StrategyResult(null, null); // Fallback to static
+            return new StrategyResult(null, null, null); // Fallback to static
         }
     }
 
     private StrategyResult parseSplitResponse(String response) {
         String valuation = "";
         String trend = "";
+        String combined = "";
 
         try {
             if (response.contains("[VALUATION_STRATEGY]")) {
-                String[] parts = response.split("\\[TREND_STRATEGY\\]");
-                valuation = parts[0].replace("[VALUATION_STRATEGY]", "").trim();
-                if (parts.length > 1) {
-                    trend = parts[1].trim();
+                String[] parts1 = response.split("\\[TREND_STRATEGY\\]");
+                valuation = parts1[0].replace("[VALUATION_STRATEGY]", "").trim();
+                if (parts1.length > 1) {
+                    if (parts1[1].contains("[COMBINED_STRATEGY]")) {
+                        String[] parts2 = parts1[1].split("\\[COMBINED_STRATEGY\\]");
+                        trend = parts2[0].trim();
+                        combined = parts2[1].trim();
+                    } else {
+                        trend = parts1[1].trim();
+                    }
                 }
             } else {
                 valuation = response; // Fallback if no tags
@@ -63,7 +71,7 @@ public class GeminiService {
             valuation = response;
         }
 
-        return new StrategyResult(valuation, trend);
+        return new StrategyResult(valuation, trend, combined);
     }
 
     public String generateAdvice(String context) {
@@ -158,17 +166,22 @@ public class GeminiService {
     private String buildStrategyPrompt(com.AISA.AISA.analysis.dto.MarketValuationDto dto) {
         StringBuilder sb = new StringBuilder();
         sb.append("Role: Professional Market Analyst (Quant-based)\n");
-        sb.append("Task: Write two concise market analysis sections (Korean, 2~3 sentences each).\n");
-        sb.append("1. [VALUATION_STRATEGY]: Focus on Valuation (Score, CAPE, Yield Gap).\n");
-        sb.append("2. [TREND_STRATEGY]: Focus on Market Trend (Trend Score, 수급, Breadth, VKOSPI).\n");
-        sb.append("Constraint: Use the exact tags [VALUATION_STRATEGY] and [TREND_STRATEGY] to separate sections.\n\n");
+        sb.append("Task: Write three concise market analysis sections (Korean, 2~3 sentences each).\n");
+        sb.append("1. [VALUATION_STRATEGY]: Focus ONLY on Valuation (Score, CAPE, Yield Gap, Valuation Signal).\n");
+        sb.append(
+                "2. [TREND_STRATEGY]: Focus ONLY on Market Trend (Trend Score, 수급, Breadth, VKOSPI, Trend Signal).\n");
+        sb.append(
+                "3. [COMBINED_STRATEGY]: Integrate Valuation and Trend to provide a final Investment Strategy based on the Final Combined Signal.\n");
+        sb.append(
+                "Constraint: Use the exact tags [VALUATION_STRATEGY], [TREND_STRATEGY], and [COMBINED_STRATEGY] to separate sections.\n\n");
 
         sb.append("Input Data:\n");
         sb.append("- Market: ").append(dto.getMarket()).append("\n");
-        sb.append("- Valuation Score: ").append(dto.getValuationScore()).append("/100 (Grade: ").append(dto.getGrade())
+        sb.append("- Valuation Score: ").append(dto.getValuationAnalysis().getScore()).append("/100 (Grade: ")
+                .append(dto.getValuationAnalysis().getState())
                 .append(")\n");
-        sb.append("- Trend Score: ").append(dto.getTrendScore()).append("/100 (Description: ")
-                .append(dto.getTrendDescription()).append(")\n");
+        sb.append("- Trend Score: ").append(dto.getTrendAnalysis().getScore()).append("/100 (Description: ")
+                .append(dto.getTrendAnalysis().getState()).append(")\n");
 
         if (dto.getValuation() != null) {
             sb.append("- CAPE: ").append(dto.getValuation().getCape()).append(" (Range: ")
@@ -176,8 +189,12 @@ public class GeminiService {
             sb.append("- Yield Gap: ").append(dto.getValuation().getYieldGap()).append("% (Inversion: ")
                     .append(dto.getScoreDetails().getYieldGapInversion()).append(")\n");
         }
-        sb.append("- Valuation Signal: ").append(dto.getScoreDetails().getValuationSignal()).append("\n");
-        sb.append("- Trend Signal: ").append(dto.getScoreDetails().getTrendSignal()).append("\n");
+        sb.append("- Valuation Signal: ").append(dto.getValuationAnalysis().getActionSignal()).append("\n");
+        sb.append("- Trend Signal: ").append(dto.getTrendAnalysis().getActionSignal()).append("\n");
+        if (dto.getInvestmentStrategy() != null) {
+            sb.append("- Final Combined Signal: ").append(dto.getInvestmentStrategy().getFinalActionSignal())
+                    .append("\n");
+        }
 
         if (dto.getInvestorTrend() != null) {
             sb.append("- Common Stock Breadth: Rising=").append(dto.getInvestorTrend().getCommonRisingStockCount())
@@ -191,7 +208,23 @@ public class GeminiService {
             sb.append("- Investor Trend (Futures): ForeignSum=").append(dto.getInvestorTrend().getFuturesForeignNet5d())
                     .append(", IndividualSum=").append(dto.getInvestorTrend().getFuturesIndividualNet5d()).append("\n");
             if (dto.getInvestorTrend().getVkospi() != null) {
-                sb.append("- VKOSPI: ").append(dto.getInvestorTrend().getVkospi()).append("\n");
+                BigDecimal vk = dto.getInvestorTrend().getVkospi();
+                String vkLevel;
+                double vkVal = vk.doubleValue();
+                if (vkVal <= 15)
+                    vkLevel = "매우 안정 (극저변동성)";
+                else if (vkVal <= 20)
+                    vkLevel = "안정";
+                else if (vkVal <= 30)
+                    vkLevel = "보통 (평균 수준)";
+                else if (vkVal <= 40)
+                    vkLevel = "경계 (높은 변동성)";
+                else
+                    vkLevel = "공포 구간 (극단적 고변동성, 코로나급)";
+                sb.append("- VKOSPI: ").append(vk).append(" [").append(vkLevel).append("]\n");
+                sb.append("  * VKOSPI 해석 기준: ≤15 매우 안정, 15-20 안정, 20-30 보통, 30-40 경계, ≥40 공포 구간. ")
+                        .append("40 이상은 시장 참여자들의 극단적 불안감을 반영하며, 급락 리스크 경고 신호입니다. ")
+                        .append("상승장에서 VKOSPI가 높으면 '과열+불안' 공존 상태로 해석해야 합니다.\n");
             }
         } else {
             sb.append("- Investor Trend: Not available\n");

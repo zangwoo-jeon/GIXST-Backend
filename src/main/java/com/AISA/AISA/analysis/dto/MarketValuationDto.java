@@ -18,13 +18,9 @@ import java.util.List;
 public class MarketValuationDto {
     private MarketType market;
     private String marketDescription;
-    private BigDecimal valuationScore;
-    private String grade;
-    private String valuationStrategy;
-    private String trendStrategy;
-
-    private BigDecimal trendScore;
-    private String trendDescription;
+    private ValuationAnalysis valuationAnalysis;
+    private TrendAnalysis trendAnalysis;
+    private InvestmentStrategy investmentStrategy; // [NEW] 종합 투자 전략
 
     private ValuationInfo valuation;
     private ScoreDetails scoreDetails;
@@ -32,6 +28,28 @@ public class MarketValuationDto {
     private MetadataInfo metadata;
     private List<TimeSeriesPoint> timeSeries;
     private PredictionReport predictionReport;
+
+    @Getter
+    @Builder(toBuilder = true)
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class ValuationAnalysis {
+        private BigDecimal score;
+        private String state; // 기존 grade
+        private ValuationSignal actionSignal; // 기존 valuationSignal
+        private String strategyText; // 기존 valuationStrategy
+    }
+
+    @Getter
+    @Builder(toBuilder = true)
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class TrendAnalysis {
+        private BigDecimal score;
+        private String state; // 기존 trendDescription
+        private TrendSignal actionSignal; // 기존 trendSignal
+        private String strategyText; // 기존 trendStrategy
+    }
 
     @Getter
     @Builder
@@ -57,8 +75,6 @@ public class MarketValuationDto {
         private Boolean yieldGapInversion; // Flag: current YG below market's own historical median
         private BigDecimal yieldGapPercentile; // 0-100% (Position within market's own YG distribution)
         private Boolean dataDistortionWarning; // Flag for structural change
-        private ValuationSignal valuationSignal;
-        private TrendSignal trendSignal;
     }
 
     @Getter
@@ -69,6 +85,10 @@ public class MarketValuationDto {
         private Long individualNet5d;
         private Long foreignNet5d;
         private Long institutionalNet5d;
+
+        private Long individualNet3d;
+        private Long foreignNet3d;
+        private Long institutionalNet3d;
 
         private Double foreignRelativeStrength; // (5d avg / 20d avg)
         private Double institutionalRelativeStrength;
@@ -101,11 +121,29 @@ public class MarketValuationDto {
     }
 
     public enum ValuationSignal {
-        UNDERVALUED_BUY, // Low Score + Buying
-        OVERVALUED_CAUTION, // High Score + Major Exit
-        VALUE_TRAP, // Low Score but persistent selling
-        FAIR_VALUE, // Near median
-        NEUTRAL
+        EXTREME_FEAR,
+        UNDERVALUED,
+        FAIR_VALUE,
+        OVERHEATED,
+        STRONG_OVERHEATED,
+        EXTREME_GREED
+    }
+
+    public enum CombinedSignal {
+        STRONG_BUY,
+        ACCUMULATE,
+        HOLD,
+        CAUTION,
+        AGGRESSIVE_SELL
+    }
+
+    @Getter
+    @Builder(toBuilder = true)
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class InvestmentStrategy {
+        private CombinedSignal finalActionSignal;
+        private String combinedStrategyText;
     }
 
     public enum TrendSignal {

@@ -36,6 +36,9 @@ public interface StockRepository extends JpaRepository<Stock, Long> {
         @Query("SELECT s FROM Stock s WHERE (s.stockCode LIKE %:keyword% OR s.stockName LIKE %:keyword%) AND s.stockType IN ('DOMESTIC', 'DOMESTIC_ETF', 'FOREIGN_ETF')")
         List<Stock> findDomesticByKeyword(@Param("keyword") String keyword);
 
+        @Query("SELECT s FROM Stock s WHERE s.marketName = :marketName AND s.stockType = 'DOMESTIC' AND s.isCommon = true AND s.isSuspended = false")
+        List<Stock> findDomesticCommonStocksByMarket(@Param("marketName") MarketType marketName);
+
         // List View API: Find Stocks by SubIndustry Code with Pagination
         @Query("SELECT s FROM Stock s JOIN s.stockIndustries si JOIN si.subIndustry sub WHERE sub.code = :subIndustryCode")
         Page<Stock> findBySubIndustryCode(@Param("subIndustryCode") String subIndustryCode, Pageable pageable);

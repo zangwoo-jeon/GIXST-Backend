@@ -1048,6 +1048,56 @@ public class KisInformationService {
         log.info("Completed batch listing date update");
     }
 
+    @Transactional
+    public void updateStockSuspensionStatus(String stockCode) {
+        validateDomesticStock(stockCode);
+        Stock stock = stockRepository.findByStockCode(stockCode)
+                .orElseThrow(() -> new BusinessException(KisApiErrorCode.STOCK_NOT_FOUND));
+
+        try {
+            KisStockSearchInfoApiResponse response = kisApiClient.fetch(token -> webClient.get()
+                    .uri(uriBuilder -> uriBuilder
+                            .path(kisApiProperties.getSearchStockInfoUrl())
+                            .queryParam("PRDT_TYPE_CD", "300")
+                            .queryParam("PDNO", stockCode)
+                            .build())
+                    .header("authorization", token)
+                    .header("appkey", kisApiProperties.getAppkey())
+                    .header("appsecret", kisApiProperties.getAppsecret())
+                    .header("tr_id", "CTPF1002R")
+                    .header("custtype", "P"), KisStockSearchInfoApiResponse.class);
+
+            if (response != null && "0".equals(response.getRtCd()) && response.getOutput() != null) {
+                String trStopYn = response.getOutput().getTrStopYn();
+                if (trStopYn != null) {
+                    boolean isSuspended = "Y".equalsIgnoreCase(trStopYn);
+                    stock.updateSuspensionStatus(isSuspended);
+                    stockRepository.save(stock);
+                    log.info("Successfully updated suspension status for {}: {}", stockCode, isSuspended);
+                }
+            }
+        } catch (Exception e) {
+            log.error("Failed to fetch search stock info for suspension status {}: {}", stockCode, e.getMessage());
+        }
+    }
+
+    public void updateAllStockSuspensionStatus() {
+        List<Stock> domesticStocks = stockRepository.findAll().stream()
+                .filter(s -> s.getStockType() == Stock.StockType.DOMESTIC)
+                .collect(Collectors.toList());
+
+        log.info("Starting batch suspension status update for {} stocks", domesticStocks.size());
+        for (Stock stock : domesticStocks) {
+            try {
+                updateStockSuspensionStatus(stock.getStockCode());
+                Thread.sleep(100);
+            } catch (Exception e) {
+                log.error("Error updating suspension status for {}: {}", stock.getStockCode(), e.getMessage());
+            }
+        }
+        log.info("Completed batch suspension status update");
+    }
+
     public void validateDomesticStock(String stockCode) {
         Stock stock = stockRepository.findByStockCode(stockCode)
                 .orElseThrow(() -> new BusinessException(KisApiErrorCode.STOCK_NOT_FOUND));

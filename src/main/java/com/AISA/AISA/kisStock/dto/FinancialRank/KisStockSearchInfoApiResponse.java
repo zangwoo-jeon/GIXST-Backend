@@ -45,5 +45,8 @@ public class KisStockSearchInfoApiResponse {
 
         @JsonProperty("lstg_abol_dt")
         private String lstgAbolDt; // 상장폐지일자
+
+        @JsonProperty("tr_stop_yn")
+        private String trStopYn; // 거래정지여부
     }
 }

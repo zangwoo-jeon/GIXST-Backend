@@ -9,6 +9,7 @@ import com.AISA.AISA.kisStock.Entity.stock.StockMarketCap;
 import com.AISA.AISA.kisStock.dto.Index.IndexChartInfoDto;
 import com.AISA.AISA.kisStock.enums.MarketType;
 import com.AISA.AISA.kisStock.kisService.KisIndexService;
+import com.AISA.AISA.kisStock.kisService.KisStockService;
 import com.AISA.AISA.kisStock.repository.*;
 import com.AISA.AISA.kisStock.kisService.KisMacroService;
 import com.AISA.AISA.portfolio.macro.repository.MacroDailyDataRepository;
@@ -53,6 +54,7 @@ public class MarketValuationService {
     private final StockDailyDataRepository stockDailyDataRepository;
     private final GeminiService geminiService;
     private final KisIndexService kisIndexService;
+    private final KisStockService kisStockService;
 
     // Inner record for KNN calculation
     private static class KnnCandidate {
@@ -722,8 +724,7 @@ public class MarketValuationService {
 
         BreadthResult breadth = includeBreadth
                 ? calculateMarketBreadth(market, subHistory.get(0).getDate())
-                : new BreadthResult(0, 0, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO,
-                        "장중 - 전일 기준 breadth 미포함");
+                : calculateIntradayMarketBreadth(market, subHistory.get(0).getDate());
 
         // VKOSPI: Only applicable for KOSPI (no equivalent index for KOSDAQ)
         BigDecimal vkospi = null;
@@ -815,6 +816,88 @@ public class MarketValuationService {
             return BigDecimal.ZERO;
         double sum = history.stream().limit(count).mapToDouble(BreadthHistoryDto::getBreadthIndex).sum();
         return BigDecimal.valueOf(sum / count).setScale(2, RoundingMode.HALF_UP);
+    }
+
+    private BreadthResult calculateIntradayMarketBreadth(MarketType market, LocalDate date) {
+        try {
+            List<Stock> domesticCommonStocks = stockRepository.findDomesticCommonStocksByMarket(market);
+            if (domesticCommonStocks.isEmpty()) {
+                return new BreadthResult(0, 0, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO,
+                        "장중 - 대상 종목 없음");
+            }
+
+            long risingCount = 0;
+            long fallingCount = 0;
+            long totalCount = domesticCommonStocks.size();
+
+            // Fetch intraday prices in parallel with a basic delay to respect rate limits
+            // (approx 20 req/sec)
+            java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newFixedThreadPool(10);
+            List<java.util.concurrent.CompletableFuture<Double>> futures = new ArrayList<>();
+
+            for (Stock stock : domesticCommonStocks) {
+                futures.add(java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+                    try {
+                        com.AISA.AISA.kisStock.dto.StockPrice.StockPriceDto priceDto = kisStockService
+                                .getStockPrice(stock.getStockCode());
+                        if (priceDto != null && priceDto.getChangeRate() != null) {
+                            return Double.parseDouble(priceDto.getChangeRate());
+                        }
+                    } catch (Exception e) {
+                        // ignore errors
+                    }
+                    return null;
+                }, executor));
+
+                try {
+                    Thread.sleep(80); // Rate limit spacer
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+
+            for (java.util.concurrent.CompletableFuture<Double> f : futures) {
+                try {
+                    Double changeRate = f.get();
+                    if (changeRate != null) {
+                        if (changeRate > 0) {
+                            risingCount++;
+                        } else if (changeRate < 0) {
+                            fallingCount++;
+                        }
+                    }
+                } catch (Exception e) {
+                    // Ignore future get errors
+                }
+            }
+            executor.shutdown();
+
+            double breadthIndex = totalCount > 0 ? (double) (risingCount - fallingCount) / totalCount * 100.0 : 0.0;
+
+            // To calculate 5d, 20d, 60d avg we need to aggregate this with the historical
+            // breadth data
+            List<LocalDate> recentDates = stockDailyDataRepository.findDistinctDatesByMarketName(market,
+                    PageRequest.of(0, 60));
+            List<BreadthHistoryDto> history = new ArrayList<>();
+            // Add today's estimated breadth
+            history.add(new BreadthHistoryDto(date, risingCount, fallingCount, totalCount));
+            // Add historical
+            history.addAll(stockDailyDataRepository.findBreadthHistoryByDates(market, recentDates));
+
+            return new BreadthResult(
+                    risingCount,
+                    fallingCount,
+                    BigDecimal.valueOf(breadthIndex).setScale(2, RoundingMode.HALF_UP),
+                    calculateAvgBreadth(history, 5),
+                    calculateAvgBreadth(history, 20),
+                    calculateAvgBreadth(history, 60),
+                    date.toString() + " (장중 실시간)");
+
+        } catch (Exception e) {
+            log.error("Failed to calculate intraday market breadth for {}: {}", market, e.getMessage());
+            return new BreadthResult(0, 0, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO,
+                    "장중 - 에러");
+        }
     }
 
     /**

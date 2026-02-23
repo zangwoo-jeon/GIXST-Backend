@@ -1,11 +1,10 @@
 package com.AISA.AISA.analysis.dto;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
-import lombok.Getter;
 import lombok.NoArgsConstructor;
-import lombok.Setter;
 
 import java.util.List;
 
@@ -15,41 +14,44 @@ public class OverseasQualityValuationDto {
     @NoArgsConstructor
     @AllArgsConstructor
     @Builder
+    @Schema(name = "OverseasQualityReportResponse")
     public static class QualityReportResponse {
-        private LongTermVerdict longTermVerdict;
-        private BusinessQuality businessQuality;
-        private ValuationContext valuationContext;
-        private List<String> thesisMonitoring;
+        private StockInfo stockInfo;
+        private InvestmentSummary investmentSummary;
+        private QualityAnalysis qualityAnalysis;
+        private ValuationAnalysis valuationAnalysis;
+    }
 
-        // Common metadata
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class StockInfo {
         private String stockCode;
         private String stockName;
         private String currentPrice;
         private String marketCap;
     }
 
-    @Getter
-    @Setter
+    @Data
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
-    public static class LongTermVerdict {
-        private String qualityGrade; // A, B, C, D
-        private String qualityDefinition; // Philosophical meaning of the grade
-        private String valuationStatus; // Expensive, Fair, Cheap
-        private String investmentAttractiveness; // Strong Buy, Buy, Neutral, Avoid
-        private String suitability; // AI-generated rationale
-        private String action; // Legacy/Simplified action guide
-        private String reEntryCondition;
-        private String holdingHorizon;
+    public static class InvestmentSummary {
+        private String action; // Strong Buy ~ Sell
+        private String investmentAttractiveness; // Very Attractive ~ Avoid
+        private String suitability; // AI 생성
+        private String reEntryCondition; // AI 생성
+        private String holdingHorizon; // "3년 이상"
+        private List<String> thesisMonitoring;
         private GradeRationale gradeRationale;
     }
 
-    @Getter
-    @Setter
+    @Data
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
+    @Schema(name = "OverseasGradeRationale")
     public static class GradeRationale {
         private List<String> positiveFactors;
         private List<String> negativeFactors;
@@ -59,25 +61,35 @@ public class OverseasQualityValuationDto {
     @NoArgsConstructor
     @AllArgsConstructor
     @Builder
-    public static class BusinessQuality {
+    public static class QualityAnalysis {
+        private String qualityGrade; // A, B, C, D
+        private String qualityDefinition; // 등급 의미
         private int score; // 0-100
-        private String trajectory; // Added for V3: Improving | Stable | Deteriorating
-        private String roicVsWacc; // e.g., "ROIC 18% > WACC 9%"
-        private String roicWaccSpread; // Added for V6: e.g., "+9.0%p"
-        private String sustainabilityWarning; // Added for V4: Extreme efficiency or risk warnings
-        private String fcfTrend; // e.g., "5년 연속 증가"
-        private String balanceSheet; // e.g., "순현금"
-        private String dilution; // e.g., "주식수 안정적"
-        private String moatDescription; // Added for qualitative insight
+        private String trajectory; // Improving / Stable / Deteriorating
+        private String moatDescription; // AI 생성
+        private QualityMetrics metrics;
     }
 
     @Data
     @NoArgsConstructor
     @AllArgsConstructor
     @Builder
-    public static class ValuationContext {
-        private String status; // 저평가, 적정, 고평가
+    public static class QualityMetrics {
+        private String roicVsWacc;
+        private String roicWaccSpread;
+        private String sustainabilityWarning;
+        private String fcfTrend;
+        private String balanceSheet;
+        private String dilution;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    public static class ValuationAnalysis {
+        private String status; // 저평가 / 적정 / 고평가
         private String fcfYield;
-        private String evEbitdaVsHistory; // e.g., "5년 평균 대비 +10%"
+        private String evEbitdaVsHistory;
     }
 }

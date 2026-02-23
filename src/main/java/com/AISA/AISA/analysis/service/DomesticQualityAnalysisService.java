@@ -43,8 +43,7 @@ public class DomesticQualityAnalysisService {
     private final ObjectMapper objectMapper;
 
     private static final Set<String> FINANCIAL_INDUSTRIES = Set.of(
-            "FINANCIALS", "BANKS", "INSURANCE", "SECURITIES", "금융", "은행", "보험", "증권"
-    );
+            "FINANCIALS", "BANKS", "INSURANCE", "SECURITIES", "금융", "은행", "보험", "증권");
 
     // ──────────────────────────────────────────────
     // Public API
@@ -67,7 +66,7 @@ public class DomesticQualityAnalysisService {
                 DomesticQualityReport saved = reportRepository.findByStockCode(stockCode).orElse(null);
                 if (saved != null && !shouldRefresh(saved, currentPrice)) {
                     log.info("[DomesticQuality] Using cached report for {}", stockCode);
-                    cached.setCurrentPrice(priceDto.getStockPrice());
+                    cached.getStockInfo().setCurrentPrice(priceDto.getStockPrice());
                     return cached;
                 }
             }
@@ -103,30 +102,33 @@ public class DomesticQualityAnalysisService {
 
         // 8. Build DTO
         QualityReportResponse response = QualityReportResponse.builder()
-                .stockCode(stockCode)
-                .stockName(stock.getStockName())
-                .currentPrice(priceDto.getStockPrice())
-                .marketCap(marketCap)
-                .longTermVerdict(LongTermVerdict.builder()
-                        .qualityGrade(scoreResult.grade)
-                        .qualityDefinition(gradeDefinition(scoreResult.grade))
-                        .valuationStatus(valuationResult.status)
-                        .investmentAttractiveness(attractiveness)
+                .stockInfo(StockInfo.builder()
+                        .stockCode(stockCode)
+                        .stockName(stock.getStockName())
+                        .currentPrice(priceDto.getStockPrice())
+                        .marketCap(marketCap)
+                        .build())
+                .investmentSummary(InvestmentSummary.builder()
                         .action(action)
+                        .investmentAttractiveness(attractiveness)
                         .holdingHorizon("3년 이상")
                         .gradeRationale(rationale)
                         .build())
-                .businessQuality(BusinessQuality.builder()
+                .qualityAnalysis(QualityAnalysis.builder()
+                        .qualityGrade(scoreResult.grade)
+                        .qualityDefinition(gradeDefinition(scoreResult.grade))
                         .score(scoreResult.totalScore)
                         .trajectory(scoreResult.trajectory)
-                        .roeAvg3Y(scoreResult.roeDescription)
-                        .operatingProfitStability(scoreResult.opStabilityDescription)
-                        .salesGrowth3Y(scoreResult.growthDescription)
-                        .growthWarning(scoreResult.growthWarning)
-                        .balanceSheet(scoreResult.balanceSheetDescription)
-                        .dividendStability(scoreResult.dividendDescription)
+                        .metrics(QualityMetrics.builder()
+                                .roeAvg3Y(scoreResult.roeDescription)
+                                .operatingProfitStability(scoreResult.opStabilityDescription)
+                                .salesGrowth3Y(scoreResult.growthDescription)
+                                .growthWarning(scoreResult.growthWarning)
+                                .balanceSheet(scoreResult.balanceSheetDescription)
+                                .dividendStability(scoreResult.dividendDescription)
+                                .build())
                         .build())
-                .valuationContext(ValuationContext.builder()
+                .valuationAnalysis(ValuationAnalysis.builder()
                         .status(valuationResult.status)
                         .perPercentile(valuationResult.perDesc)
                         .pbrPercentile(valuationResult.pbrDesc)
@@ -170,8 +172,8 @@ public class DomesticQualityAnalysisService {
             int opScore, String opStabilityDescription,
             int growthScore, String growthDescription, String growthWarning,
             int balanceScore, String balanceSheetDescription,
-            int dividendScore, String dividendDescription
-    ) {}
+            int dividendScore, String dividendDescription) {
+    }
 
     private QualityScoreResult calculateQualityScore(String stockCode, Stock stock,
             List<StockFinancialRatio> ratios, List<StockFinancialStatement> statements, boolean isFinancial) {
@@ -186,15 +188,22 @@ public class DomesticQualityAnalysisService {
                 .allMatch(r -> r.getRoe() != null && r.getRoe().compareTo(BigDecimal.ZERO) > 0);
 
         int roeScore;
-        if (roeAvg >= 15 && allRoePositive) roeScore = 30;
-        else if (roeAvg >= 15) roeScore = 22; // 음수 ROE 존재 시 상한 22
-        else if (roeAvg >= 10 && allRoePositive) roeScore = 22;
-        else if (roeAvg >= 10) roeScore = 18;
-        else if (roeAvg >= 5) roeScore = 12;
-        else roeScore = 0;
+        if (roeAvg >= 15 && allRoePositive)
+            roeScore = 30;
+        else if (roeAvg >= 15)
+            roeScore = 22; // 음수 ROE 존재 시 상한 22
+        else if (roeAvg >= 10 && allRoePositive)
+            roeScore = 22;
+        else if (roeAvg >= 10)
+            roeScore = 18;
+        else if (roeAvg >= 5)
+            roeScore = 12;
+        else
+            roeScore = 0;
 
         String roeDesc = String.format("3년 평균 ROE %.1f%%", roeAvg);
-        if (!allRoePositive) roeDesc += " (일부 연도 음수 ROE)";
+        if (!allRoePositive)
+            roeDesc += " (일부 연도 음수 ROE)";
 
         // B. 이익 안정성 - 영업이익 (25점)
         List<StockFinancialStatement> recent3Stmts = statements.stream().limit(3).collect(Collectors.toList());
@@ -203,14 +212,20 @@ public class DomesticQualityAnalysisService {
                 .count();
 
         int opScore;
-        if (opPositiveCount >= 3) opScore = 25;
-        else if (opPositiveCount == 2) opScore = 18;
-        else if (opPositiveCount == 1) opScore = 8;
-        else opScore = 0;
+        if (opPositiveCount >= 3)
+            opScore = 25;
+        else if (opPositiveCount == 2)
+            opScore = 18;
+        else if (opPositiveCount == 1)
+            opScore = 8;
+        else
+            opScore = 0;
 
         String opDesc = String.format("최근 3년 중 %d년 영업이익 흑자", opPositiveCount);
-        if (opPositiveCount >= 3) opDesc = "안정적 (" + opDesc + ")";
-        else if (opPositiveCount == 0) opDesc = "위험 (" + opDesc + ")";
+        if (opPositiveCount >= 3)
+            opDesc = "안정적 (" + opDesc + ")";
+        else if (opPositiveCount == 0)
+            opDesc = "위험 (" + opDesc + ")";
 
         // C. 성장 지속성 - 매출/EPS 3Y CAGR (20점)
         StockFinancialRatio latestRatio = ratios.get(0);
@@ -218,10 +233,14 @@ public class DomesticQualityAnalysisService {
         double epsCagr = calculateCagrFromRatios(ratios);
 
         int growthScore;
-        if (salesCagr >= 10) growthScore = 20;
-        else if (salesCagr >= 3) growthScore = 15;
-        else if (salesCagr > 0) growthScore = 8;
-        else growthScore = 0;
+        if (salesCagr >= 10)
+            growthScore = 20;
+        else if (salesCagr >= 3)
+            growthScore = 15;
+        else if (salesCagr > 0)
+            growthScore = 8;
+        else
+            growthScore = 0;
 
         String growthDesc;
         if (Double.isNaN(salesCagr)) {
@@ -246,16 +265,24 @@ public class DomesticQualityAnalysisService {
             balanceDesc = "금융업 (부채비율 별도 평가 불가)";
         } else {
             double debtRatio = (latestRatio.getDebtRatio() != null)
-                    ? latestRatio.getDebtRatio().doubleValue() : 999;
-            if (debtRatio < 100) balanceScore = 15;
-            else if (debtRatio < 200) balanceScore = 10;
-            else if (debtRatio < 300) balanceScore = 5;
-            else balanceScore = 0;
+                    ? latestRatio.getDebtRatio().doubleValue()
+                    : 999;
+            if (debtRatio < 100)
+                balanceScore = 15;
+            else if (debtRatio < 200)
+                balanceScore = 10;
+            else if (debtRatio < 300)
+                balanceScore = 5;
+            else
+                balanceScore = 0;
 
             balanceDesc = String.format("부채비율 %.0f%%", debtRatio);
-            if (debtRatio < 100) balanceDesc = "건전 (" + balanceDesc + ")";
-            else if (debtRatio < 200) balanceDesc = "보통 (" + balanceDesc + ")";
-            else balanceDesc = "주의 (" + balanceDesc + ")";
+            if (debtRatio < 100)
+                balanceDesc = "건전 (" + balanceDesc + ")";
+            else if (debtRatio < 200)
+                balanceDesc = "보통 (" + balanceDesc + ")";
+            else
+                balanceDesc = "주의 (" + balanceDesc + ")";
 
             // 유보율 보너스 텍스트
             if (latestRatio.getReserveRatio() != null
@@ -267,17 +294,25 @@ public class DomesticQualityAnalysisService {
         // E. 배당 안정성 (10점)
         int dividendScore = calculateDividendScore(stockCode);
         String dividendDesc;
-        if (dividendScore == 10) dividendDesc = "안정적 (3년 연속 배당)";
-        else if (dividendScore == 6) dividendDesc = "보통 (2년 배당)";
-        else if (dividendScore == 3) dividendDesc = "미흡 (1년 배당)";
-        else dividendDesc = "무배당";
+        if (dividendScore == 10)
+            dividendDesc = "안정적 (3년 연속 배당)";
+        else if (dividendScore == 6)
+            dividendDesc = "보통 (2년 배당)";
+        else if (dividendScore == 3)
+            dividendDesc = "미흡 (1년 배당)";
+        else
+            dividendDesc = "무배당";
 
         int totalScore = Math.max(0, Math.min(100, roeScore + opScore + growthScore + balanceScore + dividendScore));
         String grade;
-        if (totalScore >= 80) grade = "A";
-        else if (totalScore >= 60) grade = "B";
-        else if (totalScore >= 40) grade = "C";
-        else grade = "D";
+        if (totalScore >= 80)
+            grade = "A";
+        else if (totalScore >= 60)
+            grade = "B";
+        else if (totalScore >= 40)
+            grade = "C";
+        else
+            grade = "D";
 
         // ROE 8% 미만 → 등급 상한 B (자본 효율성 부족)
         if (roeAvg < 8.0 && "A".equals(grade)) {
@@ -293,8 +328,7 @@ public class DomesticQualityAnalysisService {
                 opScore, opDesc,
                 growthScore, growthDesc, growthWarning,
                 balanceScore, balanceDesc,
-                dividendScore, dividendDesc
-        );
+                dividendScore, dividendDesc);
     }
 
     private int calculateDividendScore(String stockCode) {
@@ -305,22 +339,30 @@ public class DomesticQualityAnalysisService {
             String endDate = String.valueOf(now.getYear() - yearsBack) + "1231";
             List<StockDividend> dividends = dividendRepository
                     .findByStock_StockCodeAndRecordDateBetweenOrderByRecordDateDesc(stockCode, startDate, endDate);
-            if (!dividends.isEmpty()) count++;
+            if (!dividends.isEmpty())
+                count++;
         }
-        if (count >= 3) return 10;
-        if (count == 2) return 6;
-        if (count == 1) return 3;
+        if (count >= 3)
+            return 10;
+        if (count == 2)
+            return 6;
+        if (count == 1)
+            return 3;
         return 0;
     }
 
     private String calculateTrajectory(List<StockFinancialRatio> ratios) {
-        if (ratios.size() < 3) return "Stable";
+        if (ratios.size() < 3)
+            return "Stable";
         BigDecimal currentRoe = ratios.get(0).getRoe();
         BigDecimal oldRoe = ratios.get(2).getRoe(); // 2년 전
-        if (currentRoe == null || oldRoe == null) return "Stable";
+        if (currentRoe == null || oldRoe == null)
+            return "Stable";
         double diff = currentRoe.subtract(oldRoe).doubleValue();
-        if (diff >= 2.0) return "Improving";
-        if (diff <= -2.0) return "Deteriorating";
+        if (diff >= 2.0)
+            return "Improving";
+        if (diff <= -2.0)
+            return "Deteriorating";
         return "Stable";
     }
 
@@ -330,20 +372,24 @@ public class DomesticQualityAnalysisService {
      */
     private double calculateCagr(List<StockFinancialStatement> statements,
             java.util.function.Function<StockFinancialStatement, BigDecimal> extractor) {
-        if (statements.size() < 2) return Double.NaN;
+        if (statements.size() < 2)
+            return Double.NaN;
 
         BigDecimal latest = extractor.apply(statements.get(0));
         // 3년 전 데이터 찾기 (index 3이 있으면 3년 전, 없으면 가장 오래된 데이터)
         int oldIndex = Math.min(3, statements.size() - 1);
         BigDecimal oldest = extractor.apply(statements.get(oldIndex));
 
-        if (latest == null || oldest == null || oldest.compareTo(BigDecimal.ZERO) <= 0) return Double.NaN;
+        if (latest == null || oldest == null || oldest.compareTo(BigDecimal.ZERO) <= 0)
+            return Double.NaN;
 
         double years = oldIndex; // 실제 연수 차이
-        if (years == 0) return Double.NaN;
+        if (years == 0)
+            return Double.NaN;
 
         double ratio = latest.doubleValue() / oldest.doubleValue();
-        if (ratio <= 0) return Double.NaN;
+        if (ratio <= 0)
+            return Double.NaN;
 
         return (Math.pow(ratio, 1.0 / years) - 1) * 100.0;
     }
@@ -352,19 +398,23 @@ public class DomesticQualityAnalysisService {
      * StockFinancialRatio의 EPS로 3년 CAGR 계산.
      */
     private double calculateCagrFromRatios(List<StockFinancialRatio> ratios) {
-        if (ratios.size() < 2) return Double.NaN;
+        if (ratios.size() < 2)
+            return Double.NaN;
 
         BigDecimal latestEps = ratios.get(0).getEps();
         int oldIndex = Math.min(3, ratios.size() - 1);
         BigDecimal oldestEps = ratios.get(oldIndex).getEps();
 
-        if (latestEps == null || oldestEps == null || oldestEps.compareTo(BigDecimal.ZERO) <= 0) return Double.NaN;
+        if (latestEps == null || oldestEps == null || oldestEps.compareTo(BigDecimal.ZERO) <= 0)
+            return Double.NaN;
 
         double years = oldIndex;
-        if (years == 0) return Double.NaN;
+        if (years == 0)
+            return Double.NaN;
 
         double ratio = latestEps.doubleValue() / oldestEps.doubleValue();
-        if (ratio <= 0) return Double.NaN;
+        if (ratio <= 0)
+            return Double.NaN;
 
         return (Math.pow(ratio, 1.0 / years) - 1) * 100.0;
     }
@@ -375,18 +425,21 @@ public class DomesticQualityAnalysisService {
 
     private record ValuationResult(
             String status, double valuationScore, double eySpread,
-            String perDesc, String pbrDesc, String evEbitdaDesc, String earningsYieldDesc
-    ) {}
+            String perDesc, String pbrDesc, String evEbitdaDesc, String earningsYieldDesc) {
+    }
 
     private ValuationResult calculateValuationContext(String stockCode, List<StockFinancialRatio> ratios,
             StockFinancialRatio latest, BigDecimal currentPrice) {
 
         double currentPer = (latest.getPer() != null && latest.getPer().doubleValue() > 0)
-                ? latest.getPer().doubleValue() : -1;
+                ? latest.getPer().doubleValue()
+                : -1;
         double currentPbr = (latest.getPbr() != null && latest.getPbr().doubleValue() > 0)
-                ? latest.getPbr().doubleValue() : -1;
+                ? latest.getPbr().doubleValue()
+                : -1;
         double currentEv = (latest.getEvEbitda() != null && latest.getEvEbitda().doubleValue() > 0)
-                ? latest.getEvEbitda().doubleValue() : -1;
+                ? latest.getEvEbitda().doubleValue()
+                : -1;
 
         // 전체 시장 대비 Percentile (같은 결산기의 모든 종목과 비교)
         String latestYymm = latest.getStacYymm();
@@ -414,15 +467,21 @@ public class DomesticQualityAnalysisService {
         // PBR-ROE 정합성 가감점
         double currentRoe = (latest.getRoe() != null) ? latest.getRoe().doubleValue() : 0;
         int pbrRoeAdj = 0;
-        if (currentRoe >= 15 && currentPbr > 0 && currentPbr <= 1.5) pbrRoeAdj = 5;
-        else if (currentRoe <= 5 && currentPbr >= 2.0) pbrRoeAdj = -5;
-        else if (currentRoe <= 0) pbrRoeAdj = -10;
+        if (currentRoe >= 15 && currentPbr > 0 && currentPbr <= 1.5)
+            pbrRoeAdj = 5;
+        else if (currentRoe <= 5 && currentPbr >= 2.0)
+            pbrRoeAdj = -5;
+        else if (currentRoe <= 0)
+            pbrRoeAdj = -10;
 
         // 유효한 percentile만 수집
         List<Double> validPcts = new ArrayList<>();
-        if (perPct >= 0) validPcts.add(perPct);
-        if (pbrPct >= 0) validPcts.add(pbrPct);
-        if (evPct >= 0) validPcts.add(evPct);
+        if (perPct >= 0)
+            validPcts.add(perPct);
+        if (pbrPct >= 0)
+            validPcts.add(pbrPct);
+        if (evPct >= 0)
+            validPcts.add(evPct);
 
         // 판정: 2/3 이상이 하위 35% → 저평가, 2/3 이상이 상위 65% → 고평가
         String status;
@@ -456,7 +515,8 @@ public class DomesticQualityAnalysisService {
     }
 
     private double calculatePercentile(List<Double> marketValues, double currentValue) {
-        if (marketValues.size() < 10 || currentValue <= 0) return -1;
+        if (marketValues.size() < 10 || currentValue <= 0)
+            return -1;
 
         // Winsorize: 상하위 5% 제거
         List<Double> sorted = new ArrayList<>(marketValues);
@@ -472,12 +532,17 @@ public class DomesticQualityAnalysisService {
     }
 
     private String formatPercentileDesc(double percentile, double currentValue, String label, String unit) {
-        if (percentile < 0 || currentValue <= 0) return "데이터 부족";
+        if (percentile < 0 || currentValue <= 0)
+            return "데이터 부족";
         String position;
-        if (percentile <= 25) position = "하위";
-        else if (percentile <= 50) position = "중하위";
-        else if (percentile <= 75) position = "중상위";
-        else position = "상위";
+        if (percentile <= 25)
+            position = "하위";
+        else if (percentile <= 50)
+            position = "중하위";
+        else if (percentile <= 75)
+            position = "중상위";
+        else
+            position = "상위";
         return String.format("%s %.0f%% (현재 %.1f%s)", position, percentile, currentValue, unit);
     }
 
@@ -486,7 +551,8 @@ public class DomesticQualityAnalysisService {
      * 반환: 스프레드 (%), 계산 불가 시 NaN
      */
     private double calculateEySpread(double currentPer) {
-        if (currentPer <= 0) return Double.NaN;
+        if (currentPer <= 0)
+            return Double.NaN;
         double earningsYield = (1.0 / currentPer) * 100.0;
         try {
             BigDecimal bondYield = kisMacroService.getLatestBondYield(BondYield.KR_3Y);
@@ -500,7 +566,8 @@ public class DomesticQualityAnalysisService {
     }
 
     private String calculateEarningsYieldDesc(double currentPer) {
-        if (currentPer <= 0) return "산출 불가 (PER 음수 또는 없음)";
+        if (currentPer <= 0)
+            return "산출 불가 (PER 음수 또는 없음)";
         double earningsYield = (1.0 / currentPer) * 100.0;
         try {
             BigDecimal bondYield = kisMacroService.getLatestBondYield(BondYield.KR_3Y);
@@ -543,8 +610,7 @@ public class DomesticQualityAnalysisService {
     }
 
     private static final List<String> ATTRACTIVENESS_LEVELS = List.of(
-            "Avoid", "Low", "Neutral", "Attractive", "Very Attractive"
-    );
+            "Avoid", "Low", "Neutral", "Attractive", "Very Attractive");
 
     /**
      * EY 스프레드에 따른 투자매력도 한 단계 조정.
@@ -553,10 +619,12 @@ public class DomesticQualityAnalysisService {
      * 단, B등급 이상 기업은 Avoid까지 하락하지 않음 (Low가 하한).
      */
     private String adjustByEySpread(String attractiveness, double eySpread, String qualityGrade) {
-        if (Double.isNaN(eySpread) || "Speculative".equals(attractiveness)) return attractiveness;
+        if (Double.isNaN(eySpread) || "Speculative".equals(attractiveness))
+            return attractiveness;
 
         int idx = ATTRACTIVENESS_LEVELS.indexOf(attractiveness);
-        if (idx < 0) return attractiveness;
+        if (idx < 0)
+            return attractiveness;
 
         double roundedSpread = Math.round(eySpread * 10.0) / 10.0;
 
@@ -603,29 +671,42 @@ public class DomesticQualityAnalysisService {
         List<String> negative = new ArrayList<>();
 
         // ROE
-        if (q.roeScore >= 22) positive.add("수익성 우수 (" + q.roeDescription + ")");
-        else if (q.roeScore == 0) negative.add("수익성 미흡 (" + q.roeDescription + ")");
+        if (q.roeScore >= 22)
+            positive.add("수익성 우수 (" + q.roeDescription + ")");
+        else if (q.roeScore == 0)
+            negative.add("수익성 미흡 (" + q.roeDescription + ")");
 
         // 영업이익
-        if (q.opScore >= 25) positive.add(q.opStabilityDescription);
-        else if (q.opScore <= 8) negative.add(q.opStabilityDescription);
+        if (q.opScore >= 25)
+            positive.add(q.opStabilityDescription);
+        else if (q.opScore <= 8)
+            negative.add(q.opStabilityDescription);
 
         // 성장
-        if (q.growthScore >= 15) positive.add(q.growthDescription);
-        else if (q.growthScore == 0) negative.add(q.growthDescription);
-        if (q.growthWarning != null) negative.add(q.growthWarning);
+        if (q.growthScore >= 15)
+            positive.add(q.growthDescription);
+        else if (q.growthScore == 0)
+            negative.add(q.growthDescription);
+        if (q.growthWarning != null)
+            negative.add(q.growthWarning);
 
         // 재무 안정성
-        if (q.balanceScore >= 15) positive.add(q.balanceSheetDescription);
-        else if (q.balanceScore <= 5 && !isFinancial) negative.add(q.balanceSheetDescription);
+        if (q.balanceScore >= 15)
+            positive.add(q.balanceSheetDescription);
+        else if (q.balanceScore <= 5 && !isFinancial)
+            negative.add(q.balanceSheetDescription);
 
         // 배당
-        if (q.dividendScore >= 10) positive.add(q.dividendDescription);
-        else if (q.dividendScore == 0) negative.add(q.dividendDescription);
+        if (q.dividendScore >= 10)
+            positive.add(q.dividendDescription);
+        else if (q.dividendScore == 0)
+            negative.add(q.dividendDescription);
 
         // 밸류에이션
-        if ("저평가".equals(v.status)) positive.add("밸류에이션 저평가 구간");
-        else if ("고평가".equals(v.status)) negative.add("밸류에이션 고평가 구간");
+        if ("저평가".equals(v.status))
+            positive.add("밸류에이션 저평가 구간");
+        else if ("고평가".equals(v.status))
+            negative.add("밸류에이션 고평가 구간");
 
         return GradeRationale.builder()
                 .positiveFactors(positive)
@@ -641,24 +722,24 @@ public class DomesticQualityAnalysisService {
         StringBuilder sb = new StringBuilder();
         sb.append("너는 '국내 주식 장기 투자 분석 전문가'이다. 아래 분석 결과를 바탕으로 JSON 형식으로 응답하라.\n\n");
         sb.append(String.format("종목: %s (%s)\n", stock.getStockName(), stock.getStockCode()));
-        sb.append(String.format("품질 등급: %s (%d점/100점)\n", r.getLongTermVerdict().getQualityGrade(),
-                r.getBusinessQuality().getScore()));
-        sb.append(String.format("궤적: %s\n", r.getBusinessQuality().getTrajectory()));
-        sb.append(String.format("수익성: %s\n", r.getBusinessQuality().getRoeAvg3Y()));
-        sb.append(String.format("이익안정성: %s\n", r.getBusinessQuality().getOperatingProfitStability()));
-        sb.append(String.format("성장성: %s\n", r.getBusinessQuality().getSalesGrowth3Y()));
-        if (r.getBusinessQuality().getGrowthWarning() != null) {
-            sb.append(String.format("성장 경고: %s\n", r.getBusinessQuality().getGrowthWarning()));
+        sb.append(String.format("품질 등급: %s (%d점/100점)\n", r.getQualityAnalysis().getQualityGrade(),
+                r.getQualityAnalysis().getScore()));
+        sb.append(String.format("궤적: %s\n", r.getQualityAnalysis().getTrajectory()));
+        sb.append(String.format("수익성: %s\n", r.getQualityAnalysis().getMetrics().getRoeAvg3Y()));
+        sb.append(String.format("이익안정성: %s\n", r.getQualityAnalysis().getMetrics().getOperatingProfitStability()));
+        sb.append(String.format("성장성: %s\n", r.getQualityAnalysis().getMetrics().getSalesGrowth3Y()));
+        if (r.getQualityAnalysis().getMetrics().getGrowthWarning() != null) {
+            sb.append(String.format("성장 경고: %s\n", r.getQualityAnalysis().getMetrics().getGrowthWarning()));
         }
-        sb.append(String.format("재무안정성: %s\n", r.getBusinessQuality().getBalanceSheet()));
-        sb.append(String.format("배당: %s\n", r.getBusinessQuality().getDividendStability()));
-        sb.append(String.format("밸류에이션: %s\n", r.getValuationContext().getStatus()));
-        sb.append(String.format("PER: %s\n", r.getValuationContext().getPerPercentile()));
-        sb.append(String.format("PBR: %s\n", r.getValuationContext().getPbrPercentile()));
-        sb.append(String.format("EV/EBITDA: %s\n", r.getValuationContext().getEvEbitdaPercentile()));
-        sb.append(String.format("Earnings Yield: %s\n", r.getValuationContext().getEarningsYieldVsBond()));
+        sb.append(String.format("재무안정성: %s\n", r.getQualityAnalysis().getMetrics().getBalanceSheet()));
+        sb.append(String.format("배당: %s\n", r.getQualityAnalysis().getMetrics().getDividendStability()));
+        sb.append(String.format("밸류에이션: %s\n", r.getValuationAnalysis().getStatus()));
+        sb.append(String.format("PER: %s\n", r.getValuationAnalysis().getPerPercentile()));
+        sb.append(String.format("PBR: %s\n", r.getValuationAnalysis().getPbrPercentile()));
+        sb.append(String.format("EV/EBITDA: %s\n", r.getValuationAnalysis().getEvEbitdaPercentile()));
+        sb.append(String.format("Earnings Yield: %s\n", r.getValuationAnalysis().getEarningsYieldVsBond()));
         sb.append(String.format("투자 매력도: %s → %s\n\n",
-                r.getLongTermVerdict().getInvestmentAttractiveness(), r.getLongTermVerdict().getAction()));
+                r.getInvestmentSummary().getInvestmentAttractiveness(), r.getInvestmentSummary().getAction()));
 
         sb.append("아래 JSON 형식으로만 응답하라:\n");
         sb.append("{\n");
@@ -676,18 +757,18 @@ public class DomesticQualityAnalysisService {
             var tree = objectMapper.readTree(json);
 
             if (tree.has("suitability")) {
-                response.getLongTermVerdict().setSuitability(tree.get("suitability").asText());
+                response.getInvestmentSummary().setSuitability(tree.get("suitability").asText());
             }
             if (tree.has("moatDescription")) {
-                response.getBusinessQuality().setMoatDescription(tree.get("moatDescription").asText());
+                response.getQualityAnalysis().setMoatDescription(tree.get("moatDescription").asText());
             }
             if (tree.has("thesisMonitoring")) {
                 List<String> monitoring = new ArrayList<>();
                 tree.get("thesisMonitoring").forEach(node -> monitoring.add(node.asText()));
-                response.setThesisMonitoring(monitoring);
+                response.getInvestmentSummary().setThesisMonitoring(monitoring);
             }
             if (tree.has("reEntryCondition")) {
-                response.getLongTermVerdict().setReEntryCondition(tree.get("reEntryCondition").asText());
+                response.getInvestmentSummary().setReEntryCondition(tree.get("reEntryCondition").asText());
             }
         } catch (Exception e) {
             log.warn("[DomesticQuality] Failed to parse AI JSON: {}", e.getMessage());
@@ -704,7 +785,8 @@ public class DomesticQualityAnalysisService {
         }
         int start = text.indexOf('{');
         int end = text.lastIndexOf('}');
-        if (start >= 0 && end > start) return text.substring(start, end + 1);
+        if (start >= 0 && end > start)
+            return text.substring(start, end + 1);
         throw new IllegalArgumentException("No JSON block found in AI response");
     }
 
@@ -713,7 +795,8 @@ public class DomesticQualityAnalysisService {
     // ──────────────────────────────────────────────
 
     private boolean isFinancialSector(Stock stock) {
-        if (stock.getStockIndustries() == null) return false;
+        if (stock.getStockIndustries() == null)
+            return false;
         return stock.getStockIndustries().stream()
                 .anyMatch(si -> {
                     String code = si.getSubIndustry().getIndustry().getCode();
@@ -726,7 +809,8 @@ public class DomesticQualityAnalysisService {
 
     // marketCap 단위: 억원
     private String formatMarketCap(String marketCapRaw) {
-        if (marketCapRaw == null || marketCapRaw.isBlank()) return "N/A";
+        if (marketCapRaw == null || marketCapRaw.isBlank())
+            return "N/A";
         try {
             BigDecimal capEok = new BigDecimal(marketCapRaw.replace(",", ""));
             // 억원 → 조원: / 10,000
@@ -746,19 +830,22 @@ public class DomesticQualityAnalysisService {
 
     private boolean shouldRefresh(DomesticQualityReport saved, BigDecimal currentPrice) {
         // 7일 초과
-        if (saved.getLastModifiedDate().isBefore(LocalDateTime.now().minusDays(7))) return true;
+        if (saved.getLastModifiedDate().isBefore(LocalDateTime.now().minusDays(7)))
+            return true;
 
         // 10% 이상 가격 변동
         if (saved.getLastPrice() != null && saved.getLastPrice().compareTo(BigDecimal.ZERO) > 0) {
             double change = currentPrice.subtract(saved.getLastPrice()).abs()
                     .divide(saved.getLastPrice(), 4, RoundingMode.HALF_UP).doubleValue();
-            if (change >= 0.10) return true;
+            if (change >= 0.10)
+                return true;
         }
 
         // 재무 데이터 변경
         StockFinancialRatio latestRatio = ratioRepository
                 .findTop1ByStockCodeAndDivCodeOrderByStacYymmDesc(saved.getStockCode(), "0");
-        if (latestRatio != null && !latestRatio.getStacYymm().equals(saved.getLastStacYymm())) return true;
+        if (latestRatio != null && !latestRatio.getStacYymm().equals(saved.getLastStacYymm()))
+            return true;
 
         return false;
     }

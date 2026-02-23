@@ -121,7 +121,12 @@ public class OverseasQualityAnalysisService {
                 .findByStockCodeAndDivCodeOrderByStacYymmDesc(stockCode, "0");
 
         if (latestRatio == null || stmts.isEmpty()) {
-            return QualityReportResponse.builder().stockCode(stockCode).stockName(stock.getStockName()).build();
+            return QualityReportResponse.builder()
+                    .stockInfo(StockInfo.builder()
+                            .stockCode(stockCode)
+                            .stockName(stock.getStockName())
+                            .build())
+                    .build();
         }
 
         String marketCap = getRealTimeMarketCap(stockCode);
@@ -162,14 +167,18 @@ public class OverseasQualityAnalysisService {
                     .findByStockCode(stockCode)
                     .orElse(OverseasQualityReport.builder().stockCode(stockCode).build());
 
-            LongTermVerdict verdict = response.getLongTermVerdict();
-            report.setStockName(response.getStockName());
-            report.setCurrentPrice(response.getCurrentPrice());
-            report.setMarketCap(response.getMarketCap());
-            report.setQualityGrade(verdict.getQualityGrade());
-            report.setQualityScore(response.getBusinessQuality().getScore());
-            report.setValuationStatus(verdict.getValuationStatus());
-            report.setInvestmentAttractiveness(verdict.getInvestmentAttractiveness());
+            StockInfo stockInfo = response.getStockInfo();
+            InvestmentSummary investmentSummary = response.getInvestmentSummary();
+            QualityAnalysis qualityAnalysis = response.getQualityAnalysis();
+            ValuationAnalysis valuationAnalysis = response.getValuationAnalysis();
+
+            report.setStockName(stockInfo.getStockName());
+            report.setCurrentPrice(stockInfo.getCurrentPrice());
+            report.setMarketCap(stockInfo.getMarketCap());
+            report.setQualityGrade(qualityAnalysis.getQualityGrade());
+            report.setQualityScore(qualityAnalysis.getScore());
+            report.setValuationStatus(valuationAnalysis.getStatus());
+            report.setInvestmentAttractiveness(investmentSummary.getInvestmentAttractiveness());
             report.setFullReportJson(new ObjectMapper().writeValueAsString(response));
             report.setLastModifiedDate(LocalDateTime.now());
             report.setLastPrice(currentPrice);
@@ -297,8 +306,8 @@ public class OverseasQualityAnalysisService {
                 .fcfTrend(positiveCount >= 2 ? "안정적 (최근 3년 중 " + positiveCount + "년 흑자)" : "변동성 있음")
                 .balanceSheet(debtRatio < 0 ? "데이터 없음"
                         : debtRatio < 1.0 ? "건전 (순현금 혹은 저부채)"
-                        : debtRatio < 2.0 ? "보통"
-                        : "주의 (고부채)")
+                                : debtRatio < 2.0 ? "보통"
+                                        : "주의 (고부채)")
                 .dilution(shareGrowth <= 0.1 ? "안정적" : "보통")
                 .build();
 
@@ -491,34 +500,51 @@ public class OverseasQualityAnalysisService {
         try {
             AiQualityJson json = new ObjectMapper().readValue(extractJsonBlock(aiText), AiQualityJson.class);
 
-            quality.setMoatDescription(json.moatDescription);
-
             GradeResult gradeRes = calculateGrade(quality.getScore());
             String attractiveness = determineAttractiveness(gradeRes.getGrade(), val.getStatus());
 
             return QualityReportResponse.builder()
-                    .stockCode(stockCode)
-                    .stockName(stockName)
-                    .currentPrice(price)
-                    .marketCap(marketCap)
-                    .longTermVerdict(LongTermVerdict.builder()
-                            .qualityGrade(gradeRes.getGrade())
-                            .qualityDefinition(gradeRes.getDefinition())
-                            .valuationStatus(val.getStatus())
+                    .stockInfo(StockInfo.builder()
+                            .stockCode(stockCode)
+                            .stockName(stockName)
+                            .currentPrice(price)
+                            .marketCap(marketCap)
+                            .build())
+                    .investmentSummary(InvestmentSummary.builder()
+                            .action(determineAction(attractiveness))
                             .investmentAttractiveness(attractiveness)
                             .suitability(json.suitability)
-                            .action(determineAction(attractiveness))
                             .reEntryCondition(json.reEntryCondition)
                             .holdingHorizon("3년 이상")
+                            .thesisMonitoring(json.monitoringPoints)
                             .gradeRationale(rationale)
                             .build())
-                    .businessQuality(quality)
-                    .valuationContext(val)
-                    .thesisMonitoring(json.monitoringPoints)
+                    .qualityAnalysis(QualityAnalysis.builder()
+                            .qualityGrade(gradeRes.getGrade())
+                            .qualityDefinition(gradeRes.getDefinition())
+                            .score(quality.getScore())
+                            .trajectory(quality.getTrajectory())
+                            .moatDescription(json.moatDescription)
+                            .metrics(QualityMetrics.builder()
+                                    .roicVsWacc(quality.getRoicVsWacc())
+                                    .roicWaccSpread(quality.getRoicWaccSpread())
+                                    .sustainabilityWarning(quality.getSustainabilityWarning())
+                                    .fcfTrend(quality.getFcfTrend())
+                                    .balanceSheet(quality.getBalanceSheet())
+                                    .dilution(quality.getDilution())
+                                    .build())
+                            .build())
+                    .valuationAnalysis(ValuationAnalysis.builder()
+                            .status(val.getStatus())
+                            .fcfYield(val.getFcfYield())
+                            .evEbitdaVsHistory(val.getEvEbitdaVsHistory())
+                            .build())
                     .build();
         } catch (Exception e) {
             log.error("AI Parsing Error: {}", e.getMessage());
-            return QualityReportResponse.builder().stockCode(stockCode).stockName(stockName).build();
+            return QualityReportResponse.builder()
+                    .stockInfo(StockInfo.builder().stockCode(stockCode).stockName(stockName).build())
+                    .build();
         }
     }
 
@@ -667,7 +693,8 @@ public class OverseasQualityAnalysisService {
     }
 
     private double estimateWacc(String industryCode) {
-        if (industryCode == null) return 9.5;
+        if (industryCode == null)
+            return 9.5;
         return switch (industryCode.toUpperCase()) {
             case "UTILITIES" -> 7.5;
             case "REAL_ESTATE" -> 8.0;
@@ -719,6 +746,27 @@ public class OverseasQualityAnalysisService {
         public String moatDescription;
         public List<String> monitoringPoints;
         public String reEntryCondition;
+    }
+
+    @lombok.Builder
+    @lombok.Data
+    private static class BusinessQuality {
+        private int score;
+        private String trajectory;
+        private String roicVsWacc;
+        private String roicWaccSpread;
+        private String sustainabilityWarning;
+        private String fcfTrend;
+        private String balanceSheet;
+        private String dilution;
+    }
+
+    @lombok.Builder
+    @lombok.Data
+    private static class ValuationContext {
+        private String status;
+        private String fcfYield;
+        private String evEbitdaVsHistory;
     }
 
     @Transactional

@@ -375,19 +375,34 @@ public class DomesticQualityAnalysisService {
         if (statements.size() < 2)
             return Double.NaN;
 
-        BigDecimal latest = extractor.apply(statements.get(0));
+        BigDecimal latestVal = extractor.apply(statements.get(0));
+        String latestYymm = statements.get(0).getStacYymm();
+
+        // [연환산 로직] 12월 결산이 아닌 데이터(예: 3, 6, 9월)를 12개월분으로 환산
+        if (latestYymm != null && latestYymm.length() >= 6 && latestVal != null) {
+            try {
+                int month = Integer.parseInt(latestYymm.substring(latestYymm.length() - 2));
+                if (month > 0 && month < 12) {
+                    latestVal = latestVal.multiply(new BigDecimal(12)).divide(new BigDecimal(month), 2,
+                            RoundingMode.HALF_UP);
+                }
+            } catch (Exception e) {
+                // ignore format errors
+            }
+        }
+
         // 3년 전 데이터 찾기 (index 3이 있으면 3년 전, 없으면 가장 오래된 데이터)
         int oldIndex = Math.min(3, statements.size() - 1);
         BigDecimal oldest = extractor.apply(statements.get(oldIndex));
 
-        if (latest == null || oldest == null || oldest.compareTo(BigDecimal.ZERO) <= 0)
+        if (latestVal == null || oldest == null || oldest.compareTo(BigDecimal.ZERO) <= 0)
             return Double.NaN;
 
         double years = oldIndex; // 실제 연수 차이
         if (years == 0)
             return Double.NaN;
 
-        double ratio = latest.doubleValue() / oldest.doubleValue();
+        double ratio = latestVal.doubleValue() / oldest.doubleValue();
         if (ratio <= 0)
             return Double.NaN;
 
@@ -402,6 +417,21 @@ public class DomesticQualityAnalysisService {
             return Double.NaN;
 
         BigDecimal latestEps = ratios.get(0).getEps();
+        String latestYymm = ratios.get(0).getStacYymm();
+
+        // [연환산 로직] 12월 결산이 아닌 데이터(예: 3, 6, 9월)를 12개월분으로 환산
+        if (latestYymm != null && latestYymm.length() >= 6 && latestEps != null) {
+            try {
+                int month = Integer.parseInt(latestYymm.substring(latestYymm.length() - 2));
+                if (month > 0 && month < 12) {
+                    latestEps = latestEps.multiply(new BigDecimal(12)).divide(new BigDecimal(month), 2,
+                            RoundingMode.HALF_UP);
+                }
+            } catch (Exception e) {
+                // ignore format errors
+            }
+        }
+
         int oldIndex = Math.min(3, ratios.size() - 1);
         BigDecimal oldestEps = ratios.get(oldIndex).getEps();
 

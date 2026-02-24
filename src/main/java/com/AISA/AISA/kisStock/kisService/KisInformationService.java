@@ -99,28 +99,42 @@ public class KisInformationService {
                 throw new BusinessException(KisApiErrorCode.STOCK_PRICE_FETCH_FAILED);
             }
 
-            // 2. Save to DB (StockBalanceSheet)
-            List<StockBalanceSheet> entitiesToSave = response.getOutput().stream()
-                    .map(item -> StockBalanceSheet.builder()
+            // 2. Save to DB (StockBalanceSheet) with Upsert Logic
+            List<StockBalanceSheet> entitiesToSave = new ArrayList<>();
+            for (KisBalanceSheetApiResponse.Output item : response.getOutput()) {
+                StockBalanceSheet existing = stockBalanceSheetRepository
+                        .findByStockCodeAndStacYymmAndDivCode(stockCode, item.getStacYymm(), divCode)
+                        .orElse(null);
+
+                StockBalanceSheet entity;
+                if (existing != null) {
+                    entity = StockBalanceSheet.builder()
+                            .id(existing.getId()) // Keep ID for update
                             .stockCode(stockCode)
                             .stacYymm(item.getStacYymm())
                             .divCode(divCode)
                             .totalAssets(new java.math.BigDecimal(parseLongSafe(item.getTotalAssets())))
                             .totalLiabilities(new java.math.BigDecimal(parseLongSafe(item.getTotalLiabilities())))
                             .totalCapital(new java.math.BigDecimal(parseLongSafe(item.getTotalCapital())))
-                            .build())
-                    .collect(Collectors.toList());
+                            .build();
+                } else {
+                    entity = StockBalanceSheet.builder()
+                            .stockCode(stockCode)
+                            .stacYymm(item.getStacYymm())
+                            .divCode(divCode)
+                            .totalAssets(new java.math.BigDecimal(parseLongSafe(item.getTotalAssets())))
+                            .totalLiabilities(new java.math.BigDecimal(parseLongSafe(item.getTotalLiabilities())))
+                            .totalCapital(new java.math.BigDecimal(parseLongSafe(item.getTotalCapital())))
+                            .build();
+                }
+                entitiesToSave.add(entity);
+            }
 
             if (entitiesToSave.isEmpty()) {
                 throw new Exception("Empty KIS response");
             }
 
-            try {
-                // Ignore duplicates using simple save logic.
-                stockBalanceSheetRepository.saveAll(entitiesToSave);
-            } catch (Exception e) {
-                log.warn("Duplicate entry or save error for balance sheet {}: {}", stockCode, e.getMessage());
-            }
+            stockBalanceSheetRepository.saveAll(entitiesToSave);
 
             return entitiesToSave.stream()
                     .map(entity -> BalanceSheetDto.builder()

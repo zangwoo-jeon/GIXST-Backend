@@ -5,6 +5,7 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 @Getter
@@ -14,6 +15,8 @@ import java.util.List;
 public class DiagnosisResultDto {
     private String portfolioId;
     private String diagnosisDate;
+    private BigDecimal totalExpectedDividend;
+    private BigDecimal portfolioDividendYield;
     private List<FactorAnalysisResult> factorAnalysis;
     private List<String> adviceList;
 

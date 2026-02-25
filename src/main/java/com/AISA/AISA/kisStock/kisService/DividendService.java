@@ -360,58 +360,67 @@ public class DividendService {
 
         @Cacheable(value = "dividendRank", key = "'all'", sync = true)
         public DividendRankDto getDividendRank() {
-                List<StockDividendRank> rankList = stockDividendRankRepository.findAll();
+                try {
+                        List<StockDividendRank> rankList = stockDividendRankRepository.findAll();
 
-                // 1. 배당수익률 내림차순 정렬
-                rankList.sort(Comparator.comparing(StockDividendRank::getDividendRate, (s1, s2) -> {
-                        Double d1 = Double.parseDouble(s1);
-                        Double d2 = Double.parseDouble(s2);
-                        return d2.compareTo(d1);
-                }));
+                        // 1. 배당수익률 내림차순 정렬
+                        rankList.sort(Comparator.comparing(StockDividendRank::getDividendRate, (s1, s2) -> {
+                                Double d1 = Double.parseDouble(s1);
+                                Double d2 = Double.parseDouble(s2);
+                                return d2.compareTo(d1);
+                        }));
 
-                // 2. 상위 20개만 추출
-                List<StockDividendRank> top20 = rankList.stream()
-                                .limit(20)
-                                .collect(Collectors.toList());
+                        // 2. 상위 20개만 추출
+                        List<StockDividendRank> top20 = rankList.stream()
+                                        .limit(20)
+                                        .collect(Collectors.toList());
 
-                // 3. 실시간 현재가 조회 및 DTO 변환
-                List<Stock> allStocksForType = stockRepository.findAll();
-                Map<String, Stock.StockType> stockTypeMap = allStocksForType.stream()
-                                .collect(Collectors.toMap(Stock::getStockCode, Stock::getStockType, (a, b) -> a));
+                        // 3. 실시간 현재가 조회 및 DTO 변환을 위해 필요한 주식 정보만 조회
+                        List<String> stockCodes = top20.stream()
+                                        .map(StockDividendRank::getStockCode)
+                                        .collect(Collectors.toList());
 
-                List<DividendRankDto.DividendRankEntry> entries = top20.stream()
-                                .map(entity -> {
-                                        String currentPrice = "0";
-                                        try {
-                                                StockPriceDto priceDto = kisStockService
-                                                                .getStockPrice(entity.getStockCode());
-                                                if (priceDto != null) {
-                                                        currentPrice = priceDto.getStockPrice();
+                        Map<String, Stock.StockType> stockTypeMap = stockRepository.findByStockCodeIn(stockCodes)
+                                        .stream()
+                                        .collect(Collectors.toMap(Stock::getStockCode,
+                                                        s -> s.getStockType() != null ? s.getStockType()
+                                                                        : Stock.StockType.DOMESTIC,
+                                                        (a, b) -> a));
+
+                        List<DividendRankDto.DividendRankEntry> entries = top20.stream()
+                                        .map(entity -> {
+                                                String currentPrice = "0";
+                                                try {
+                                                        StockPriceDto priceDto = kisStockService
+                                                                        .getStockPrice(entity.getStockCode());
+                                                        if (priceDto != null) {
+                                                                currentPrice = priceDto.getStockPrice();
+                                                        }
+                                                } catch (Exception e) {
+                                                        log.warn("Failed to fetch real-time price for {}: {}",
+                                                                        entity.getStockCode(), e.getMessage());
                                                 }
-                                        } catch (Exception e) {
-                                                log.warn("Failed to fetch real-time price for {}: {}",
-                                                                entity.getStockCode(), e.getMessage());
-                                        }
 
-                                        return DividendRankDto.DividendRankEntry.builder()
-                                                        .rank(entity.getRank()) // The rank
-                                                                                // field is
-                                                                                // now
-                                                                                // Integer
-                                                        .stockCode(entity.getStockCode())
-                                                        .stockName(entity.getStockName())
-                                                        .dividendAmount(entity.getDividendAmount())
-                                                        .dividendRate(entity.getDividendRate())
-                                                        .currentPrice(currentPrice)
-                                                        .stockType(stockTypeMap.getOrDefault(entity.getStockCode(),
-                                                                        null))
-                                                        .build();
-                                })
-                                .collect(Collectors.toList());
+                                                return DividendRankDto.DividendRankEntry.builder()
+                                                                .rank(entity.getRank())
+                                                                .stockCode(entity.getStockCode())
+                                                                .stockName(entity.getStockName())
+                                                                .dividendAmount(entity.getDividendAmount())
+                                                                .dividendRate(entity.getDividendRate())
+                                                                .currentPrice(currentPrice)
+                                                                .stockType(stockTypeMap.getOrDefault(
+                                                                                entity.getStockCode(), null))
+                                                                .build();
+                                        })
+                                        .collect(Collectors.toList());
 
-                return DividendRankDto.builder()
-                                .ranks(entries)
-                                .build();
+                        return DividendRankDto.builder()
+                                        .ranks(entries)
+                                        .build();
+                } catch (Exception e) {
+                        log.error("Failed to get dividend rank: {}", e.getMessage());
+                        return DividendRankDto.builder().ranks(new ArrayList<>()).build();
+                }
         }
 
         @Transactional

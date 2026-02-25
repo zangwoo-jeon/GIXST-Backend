@@ -166,7 +166,7 @@ public class KisStockService {
 
     // Hybrid Caching: Past Data (Cached) + Today's Data (Real-time)
     public String getStockChartJson(String stockCode, String startDate, String endDate,
-                                    String dateType) {
+            String dateType) {
         validateDomesticStock(stockCode);
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
         LocalDate targetStartDate = LocalDate.parse(startDate, formatter);
@@ -199,7 +199,7 @@ public class KisStockService {
     }
 
     public StockChartResponseDto getStockChart(String stockCode, String startDate, String endDate,
-                                               String dateType) {
+            String dateType) {
         String json = getStockChartJson(stockCode, startDate, endDate, dateType);
         try {
             return objectMapper.readValue(json, StockChartResponseDto.class);
@@ -417,7 +417,7 @@ public class KisStockService {
     }
 
     private StockChartResponseDto fetchStockChartFromApi(String stockCode, String startDate, String endDate,
-                                                         String dateType, String marketDivCode) {
+            String dateType, String marketDivCode) {
         StockChartResponseDto apiResponse;
         try {
             apiResponse = kisApiClient.fetch(token -> webClient.get()
@@ -471,7 +471,7 @@ public class KisStockService {
         int consecutiveFailures = 0;
         final int MAX_CONSECUTIVE_FAILURES = 5;
         final int FALLBACK_THRESHOLD = 3;
-        final String[] effectiveMarketCode = {marketCode};
+        final String[] effectiveMarketCode = { marketCode };
         boolean fallbackAttempted = false;
 
         while (currentDate.isAfter(targetStartDate)) {
@@ -663,12 +663,20 @@ public class KisStockService {
                 return VolumeRankDto.builder().ranks(new ArrayList<>()).build();
             }
 
-            List<Stock> allStocks = stockRepository.findAll();
-            Map<String, Stock.StockType> stockTypeMap = allStocks.stream()
-                    .collect(Collectors.toMap(Stock::getStockCode, Stock::getStockType,
-                            (a, b) -> a));
+            // Limit to top 20 rankings to avoid performance issues and improve readability
+            List<KisVolumeRankApiResponse.VolumeRankItem> rankingItems = response.getOutput().stream()
+                    .limit(20)
+                    .collect(Collectors.toList());
 
-            List<VolumeRankDto.VolumeRankEntry> ranks = response.getOutput().stream()
+            // Bulk fetch only the required stocks to optimize database query
+            List<String> stockCodes = rankingItems.stream()
+                    .map(KisVolumeRankApiResponse.VolumeRankItem::getStockCode)
+                    .collect(Collectors.toList());
+
+            Map<String, Stock.StockType> stockTypeMap = stockRepository.findByStockCodeIn(stockCodes).stream()
+                    .collect(Collectors.toMap(Stock::getStockCode, Stock::getStockType, (a, b) -> a));
+
+            List<VolumeRankDto.VolumeRankEntry> ranks = rankingItems.stream()
                     .map(item -> VolumeRankDto.VolumeRankEntry.builder()
                             .stockName(item.getStockName())
                             .stockCode(item.getStockCode())
@@ -688,7 +696,8 @@ public class KisStockService {
 
         } catch (Exception e) {
             log.error("Failed to fetch volume rank: {}", e.getMessage());
-            return null;
+            // Return empty list instead of null to prevent breaking the frontend
+            return VolumeRankDto.builder().ranks(new ArrayList<>()).build();
         }
     }
 
@@ -782,7 +791,7 @@ public class KisStockService {
     }
 
     private List<StockChartPriceDto> applyUsdConversion(List<StockChartPriceDto> list, String startDate,
-                                                        String endDate) {
+            String endDate) {
         if (list == null || list.isEmpty()) {
             return list;
         }
@@ -858,23 +867,23 @@ public class KisStockService {
                 .findByStockAndDateBetweenOrderByDateAsc(stock, startDate, today);
 
         return dailyData.stream().map(d -> StockInvestorDailyDto.builder()
-                        .date(d.getDate().toString())
-                        .foreignerNetBuyAmount(String.valueOf(d.getForeignerNetBuyAmount().longValue()))
-                        .institutionNetBuyAmount(String.valueOf(d.getInstitutionNetBuyAmount().longValue()))
-                        .personalNetBuyAmount(String.valueOf(d.getPersonalNetBuyAmount().longValue()))
-                        .etcCorporateNetBuyAmount(d.getEtcCorporateNetBuyAmount() != null
-                                ? String.valueOf(d.getEtcCorporateNetBuyAmount().longValue())
-                                : "0")
-                        .foreignerNetBuyQuantity(d.getForeignerNetBuyQuantity() != null
-                                ? String.valueOf(d.getForeignerNetBuyQuantity())
-                                : "0")
-                        .institutionNetBuyQuantity(d.getInstitutionNetBuyQuantity() != null
-                                ? String.valueOf(d.getInstitutionNetBuyQuantity())
-                                : "0")
-                        .personalNetBuyQuantity(d.getPersonalNetBuyQuantity() != null
-                                ? String.valueOf(d.getPersonalNetBuyQuantity())
-                                : "0")
-                        .build())
+                .date(d.getDate().toString())
+                .foreignerNetBuyAmount(String.valueOf(d.getForeignerNetBuyAmount().longValue()))
+                .institutionNetBuyAmount(String.valueOf(d.getInstitutionNetBuyAmount().longValue()))
+                .personalNetBuyAmount(String.valueOf(d.getPersonalNetBuyAmount().longValue()))
+                .etcCorporateNetBuyAmount(d.getEtcCorporateNetBuyAmount() != null
+                        ? String.valueOf(d.getEtcCorporateNetBuyAmount().longValue())
+                        : "0")
+                .foreignerNetBuyQuantity(d.getForeignerNetBuyQuantity() != null
+                        ? String.valueOf(d.getForeignerNetBuyQuantity())
+                        : "0")
+                .institutionNetBuyQuantity(d.getInstitutionNetBuyQuantity() != null
+                        ? String.valueOf(d.getInstitutionNetBuyQuantity())
+                        : "0")
+                .personalNetBuyQuantity(d.getPersonalNetBuyQuantity() != null
+                        ? String.valueOf(d.getPersonalNetBuyQuantity())
+                        : "0")
+                .build())
                 .collect(Collectors.toList());
     }
 
@@ -1092,7 +1101,7 @@ public class KisStockService {
     }
 
     private double calculateOverallScore(BigDecimal f1m, BigDecimal i1m, BigDecimal f3m, BigDecimal i3m,
-                                         BigDecimal f1y, BigDecimal i1y, double fZ, double iZ) {
+            BigDecimal f1y, BigDecimal i1y, double fZ, double iZ) {
         double score = 50.0;
         score += (fZ * 5) + (iZ * 10);
         if (f1m.compareTo(BigDecimal.ZERO) > 0)
@@ -1107,7 +1116,7 @@ public class KisStockService {
     }
 
     private String determineAdvancedTrend(double fZ, double iZ, BigDecimal fOverheat, BigDecimal iOverheat,
-                                          double score) {
+            double score) {
         if (fZ > 3.0 || iZ > 3.0)
             return "수급 다이버전스/폭발 발생";
         if (score > 80) {
@@ -1157,7 +1166,7 @@ public class KisStockService {
         int consecutiveSkips = 0;
         final int MAX_CONSECUTIVE_SKIPS = 30;
         final int FALLBACK_THRESHOLD = 5; // UN → J 전환 기준 연속 빈 응답 횟수
-        final String[] effectiveMarketCode = {marketCode};
+        final String[] effectiveMarketCode = { marketCode };
         boolean fallbackAttempted = false;
 
         while (currentDate.isAfter(targetDate)) {
@@ -1316,7 +1325,7 @@ public class KisStockService {
     }
 
     private BigDecimal getEffectiveQuantity(BigDecimal amt, Long qty, LocalDate date,
-                                            Map<LocalDate, BigDecimal> priceMap, BigDecimal fallbackPrice) {
+            Map<LocalDate, BigDecimal> priceMap, BigDecimal fallbackPrice) {
         // 1. If actual quantity exists, use it
         if (qty != null && qty > 0) {
             return new BigDecimal(qty);
@@ -1412,7 +1421,7 @@ public class KisStockService {
 
     @Transactional(readOnly = true)
     public Page<StockSearchResponseDto> getStocksBySector(String subIndustryCode,
-                                                          Pageable pageable) {
+            Pageable pageable) {
         Page<Stock> stockPage = stockRepository
                 .findBySubIndustryCode(subIndustryCode, pageable);
         return stockPage.map(stock -> StockSearchResponseDto.builder()

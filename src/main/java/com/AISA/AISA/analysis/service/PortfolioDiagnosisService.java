@@ -10,6 +10,8 @@ import com.AISA.AISA.portfolio.PortfolioStock.PortStockService;
 import com.AISA.AISA.portfolio.PortfolioStock.dto.PortfolioReturnResponse;
 import com.AISA.AISA.portfolio.PortfolioStock.dto.PortStockResponse;
 import com.AISA.AISA.kisStock.Entity.stock.Stock;
+import com.AISA.AISA.kisStock.kisService.DividendService;
+import com.AISA.AISA.kisOverseasStock.service.OverseasDividendService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -35,6 +37,8 @@ public class PortfolioDiagnosisService {
     private final AnalysisService analysisService;
     private final GeminiService geminiService;
     private final PortStockService portStockService;
+    private final DividendService dividendService;
+    private final OverseasDividendService overseasDividendService;
 
     private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyyMMdd");
 
@@ -60,6 +64,60 @@ public class PortfolioDiagnosisService {
         }
 
         PortfolioReturnResponse portfolioComposition = portStockService.getPortStocks(portfolioId);
+
+        // Calculate expected dividend
+        BigDecimal totalExpectedDividend = BigDecimal.ZERO;
+        BigDecimal portfolioTotalValue = portfolioComposition != null ? portfolioComposition.getTotalValue()
+                : BigDecimal.ZERO;
+
+        if (portfolioComposition != null && portfolioComposition.getPortStocks() != null) {
+            String divStartDate = LocalDate.now().minusYears(1).format(FORMATTER);
+            String divEndDate = LocalDate.now().format(FORMATTER);
+
+            for (PortStockResponse stock : portfolioComposition.getPortStocks()) {
+                try {
+                    boolean isDomestic = stock.getStockType() == Stock.StockType.DOMESTIC ||
+                            stock.getStockType() == Stock.StockType.DOMESTIC_ETF ||
+                            stock.getStockType() == Stock.StockType.FOREIGN_ETF;
+
+                    if (isDomestic) {
+                        com.AISA.AISA.kisStock.dto.Dividend.DividendDetailDto detail = dividendService
+                                .getDividendDetail(stock.getStockCode());
+                        if (detail != null && detail.getDividendYield() != null
+                                && !detail.getDividendYield().equals("0")) {
+                            BigDecimal yield = new BigDecimal(detail.getDividendYield());
+                            BigDecimal stockValue = stock.getTotalValueKrw() != null ? stock.getTotalValueKrw()
+                                    : BigDecimal.ZERO;
+                            BigDecimal expectedDiv = stockValue.multiply(yield).divide(new BigDecimal("100"), 4,
+                                    java.math.RoundingMode.HALF_UP);
+                            totalExpectedDividend = totalExpectedDividend.add(expectedDiv);
+                        }
+                    } else {
+                        List<com.AISA.AISA.kisStock.dto.Dividend.StockDividendInfoDto> divList = overseasDividendService
+                                .getDividendInfo(stock.getStockCode(), divStartDate, divEndDate);
+                        if (divList != null && !divList.isEmpty()) {
+                            BigDecimal stockTotalDivKrw = BigDecimal.ZERO;
+                            for (var div : divList) {
+                                if (div.getDividendAmountKrw() != null) {
+                                    stockTotalDivKrw = stockTotalDivKrw.add(div.getDividendAmountKrw());
+                                }
+                            }
+                            BigDecimal expectedDiv = stockTotalDivKrw.multiply(new BigDecimal(stock.getQuantity()));
+                            totalExpectedDividend = totalExpectedDividend.add(expectedDiv);
+                        }
+                    }
+                } catch (Exception e) {
+                    log.warn("Failed to calc dividend for stock {} during diagnosis: {}", stock.getStockCode(),
+                            e.getMessage());
+                }
+            }
+        }
+
+        BigDecimal portfolioDividendYield = BigDecimal.ZERO;
+        if (portfolioTotalValue != null && portfolioTotalValue.compareTo(BigDecimal.ZERO) > 0) {
+            portfolioDividendYield = totalExpectedDividend
+                    .divide(portfolioTotalValue, 4, java.math.RoundingMode.HALF_UP).multiply(new BigDecimal("100"));
+        }
 
         // Extract Stock Codes for Interpretation Layer
         Set<String> portfolioStockCodes = (portfolioComposition != null
@@ -121,7 +179,8 @@ public class PortfolioDiagnosisService {
                 portfolioStockCodes, portfolioComposition);
 
         // 4. Generate AI Advice
-        String prompt = createPrompt(factorResults, rawSignals, portfolioComposition);
+        String prompt = createPrompt(factorResults, rawSignals, portfolioComposition, totalExpectedDividend,
+                portfolioDividendYield);
         String aiAdvice = geminiService.generateAdvice(prompt);
 
         List<String> adviceList = new ArrayList<>();
@@ -141,13 +200,16 @@ public class PortfolioDiagnosisService {
         return DiagnosisResultDto.builder()
                 .portfolioId(portfolioId.toString())
                 .diagnosisDate(endVal.format(FORMATTER))
+                .totalExpectedDividend(totalExpectedDividend)
+                .portfolioDividendYield(portfolioDividendYield)
                 .factorAnalysis(factorResults)
                 .adviceList(adviceList)
                 .build();
     }
 
     private String createPrompt(List<DiagnosisResultDto.FactorAnalysisResult> results, List<String> rawSignals,
-            PortfolioReturnResponse portfolioComposition) {
+            PortfolioReturnResponse portfolioComposition, BigDecimal totalExpectedDividend,
+            BigDecimal portfolioDividendYield) {
         StringBuilder sb = new StringBuilder();
         sb.append("당신은 '전문 투자 포트폴리오 분석가'입니다. 아래 데이터를 바탕으로 사용자의 포트폴리오를 냉철하고 객관적으로 분석해주세요.\n\n");
 
@@ -168,14 +230,23 @@ public class PortfolioDiagnosisService {
         }
         sb.append("\n");
 
+        sb.append("[포트폴리오 배당(현금흐름) 정보]\n");
+        if (totalExpectedDividend != null && portfolioDividendYield != null) {
+            sb.append(String.format("- 예상 연간 총 배당금: %s원\n", String.format("%,d", totalExpectedDividend.longValue())));
+            sb.append(String.format("- 포트폴리오 배당 수익률: %.2f%%\n", portfolioDividendYield.doubleValue()));
+        } else {
+            sb.append("- 배당 정보 없음\n");
+        }
+        sb.append("\n");
+
         sb.append("[작성 가이드]\n");
         sb.append("1. **어조**: 비유나 은유를 최대한 배제하고, 금융 전문가로서 담백하고 알기 쉽게 설명하세요.\n");
         sb.append("2. **구조**: \n");
         sb.append("   - **종합 평가**: 포트폴리오의 전반적인 성격을 요약 (안정형/공격형, 특정 자산 편중 여부 등)\n");
-        sb.append("   - **장점**: 데이터에 기반한 긍정적인 요소 (예: 낮은 변동성, 하락장 방어력 등)\n");
+        sb.append("   - **장점**: 데이터에 기반한 긍정적인 요소 (예: 낮은 변동성, 하락장 방어력, 우수한 현금흐름(배당) 등)\n");
         sb.append("   - **단점 및 위험 요인**: 주의가 필요한 요소 (예: 특정 자산군 쏠림, 벤치마크 대비 저조한 성과 등)\n");
-        sb.append("   - **개선 제안**: 구체적인 보완 방법 제시 (예: 벤치마크 성과가 우수한 자산군 편입 고려 등)\n");
-        sb.append("3. **분석 기준**: 제공된 '진단 데이터'와 '포트폴리오 구성'을 종합적으로 고려하세요.\n");
+        sb.append("   - **개선 제안**: 구체적인 보완 방법 제시 (예: 벤치마크 성과가 우수한 자산군 편입 고려, 배당수익률 향상 고려 등)\n");
+        sb.append("3. **분석 기준**: 제공된 '진단 데이터', '포트폴리오 배당 정보'와 '포트폴리오 구성'을 종합적으로 고려하세요.\n");
         sb.append("4. **용어 설명**: 일반인이 이해하기 어려운 전문 용어는 쉽게 풀어서 설명하세요.\n\n");
 
         sb.append("[진단 데이터]\n");

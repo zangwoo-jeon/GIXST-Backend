@@ -198,7 +198,7 @@ public class KisInformationController {
         }
 
         @GetMapping("/investor-trend/daily/{stockCode}")
-        @Operation(summary = "종목별 일자별 수급 데이터 조회 (기간 선택)", description = "DB에 저장된 특정 종목의 일자별 외국인/기관/개인 순매수 정보를 조회합니다. (period: 1w, 1m, 3m, 6m)")
+        @Operation(summary = "종목별 일자별 수급 데이터 조회 (기간 선택)", description = "DB에 저장된 특정 종목의 일자별 외국인/기관/개인 순매수 정보를 조회합니다. (period: 1d, 1w, 1m, 3m, 6m)")
         public ResponseEntity<SuccessResponse<List<StockInvestorDailyDto>>> getDailyInvestorTrend(
                         @PathVariable String stockCode,
                         @RequestParam(defaultValue = "3m") String period) {

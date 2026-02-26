@@ -49,17 +49,20 @@ public class KisInvestorService {
                         throw new BusinessException(KisApiErrorCode.INVALID_STOCK_TYPE);
                 }
 
+                LocalDate today = LocalDate.now();
                 LocalDate startDate;
-                if ("1w".equalsIgnoreCase(period)) {
-                        startDate = LocalDate.now().minusWeeks(1);
+                if ("1d".equalsIgnoreCase(period)) {
+                        startDate = stockInvestorDailyRepository.existsByStockAndDate(stock, today) ? today : today.minusDays(1);
+                } else if ("1w".equalsIgnoreCase(period)) {
+                        startDate = today.minusWeeks(1);
                 } else if ("1m".equalsIgnoreCase(period)) {
-                        startDate = LocalDate.now().minusMonths(1);
+                        startDate = today.minusMonths(1);
                 } else if ("6m".equalsIgnoreCase(period)) {
-                        startDate = LocalDate.now().minusMonths(6);
+                        startDate = today.minusMonths(6);
                 } else if ("1y".equalsIgnoreCase(period)) {
-                        startDate = LocalDate.now().minusYears(1);
+                        startDate = today.minusYears(1);
                 } else {
-                        startDate = LocalDate.now().minusMonths(3);
+                        startDate = today.minusMonths(3);
                 }
 
                 AccumulatedInvestorProjection projection = stockInvestorDailyRepository

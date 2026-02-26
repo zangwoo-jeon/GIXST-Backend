@@ -28,7 +28,10 @@ public class KisRankService {
     @Transactional(readOnly = true)
     public InvestorRankResponseDto getInvestorRanking(String period, String type, int limit) {
         LocalDate startDate;
-        if ("1w".equalsIgnoreCase(period)) {
+        if ("1d".equalsIgnoreCase(period)) {
+            LocalDate today = LocalDate.now();
+            startDate = stockInvestorDailyRepository.existsByDate(today) ? today : today.minusDays(1);
+        } else if ("1w".equalsIgnoreCase(period)) {
             startDate = LocalDate.now().minusWeeks(1);
         } else if ("1m".equalsIgnoreCase(period)) {
             startDate = LocalDate.now().minusMonths(1);

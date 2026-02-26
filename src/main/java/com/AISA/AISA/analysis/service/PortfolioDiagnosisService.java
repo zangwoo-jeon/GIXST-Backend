@@ -3,6 +3,8 @@ package com.AISA.AISA.analysis.service;
 import com.AISA.AISA.analysis.dto.CorrelationResultDto;
 import com.AISA.AISA.analysis.dto.DiagnosisResultDto;
 import com.AISA.AISA.analysis.dto.RollingCorrelationDto;
+import com.AISA.AISA.kisStock.dto.Dividend.DividendDetailDto;
+import com.AISA.AISA.kisStock.dto.Dividend.StockDividendInfoDto;
 import com.AISA.AISA.portfolio.backtest.dto.BacktestResultDto;
 import com.AISA.AISA.portfolio.backtest.dto.DailyPortfolioValueDto;
 import com.AISA.AISA.portfolio.backtest.service.BacktestService;
@@ -18,6 +20,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -81,7 +84,7 @@ public class PortfolioDiagnosisService {
                             stock.getStockType() == Stock.StockType.FOREIGN_ETF;
 
                     if (isDomestic) {
-                        com.AISA.AISA.kisStock.dto.Dividend.DividendDetailDto detail = dividendService
+                        DividendDetailDto detail = dividendService
                                 .getDividendDetail(stock.getStockCode());
                         if (detail != null && detail.getDividendYield() != null
                                 && !detail.getDividendYield().equals("0")) {
@@ -89,11 +92,11 @@ public class PortfolioDiagnosisService {
                             BigDecimal stockValue = stock.getTotalValueKrw() != null ? stock.getTotalValueKrw()
                                     : BigDecimal.ZERO;
                             BigDecimal expectedDiv = stockValue.multiply(yield).divide(new BigDecimal("100"), 4,
-                                    java.math.RoundingMode.HALF_UP);
+                                    RoundingMode.HALF_UP);
                             totalExpectedDividend = totalExpectedDividend.add(expectedDiv);
                         }
                     } else {
-                        List<com.AISA.AISA.kisStock.dto.Dividend.StockDividendInfoDto> divList = overseasDividendService
+                        List<StockDividendInfoDto> divList = overseasDividendService
                                 .getDividendInfo(stock.getStockCode(), divStartDate, divEndDate);
                         if (divList != null && !divList.isEmpty()) {
                             BigDecimal stockTotalDivKrw = BigDecimal.ZERO;
@@ -116,7 +119,7 @@ public class PortfolioDiagnosisService {
         BigDecimal portfolioDividendYield = BigDecimal.ZERO;
         if (portfolioTotalValue != null && portfolioTotalValue.compareTo(BigDecimal.ZERO) > 0) {
             portfolioDividendYield = totalExpectedDividend
-                    .divide(portfolioTotalValue, 4, java.math.RoundingMode.HALF_UP).multiply(new BigDecimal("100"));
+                    .divide(portfolioTotalValue, 4, RoundingMode.HALF_UP).multiply(new BigDecimal("100"));
         }
 
         // Extract Stock Codes for Interpretation Layer
@@ -220,7 +223,7 @@ public class PortfolioDiagnosisService {
                 double weight = 0;
                 if (totalValue != null && totalValue.compareTo(BigDecimal.ZERO) > 0
                         && stock.getTotalValueKrw() != null) {
-                    weight = stock.getTotalValueKrw().divide(totalValue, 4, java.math.RoundingMode.HALF_UP)
+                    weight = stock.getTotalValueKrw().divide(totalValue, 4, RoundingMode.HALF_UP)
                             .doubleValue()
                             * 100;
                 }

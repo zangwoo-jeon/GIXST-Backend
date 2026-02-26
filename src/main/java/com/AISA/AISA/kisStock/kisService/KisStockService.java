@@ -853,7 +853,9 @@ public class KisStockService {
         // Fetch based on period
         LocalDate today = LocalDate.now();
         LocalDate startDate;
-        if ("1w".equalsIgnoreCase(period)) {
+        if ("1d".equalsIgnoreCase(period)) {
+            startDate = stockInvestorDailyRepository.existsByStockAndDate(stock, today) ? today : today.minusDays(1);
+        } else if ("1w".equalsIgnoreCase(period)) {
             startDate = today.minusWeeks(1);
         } else if ("1m".equalsIgnoreCase(period)) {
             startDate = today.minusMonths(1);

@@ -26,6 +26,7 @@ import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.Map;
+import java.util.Set;
 import com.AISA.AISA.kisStock.repository.StockRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -244,10 +245,18 @@ public class KisInformationService {
         }
 
         // 4. Filter & Apply Sort
+        // Stock.isSuspended is the authoritative source (updated in real-time),
+        // whereas StockFinancialRatio.isSuspended is only updated during weekly batch.
+        List<Stock> allStocks = stockRepository.findAll();
+        Set<String> suspendedCodes = allStocks.stream()
+                .filter(Stock::isSuspended)
+                .map(Stock::getStockCode)
+                .collect(Collectors.toSet());
+
         List<StockFinancialRatio> filteredRanks = latestRatios.stream()
                 .filter(r -> {
-                    // Filter Out Suspended Stocks
-                    if (Boolean.TRUE.equals(r.getIsSuspended())) {
+                    // Filter Out Suspended Stocks using Stock entity as authoritative source
+                    if (suspendedCodes.contains(r.getStockCode())) {
                         return false;
                     }
 
@@ -268,11 +277,10 @@ public class KisInformationService {
         }
 
         // 5. Map to DTO (Top 20)
-        List<Stock> allStocks = stockRepository.findAll();
         Map<String, String> stockNameMap = allStocks.stream()
                 .collect(Collectors.toMap(Stock::getStockCode, Stock::getStockName, (a, b) -> a));
-        Map<String, Stock.StockType> stockTypeMap = allStocks.stream()
-                .collect(Collectors.toMap(Stock::getStockCode, Stock::getStockType, (a, b) -> a));
+        Map<String, Stock.StockType> stockTypeMap = new java.util.HashMap<>();
+        allStocks.forEach(s -> stockTypeMap.put(s.getStockCode(), s.getStockType()));
 
         List<FinancialRatioRankDto.FinancialRatioEntry> entries = filteredRanks.stream()
                 .limit(20)
@@ -730,8 +738,8 @@ public class KisInformationService {
 
         // 2. Map to DTO
         List<Stock> allStocksForType = stockRepository.findAll();
-        Map<String, Stock.StockType> stockTypeMapForRank = allStocksForType.stream()
-                .collect(Collectors.toMap(Stock::getStockCode, Stock::getStockType, (a, b) -> a));
+        Map<String, Stock.StockType> stockTypeMapForRank = new java.util.HashMap<>();
+        allStocksForType.forEach(s -> stockTypeMapForRank.put(s.getStockCode(), s.getStockType()));
 
         List<FinancialRankDto.FinancialRankEntry> calculatedRanks = allRanks.stream()
                 .map(rank -> FinancialRankDto.FinancialRankEntry.builder()

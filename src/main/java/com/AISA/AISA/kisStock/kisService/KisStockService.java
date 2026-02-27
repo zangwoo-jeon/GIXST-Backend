@@ -673,8 +673,9 @@ public class KisStockService {
                     .map(KisVolumeRankApiResponse.VolumeRankItem::getStockCode)
                     .collect(Collectors.toList());
 
-            Map<String, Stock.StockType> stockTypeMap = stockRepository.findByStockCodeIn(stockCodes).stream()
-                    .collect(Collectors.toMap(Stock::getStockCode, Stock::getStockType, (a, b) -> a));
+            Map<String, Stock.StockType> stockTypeMap = new java.util.HashMap<>();
+            stockRepository.findByStockCodeIn(stockCodes)
+                    .forEach(s -> stockTypeMap.put(s.getStockCode(), s.getStockType()));
 
             List<VolumeRankDto.VolumeRankEntry> ranks = rankingItems.stream()
                     .map(item -> VolumeRankDto.VolumeRankEntry.builder()

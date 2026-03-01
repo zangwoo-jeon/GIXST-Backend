@@ -169,26 +169,14 @@ public class StockScheduler {
         String endDateStr = endDate.format(DateTimeFormatter.ofPattern("yyyyMMdd"));
         String startDateStr = startDate.format(DateTimeFormatter.ofPattern("yyyyMMdd"));
 
-        // 1. Update Basic Rates (USD, JPY, HKD, EUR)
+        // Update all exchange rates via ECOS (USD, JPY, EUR, HKD, CNY)
         for (ExchangeRateCode code : ExchangeRateCode.values()) {
-            if (code == ExchangeRateCode.HKD_KRW || code == ExchangeRateCode.EUR_KRW) {
-                continue; // Skip calculated rates for now
-            }
             try {
                 kisMacroService.fetchAndSaveExchangeRate(code.getSymbol(), startDateStr, endDateStr);
                 Thread.sleep(500); // Rate limit
             } catch (Exception e) {
                 log.error("Failed to update exchange rate for {}: {}", code, e.getMessage());
             }
-        }
-
-        // 2. Update Calculated Rates (HKD/KRW, EUR/KRW)
-        try {
-            kisMacroService.calcAndSaveHkdKrwRate(startDateStr, endDateStr);
-            Thread.sleep(100);
-            kisMacroService.calcAndSaveEurKrwRate(startDateStr, endDateStr);
-        } catch (Exception e) {
-            log.error("Failed to calculate cross rates: {}", e.getMessage());
         }
 
         log.info("Completed scheduled exchange rate data update.");

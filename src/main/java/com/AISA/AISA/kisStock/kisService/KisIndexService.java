@@ -386,8 +386,8 @@ public class KisIndexService {
         String currencyCode = switch (index) {
             case NASDAQ, SP500 -> ExchangeRateCode.USD.getSymbol();
             case NIKKEI -> ExchangeRateCode.JPY.getSymbol();
-            case HANGSENG -> ExchangeRateCode.HKD_KRW.getSymbol();
-            case EUROSTOXX50 -> ExchangeRateCode.EUR_KRW.getSymbol();
+            case HANGSENG -> ExchangeRateCode.HKD.getSymbol();
+            case EUROSTOXX50 -> ExchangeRateCode.EUR.getSymbol();
             default -> ExchangeRateCode.USD.getSymbol();
         };
 

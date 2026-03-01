@@ -38,9 +38,9 @@ public class MacroService {
         } else if (overseasIndex == OverseasIndex.NIKKEI) {
             currencyCode = ExchangeRateCode.JPY.getSymbol();
         } else if (overseasIndex == OverseasIndex.HANGSENG) {
-            currencyCode = ExchangeRateCode.HKD_KRW.getSymbol();
+            currencyCode = ExchangeRateCode.HKD.getSymbol();
         } else if (overseasIndex == OverseasIndex.EUROSTOXX50) {
-            currencyCode = ExchangeRateCode.EUR_KRW.getSymbol();
+            currencyCode = ExchangeRateCode.EUR.getSymbol();
         } else {
             throw new IllegalArgumentException("원화 환산은 NASDAQ, S&P500, NIKKEI, HANGSENG, EUROSTOXX50 지수만 지원합니다.");
         }

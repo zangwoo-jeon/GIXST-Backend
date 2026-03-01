@@ -158,8 +158,8 @@ public class StockScheduler {
         log.info("Completed scheduled overseas index data update.");
     }
 
-    // Run at 4 PM every day (After Korean market close)
-    @Scheduled(cron = "0 0 16 * * *")
+    // Run at 4 PM every weekday (After Korean market close)
+    @Scheduled(cron = "0 0 16 * * MON-FRI")
     public void updateExchangeRateData() {
         log.info("Starting scheduled exchange rate data update...");
 
@@ -200,8 +200,8 @@ public class StockScheduler {
         log.info("Completed scheduled domestic index data update.");
     }
 
-    // Run at 4:05 PM every day (After Exchange Rate update)
-    @Scheduled(cron = "0 5 16 * * *")
+    // Run at 4:05 PM every weekday (After Exchange Rate update)
+    @Scheduled(cron = "0 5 16 * * MON-FRI")
     public void updateBondYieldData() {
         log.info("Starting scheduled bond yield data update...");
 

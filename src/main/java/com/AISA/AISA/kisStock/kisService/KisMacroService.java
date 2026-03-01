@@ -20,6 +20,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 
 import java.math.RoundingMode;
@@ -133,12 +134,14 @@ public class KisMacroService {
     }
 
     @Transactional
+    @CacheEvict(value = "macroExchangeRate", allEntries = true)
     public void fetchAndSaveExchangeRate(String currencyCode, String startDateStr, String endDateStr) {
         ExchangeRateCode exchangeRateCode = ExchangeRateCode.findBySymbol(currencyCode);
         fetchAndSaveEcosDataForRange(STAT_CODE_EXCHANGE_RATE, exchangeRateCode.getItemCode(), startDateStr, endDateStr);
     }
 
     @Transactional
+    @CacheEvict(value = "macroBond", allEntries = true)
     public void fetchAndSaveBondYield(BondYield bond, String startDateStr, String endDateStr) {
         if (bond.isEcosBased()) {
             fetchAndSaveEcosDataForRange(STAT_CODE_ECOS_BOND_YIELD, bond.getEcosItemCode(), startDateStr, endDateStr);

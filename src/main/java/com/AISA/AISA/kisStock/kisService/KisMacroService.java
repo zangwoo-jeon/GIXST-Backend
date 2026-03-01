@@ -61,18 +61,16 @@ public class KisMacroService {
                 .findAllByStatCodeAndItemCodeAndDateBetweenOrderByDateAsc(
                         STAT_CODE_EXCHANGE_RATE, exchangeRateCode.getItemCode(), start, end);
 
-        if (!dbData.isEmpty()) {
-            return dbData.stream()
-                    .map(entity -> new MacroIndicatorDto(entity.getDate().format(formatter), entity.getValue().toString()))
-                    .collect(Collectors.toList());
+        // DB가 비어있거나, 첫 데이터가 요청 시작일보다 7일 이상 늦으면 ECOS에서 빠진 구간 보충
+        boolean hasGap = dbData.isEmpty() || dbData.get(0).getDate().isAfter(start.plusDays(7));
+        if (hasGap) {
+            fetchAndSaveExchangeRate(currencyCode, startDate, endDate);
+            dbData = macroDailyDataRepository
+                    .findAllByStatCodeAndItemCodeAndDateBetweenOrderByDateAsc(
+                            STAT_CODE_EXCHANGE_RATE, exchangeRateCode.getItemCode(), start, end);
         }
 
-        fetchAndSaveExchangeRate(currencyCode, startDate, endDate);
-
-        return macroDailyDataRepository
-                .findAllByStatCodeAndItemCodeAndDateBetweenOrderByDateAsc(
-                        STAT_CODE_EXCHANGE_RATE, exchangeRateCode.getItemCode(), start, end)
-                .stream()
+        return dbData.stream()
                 .map(entity -> new MacroIndicatorDto(entity.getDate().format(formatter), entity.getValue().toString()))
                 .collect(Collectors.toList());
     }
@@ -88,18 +86,16 @@ public class KisMacroService {
                     .findAllByStatCodeAndItemCodeAndDateBetweenOrderByDateAsc(
                             STAT_CODE_ECOS_BOND_YIELD, bond.getEcosItemCode(), start, end);
 
-            if (!dbData.isEmpty()) {
-                return dbData.stream()
-                        .map(e -> new MacroIndicatorDto(e.getDate().format(formatter), e.getValue().toString()))
-                        .collect(Collectors.toList());
+            // DB가 비어있거나, 첫 데이터가 요청 시작일보다 7일 이상 늦으면 ECOS에서 빠진 구간 보충
+            boolean hasGap = dbData.isEmpty() || dbData.get(0).getDate().isAfter(start.plusDays(7));
+            if (hasGap) {
+                fetchAndSaveBondYield(bond, startDate, endDate);
+                dbData = macroDailyDataRepository
+                        .findAllByStatCodeAndItemCodeAndDateBetweenOrderByDateAsc(
+                                STAT_CODE_ECOS_BOND_YIELD, bond.getEcosItemCode(), start, end);
             }
 
-            fetchAndSaveBondYield(bond, startDate, endDate);
-
-            return macroDailyDataRepository
-                    .findAllByStatCodeAndItemCodeAndDateBetweenOrderByDateAsc(
-                            STAT_CODE_ECOS_BOND_YIELD, bond.getEcosItemCode(), start, end)
-                    .stream()
+            return dbData.stream()
                     .map(e -> new MacroIndicatorDto(e.getDate().format(formatter), e.getValue().toString()))
                     .collect(Collectors.toList());
         }

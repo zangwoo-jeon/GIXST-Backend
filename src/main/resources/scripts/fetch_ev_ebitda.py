@@ -4,17 +4,25 @@ from bs4 import BeautifulSoup
 from tqdm import tqdm
 import time
 from datetime import datetime
+import os
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 # DB Configuration
 DB_CONFIG = {
-    'host': '100.77.73.46',
-    'port': 3306,
-    'user': 'user',
-    'password': '0717',
-    'db': 'aisa_portfolio',
+    'host': os.environ.get('DB_HOST', '127.0.0.1'),
+    'port': int(os.environ.get('DB_PORT', '3306')),
+    'user': os.environ['DB_USER'],
+    'password': os.environ['DB_PASSWORD'],
+    'db': os.environ.get('DB_NAME', 'aisa_portfolio'),
     'charset': 'utf8',
     'cursorclass': pymysql.cursors.DictCursor
 }
+
+H_BASE_URL = os.environ.get('H_BASE_URL')
 
 # Request Headers
 HEADERS = {
@@ -36,12 +44,12 @@ def get_overseas_stock_list():
         if 'connection' in locals():
             connection.close()
 
-def fetch_ev_ebitda_from_hankyung(symbol):
-    """Hankyung Global Market에서 EV/EBITDA를 추출"""
+def fetch_ev_ebitda(symbol):
+    """EV/EBITDA를 추출"""
     try:
         # handle special cases like 'BRK.A' -> 'brka'
         formatted_code = symbol.lower().replace('.', '')
-        url = f"https://www.hankyung.com/globalmarket/equities/americas/{formatted_code}"
+        url = f"{H_BASE_URL}/{formatted_code}"
         
         res = requests.get(url, headers=HEADERS, timeout=10)
         if res.status_code != 200:
@@ -84,7 +92,7 @@ def fetch_ev_ebitda_from_hankyung(symbol):
         return None
 
 def main():
-    print("🚀 Starting EV/EBITDA update from Hankyung...")
+    print("🚀 Starting EV/EBITDA update...")
     
     stocks = get_overseas_stock_list()
     if not stocks:
@@ -98,7 +106,7 @@ def main():
         cursor = connection.cursor()
         
         for symbol in tqdm(stocks, desc="Fetching EV/EBITDA"):
-            ev_ebitda = fetch_ev_ebitda_from_hankyung(symbol)
+            ev_ebitda = fetch_ev_ebitda(symbol)
             
             if ev_ebitda is None:
                 continue

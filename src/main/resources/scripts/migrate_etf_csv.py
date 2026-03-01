@@ -3,13 +3,19 @@ import mysql.connector
 import os
 from datetime import datetime
 import decimal
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 # Database connection configuration
 DB_CONFIG = {
-    "host": "100.77.73.46",
-    "user": "user",
-    "password": "0717",
-    "database": "aisa_portfolio"
+    "host": os.environ.get('DB_HOST', '127.0.0.1'),
+    "port": int(os.environ.get('DB_PORT', '3306')),
+    "user": os.environ['DB_USER'],
+    "password": os.environ['DB_PASSWORD'],
+    "database": os.environ.get('DB_NAME', 'aisa_portfolio'),
 }
 
 CSV_PATH = os.path.join(os.path.dirname(__file__), "data", "etf_list.csv")

@@ -218,7 +218,7 @@ public class MacroController {
     // Endpoints moved to KisIndexController
 
     @GetMapping("/bond/{bondName}")
-    @Operation(summary = "채권 금리 조회", description = "주요 국채 금리(한국, 미국)를 조회합니다. (가능한 bondName: KR_1Y, KR_3Y, KR_10Y, US_1Y, US_10Y, US_30Y)")
+    @Operation(summary = "채권 금리 조회", description = "주요 채권 금리(한국, 미국)를 조회합니다. (가능한 bondName: KR_1Y, KR_3Y, KR_10Y, KR_CORP_3Y, US_1Y, US_10Y, US_30Y)")
     public ResponseEntity<SuccessResponse<List<MacroIndicatorDto>>> getBondYield(
             @PathVariable String bondName,
             @RequestParam String startDate,
@@ -229,7 +229,7 @@ public class MacroController {
     }
 
     @PostMapping("/bond/init")
-    @Operation(summary = "채권 금리 데이터 초기화/업데이트", description = "채권 금리 데이터를 KIS API에서 가져와 DB에 저장합니다. (가능한 bondName: KR_1Y, KR_3Y, KR_10Y, US_1Y, US_10Y, US_30Y)")
+    @Operation(summary = "채권 금리 데이터 초기화/업데이트", description = "채권 금리 데이터를 DB에 저장합니다. 한국 채권(KR_*)은 한국은행 ECOS API, 미국 채권(US_*)은 KIS API를 사용합니다. (가능한 bondName: KR_1Y, KR_3Y, KR_10Y, KR_CORP_3Y, US_1Y, US_10Y, US_30Y)")
     public ResponseEntity<SuccessResponse<Void>> initBondYield(
             @RequestParam String bondName,
             @RequestParam String startDate,

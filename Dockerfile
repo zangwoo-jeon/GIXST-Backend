@@ -22,7 +22,7 @@ RUN mkdir /newsLogs && chown spring:spring /newsLogs
 # Python 및 필수 패키지 설치
 RUN apt-get update && apt-get install -y python3 python3-pip && rm -rf /var/lib/apt/lists/*
 RUN ln -s /usr/bin/python3 /usr/bin/python
-RUN pip3 install requests pandas beautifulsoup4 lxml tqdm --break-system-packages
+RUN pip3 install requests pandas beautifulsoup4 lxml tqdm python-dotenv --break-system-packages
 
 USER spring:spring
 

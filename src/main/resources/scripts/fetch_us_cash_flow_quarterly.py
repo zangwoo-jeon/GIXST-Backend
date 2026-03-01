@@ -4,20 +4,28 @@ from bs4 import BeautifulSoup
 from tqdm import tqdm
 import time
 import warnings
+import os
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 # Suppress warnings
 warnings.filterwarnings("ignore")
 
 # DB Configuration
 DB_CONFIG = {
-    'host': '100.77.73.46',
-    'port': 3306,
-    'user': 'user',
-    'password': '0717',
-    'db': 'aisa_portfolio',
+    'host': os.environ.get('DB_HOST', '127.0.0.1'),
+    'port': int(os.environ.get('DB_PORT', '3306')),
+    'user': os.environ['DB_USER'],
+    'password': os.environ['DB_PASSWORD'],
+    'db': os.environ.get('DB_NAME', 'aisa_portfolio'),
     'charset': 'utf8',
     'cursorclass': pymysql.cursors.DictCursor
 }
+
+H_BASE_URL = os.environ.get('H_BASE_URL')
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
@@ -61,11 +69,8 @@ def parse_number(text: str):
         return 0.0
 
 def fetch_dividend_and_capital_change_quarterly(stock_code):
-    """
-    한경 글로벌마켓에서 해당 종목의 분기 현금흐름표를 크롤링
-    """
     formatted_code = stock_code.lower().replace('.', '')
-    url = f"https://www.hankyung.com/globalmarket/equities/americas/{formatted_code}"
+    url = f"{H_BASE_URL}/{formatted_code}"
     
     try:
         res = requests.get(url, headers=HEADERS, timeout=10)
@@ -164,9 +169,6 @@ def fetch_dividend_and_capital_change_quarterly(stock_code):
     return result
 
 def save_cash_flows(stock_codes):
-    """
-    Hankyung -> DB Upsert (Quarterly)
-    """
     try:
         connection = pymysql.connect(**DB_CONFIG)
         

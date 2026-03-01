@@ -3,13 +3,17 @@ import pandas as pd
 from bs4 import BeautifulSoup
 from tqdm import tqdm
 import os
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
+N_STOCK_URL = os.environ.get('N_STOCK_URL')
 
 def get_stock_list(market_code):
-    """
-    네이버 금융에서 시장별(KOSPI: 0, KOSDAQ: 1) 종목 목록을 가져오는 함수
-    """
     stocks = []
-    base_url = "https://finance.naver.com/sise/sise_market_sum.naver"
+    base_url = N_STOCK_URL
     params = {'sosok': market_code, 'page': 1}
 
     # 첫 페이지 요청
@@ -63,7 +67,7 @@ def create_sql_file(all_stocks):
     """
     filename = "stocks.sql"
     with open(filename, "w", encoding="utf-8") as f:
-        f.write("-- 네이버 증권 상장 기업 목록 SQL 스크립트\n")
+        f.write("-- 상장 기업 목록 SQL 스크립트\n")
         
         # INSERT IGNORE를 사용하여 중복 키 발생 시 무시 (MySQL 문법)
         f.write("INSERT IGNORE INTO stock (stock_code, stock_name, market_name) VALUES\n")
@@ -77,9 +81,9 @@ def create_sql_file(all_stocks):
     print(f"총 {len(all_stocks)}개의 종목 정보 저장됨.")
 
 if __name__ == "__main__":
-    print("네이버 금융에서 KOSPI 종목 수집 중...")
+    print("KOSPI 종목 수집 중...")
     kospi_stocks = get_stock_list(0)
-    print("네이버 금융에서 KOSDAQ 종목 수집 중...")
+    print("KOSDAQ 종목 수집 중...")
     kosdaq_stocks = get_stock_list(1)
 
     all_stocks = kospi_stocks + kosdaq_stocks

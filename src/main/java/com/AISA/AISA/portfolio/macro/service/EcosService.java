@@ -29,8 +29,8 @@ public class EcosService {
     private final MacroDailyDataRepository macroDailyDataRepository;
 
     // 통계표코드 / 주기 / 항목코드
-    private static final String STAT_CODE_M2 = "101Y004"; // M2(광의통화, 평잔, 원계열)
-    private static final String ITEM_CODE_M2_TOTAL = "BBHA00"; // M2(평잔, 원계열)
+    private static final String STAT_CODE_M2 = "161Y015"; // M2(광의통화, 말잔)
+    private static final String ITEM_CODE_M2_TOTAL = "BBABLA"; // M2(말잔, 원계열)
 
     private static final String STAT_CODE_BASE_RATE = "722Y001"; // 한국은행 기준금리 및 여수신금리
     private static final String ITEM_CODE_BASE_RATE = "0101000"; // 한국은행 기준금리

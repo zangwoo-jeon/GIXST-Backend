@@ -3,14 +3,20 @@ import yfinance as yf
 from tqdm import tqdm
 import time
 from datetime import datetime
+import os
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 # DB Configuration
 DB_CONFIG = {
-    'host': '100.77.73.46',
-    'port': 3306,
-    'user': 'user',
-    'password': '0717',
-    'db': 'aisa_portfolio',
+    'host': os.environ.get('DB_HOST', '127.0.0.1'),
+    'port': int(os.environ.get('DB_PORT', '3306')),
+    'user': os.environ['DB_USER'],
+    'password': os.environ['DB_PASSWORD'],
+    'db': os.environ.get('DB_NAME', 'aisa_portfolio'),
     'charset': 'utf8',
     'cursorclass': pymysql.cursors.DictCursor
 }

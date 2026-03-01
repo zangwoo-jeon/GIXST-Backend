@@ -156,7 +156,19 @@ jobs:
               -e SPRING_DATA_REDIS_HOST="172.17.0.1" \
               -e SPRING_DATA_REDIS_PORT="6379" \
               -e SPRING_DATA_REDIS_PASSWORD="${{ secrets.REDIS_PASSWORD }}" \
+              \
+              -e DB_HOST="172.17.0.1" \
+              -e DB_PORT="3306" \
+              -e DB_NAME="aisa_portfolio" \
+              -e DB_USER="${{ secrets.DB_USERNAME }}" \
+              -e DB_PASSWORD="${{ secrets.DB_PASSWORD }}" \
               -e MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE="prometheus,health,metrics" \
+              \
+              -e H_BASE_URL="${{ secrets.H_BASE_URL }}" \
+              -e S_BASE_URL="${{ secrets.S_BASE_URL }}" \
+              -e S_COOKIE="${{ secrets.S_COOKIE }}" \
+              -e N_STOCK_URL="${{ secrets.N_STOCK_URL }}" \
+              -e N_ETF_URL="${{ secrets.N_ETF_URL }}" \
               \
               $FULL_IMAGE_URI
 

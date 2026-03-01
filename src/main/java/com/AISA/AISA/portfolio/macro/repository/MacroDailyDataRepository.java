@@ -15,4 +15,7 @@ public interface MacroDailyDataRepository extends JpaRepository<MacroDailyData, 
 
     // Find the latest data entry to determine the gap
     Optional<MacroDailyData> findTopByStatCodeAndItemCodeOrderByDateDesc(String statCode, String itemCode);
+
+    // Delete all data for a specific stat + item (used for overwrite/re-init)
+    void deleteByStatCodeAndItemCode(String statCode, String itemCode);
 }

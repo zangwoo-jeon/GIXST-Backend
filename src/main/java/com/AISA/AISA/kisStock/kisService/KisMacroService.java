@@ -146,6 +146,31 @@ public class KisMacroService {
 
     @Cacheable(value = "macroBond", key = "#bond.name() + '-' + #startDate + '-' + #endDate")
     public List<MacroIndicatorDto> fetchBondYield(BondYield bond, String startDate, String endDate) {
+        if (bond.isEcosBased()) {
+            DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
+            LocalDate start = LocalDate.parse(startDate, formatter);
+            LocalDate end = LocalDate.parse(endDate, formatter);
+
+            List<MacroDailyData> dbData = macroDailyDataRepository
+                    .findAllByStatCodeAndItemCodeAndDateBetweenOrderByDateAsc(
+                            STAT_CODE_ECOS_BOND_YIELD, bond.getEcosItemCode(), start, end);
+
+            if (!dbData.isEmpty()) {
+                return dbData.stream()
+                        .map(e -> new MacroIndicatorDto(e.getDate().format(formatter), e.getValue().toString()))
+                        .collect(Collectors.toList());
+            }
+
+            fetchAndSaveBondYield(bond, startDate, endDate);
+
+            return macroDailyDataRepository
+                    .findAllByStatCodeAndItemCodeAndDateBetweenOrderByDateAsc(
+                            STAT_CODE_ECOS_BOND_YIELD, bond.getEcosItemCode(), start, end)
+                    .stream()
+                    .map(e -> new MacroIndicatorDto(e.getDate().format(formatter), e.getValue().toString()))
+                    .collect(Collectors.toList());
+        }
+
         return fetchMacroData(STAT_CODE_BOND_YIELD, bond.getSymbol(), "I", bond.getSymbol(), startDate, endDate);
     }
 
@@ -190,8 +215,52 @@ public class KisMacroService {
 
     @Transactional
     public void fetchAndSaveBondYield(BondYield bond, String startDateStr, String endDateStr) {
-        fetchAndSaveMacroData(STAT_CODE_BOND_YIELD, bond.getSymbol(), "I", bond.getSymbol(), startDateStr,
-                endDateStr);
+        if (bond.isEcosBased()) {
+            fetchAndSaveEcosDataForRange(STAT_CODE_ECOS_BOND_YIELD, bond.getEcosItemCode(), startDateStr, endDateStr);
+        } else {
+            fetchAndSaveMacroData(STAT_CODE_BOND_YIELD, bond.getSymbol(), "I", bond.getSymbol(), startDateStr, endDateStr);
+        }
+    }
+
+    @Transactional
+    public void fetchAndSaveEcosDataForRange(String statCode, String itemCode, String startDateStr, String endDateStr) {
+        try {
+            String url = String.format("/StatisticSearch/%s/json/kr/1/100/%s/D/%s/%s/%s",
+                    ecosApiProperties.getApiKey(), statCode, startDateStr, endDateStr, itemCode);
+
+            log.info("Fetching ECOS data: stat={}, item={}, range=[{}~{}]", statCode, itemCode, startDateStr, endDateStr);
+
+            EcosApiResponseDto response = webClient.get()
+                    .uri(ecosApiProperties.getBaseUrl() + url)
+                    .retrieve()
+                    .bodyToMono(EcosApiResponseDto.class)
+                    .block();
+
+            if (response == null || response.getStatisticSearch() == null
+                    || response.getStatisticSearch().getRow() == null) return;
+
+            DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
+            for (EcosApiResponseDto.Row row : response.getStatisticSearch().getRow()) {
+                if (row.getDataValue() == null || row.getDataValue().isBlank()) continue;
+                LocalDate date = LocalDate.parse(row.getTime(), formatter);
+                BigDecimal value = new BigDecimal(row.getDataValue());
+
+                boolean exists = macroDailyDataRepository
+                        .findAllByStatCodeAndItemCodeAndDateBetweenOrderByDateAsc(statCode, itemCode, date, date)
+                        .stream().findAny().isPresent();
+
+                if (!exists) {
+                    macroDailyDataRepository.save(MacroDailyData.builder()
+                            .statCode(statCode)
+                            .itemCode(itemCode)
+                            .date(date)
+                            .value(value)
+                            .build());
+                }
+            }
+        } catch (Exception e) {
+            log.error("Failed to fetch/save ECOS data (stat={}, item={}): {}", statCode, itemCode, e.getMessage());
+        }
     }
 
     public Double getLatestExchangeRate() {
@@ -532,31 +601,23 @@ public class KisMacroService {
     @Cacheable(value = "macroBond", key = "'latest-' + #bond.name()", unless = "#result == null")
     public BigDecimal getLatestBondYield(BondYield bond) {
         LocalDate endDate = LocalDate.now();
-        LocalDate startDate = endDate.minusDays(7); // Check last 7 days
-
-        // 1. Try DB
-        List<MacroDailyData> data = macroDailyDataRepository
-                .findAllByStatCodeAndItemCodeAndDateBetweenOrderByDateAsc(
-                        STAT_CODE_BOND_YIELD, bond.getSymbol(), startDate, endDate);
-
-        if (!data.isEmpty()) {
-            return data.get(data.size() - 1).getValue();
-        }
-
-        // 2. If empty, try Fetch (and it will save to DB)
+        LocalDate startDate = endDate.minusDays(7);
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
+
+        String statCode = bond.isEcosBased() ? STAT_CODE_ECOS_BOND_YIELD : STAT_CODE_BOND_YIELD;
+        String itemCode = bond.isEcosBased() ? bond.getEcosItemCode() : bond.getSymbol();
+
+        List<MacroDailyData> data = macroDailyDataRepository
+                .findAllByStatCodeAndItemCodeAndDateBetweenOrderByDateAsc(statCode, itemCode, startDate, endDate);
+
+        if (!data.isEmpty()) return data.get(data.size() - 1).getValue();
+
         fetchAndSaveBondYield(bond, startDate.format(formatter), endDate.format(formatter));
 
-        // 3. Retry DB
         data = macroDailyDataRepository
-                .findAllByStatCodeAndItemCodeAndDateBetweenOrderByDateAsc(
-                        STAT_CODE_BOND_YIELD, bond.getSymbol(), startDate, endDate);
+                .findAllByStatCodeAndItemCodeAndDateBetweenOrderByDateAsc(statCode, itemCode, startDate, endDate);
 
-        if (!data.isEmpty()) {
-            return data.get(data.size() - 1).getValue();
-        }
-
-        return null;
+        return data.isEmpty() ? null : data.get(data.size() - 1).getValue();
     }
 
 }

@@ -34,131 +34,128 @@ public class MacroController {
     private final KisMacroService kisMacroService;
 
     @GetMapping("/exchange-rate")
-    @Operation(summary = "원/달러 환율 조회", description = "한국투자증권 API를 통해 원/달러 환율을 조회합니다. (DB 우선, 부족 시 API)")
+    @Operation(summary = "원/달러 환율 조회", description = "한국은행 ECOS API 기반 원/달러 환율을 조회합니다.")
     public ResponseEntity<SuccessResponse<List<MacroIndicatorDto>>> getExchangeRate(
             @RequestParam String startDate,
             @RequestParam String endDate) {
-        List<MacroIndicatorDto> data = kisMacroService.fetchExchangeRate("FX@KRW", startDate, endDate);
+        List<MacroIndicatorDto> data = kisMacroService.fetchExchangeRate("USD", startDate, endDate);
         return ResponseEntity.ok(new SuccessResponse<>(true, "환율 조회 성공", data));
     }
 
     @GetMapping("/exchange-rate/status")
-    @Operation(summary = "원/달러 환율 현재가 조회", description = "한국투자증권 API를 통해 실시간 원/달러 환율, 변동액, 등락률을 조회합니다.")
+    @Operation(summary = "원/달러 환율 현재가 조회", description = "DB에 저장된 최신 원/달러 환율 및 전일 대비 변동 정보를 조회합니다.")
     public ResponseEntity<SuccessResponse<ExchangeRateStatusDto>> getExchangeRateStatus() {
         ExchangeRateStatusDto data = kisMacroService.getExchangeRateStatus();
         return ResponseEntity.ok(new SuccessResponse<>(true, "환율 현재가 조회 성공", data));
     }
 
     @PostMapping("/exchange-rate/init")
-    @Operation(summary = "원/달러 환율 데이터 초기화/업데이트", description = "한국투자증권 API에서 원/달러 환율 데이터를 가져와 DB에 저장합니다. (대량 데이터 적재용)")
+    @Operation(summary = "원/달러 환율 데이터 초기화/업데이트", description = "한국은행 ECOS API에서 원/달러 환율 데이터를 가져와 DB에 저장합니다.")
     public ResponseEntity<SuccessResponse<Void>> initExchangeRate(
             @RequestParam String startDate,
             @RequestParam String endDate) {
-        kisMacroService.fetchAndSaveExchangeRate("FX@KRW", startDate, endDate);
+        kisMacroService.fetchAndSaveExchangeRate("USD", startDate, endDate);
         return ResponseEntity.ok(new SuccessResponse<>(true, "환율 데이터 저장 성공", null));
     }
 
     @GetMapping("/exchange-rate/jpy")
-    @Operation(summary = "원/엔(100엔) 환율 조회", description = "한국투자증권 API를 통해 원/엔(100엔) 환율을 조회합니다.")
+    @Operation(summary = "원/엔(100엔) 환율 조회", description = "한국은행 ECOS API 기반 원/엔(100엔) 환율을 조회합니다.")
     public ResponseEntity<SuccessResponse<List<MacroIndicatorDto>>> getJpyExchangeRate(
             @RequestParam String startDate,
             @RequestParam String endDate) {
-        List<MacroIndicatorDto> data = kisMacroService.fetchExchangeRate("FX@KRWJS", startDate, endDate);
+        List<MacroIndicatorDto> data = kisMacroService.fetchExchangeRate("JPY", startDate, endDate);
         return ResponseEntity.ok(new SuccessResponse<>(true, "원/엔 환율 조회 성공", data));
     }
 
-    @PostMapping("/exchange-rate/jpy/init")
-    @Operation(summary = "원/엔(100엔) 환율 데이터 초기화/업데이트", description = "한국투자증권 API에서 원/엔(100엔) 환율 데이터를 가져와 DB에 저장합니다.")
-    public ResponseEntity<SuccessResponse<Void>> initJpyExchangeRate(
-            @RequestParam String startDate,
-            @RequestParam String endDate) {
-        kisMacroService.fetchAndSaveExchangeRate("FX@KRWJS", startDate, endDate);
-        return ResponseEntity.ok(new SuccessResponse<>(true, "원/엔 환율 데이터 저장 성공", null));
-    }
-
     @GetMapping("/exchange-rate/jpy/status")
-    @Operation(summary = "원/엔(100엔) 환율 현재가 조회", description = "한국투자증권 API를 통해 실시간 원/엔(100엔) 환율을 조회합니다.")
+    @Operation(summary = "원/엔(100엔) 환율 현재가 조회", description = "DB에 저장된 최신 원/엔(100엔) 환율 및 전일 대비 변동 정보를 조회합니다.")
     public ResponseEntity<SuccessResponse<ExchangeRateStatusDto>> getJpyExchangeRateStatus() {
         ExchangeRateStatusDto data = kisMacroService.getExchangeRateStatus(ExchangeRateCode.JPY);
         return ResponseEntity.ok(new SuccessResponse<>(true, "원/엔 환율 현재가 조회 성공", data));
     }
 
-    @GetMapping("/exchange-rate/hkd")
-    @Operation(summary = "홍콩달러/달러 환율 조회", description = "한국투자증권 API를 통해 달러 대비 홍콩달러(USD/HKD) 환율을 조회합니다.")
-    public ResponseEntity<SuccessResponse<List<MacroIndicatorDto>>> getHkdExchangeRate(
+    @PostMapping("/exchange-rate/jpy/init")
+    @Operation(summary = "원/엔(100엔) 환율 데이터 초기화/업데이트", description = "한국은행 ECOS API에서 원/엔(100엔) 환율 데이터를 가져와 DB에 저장합니다.")
+    public ResponseEntity<SuccessResponse<Void>> initJpyExchangeRate(
             @RequestParam String startDate,
             @RequestParam String endDate) {
-        List<MacroIndicatorDto> data = kisMacroService.fetchExchangeRate("FX@HKD", startDate, endDate);
-        return ResponseEntity.ok(new SuccessResponse<>(true, "홍콩달러/달러 환율 조회 성공", data));
-    }
-
-    @PostMapping("/exchange-rate/hkd/init")
-    @Operation(summary = "홍콩달러/달러 환율 데이터 초기화/업데이트", description = "한국투자증권 API에서 홍콩달러/달러(USD/HKD) 환율 데이터를 가져와 DB에 저장합니다.")
-    public ResponseEntity<SuccessResponse<Void>> initHkdExchangeRate(
-            @RequestParam String startDate,
-            @RequestParam String endDate) {
-        kisMacroService.fetchAndSaveExchangeRate("FX@HKD", startDate, endDate);
-        return ResponseEntity.ok(new SuccessResponse<>(true, "홍콩달러/달러 환율 데이터 저장 성공", null));
-    }
-
-    @GetMapping("/exchange-rate/hkd/krw")
-    @Operation(summary = "홍콩달러/원 환율 조회", description = "DB에 저장된 홍콩달러/원(HKD/KRW) 환율을 조회합니다.")
-    public ResponseEntity<SuccessResponse<List<MacroIndicatorDto>>> getHkdKrwExchangeRate(
-            @RequestParam String startDate,
-            @RequestParam String endDate) {
-        // Symbol for HKD/KRW in Enum is "HKD/KRW"
-        List<MacroIndicatorDto> data = kisMacroService.fetchExchangeRate("HKD/KRW", startDate, endDate);
-        return ResponseEntity.ok(new SuccessResponse<>(true, "홍콩달러/원 환율 조회 성공", data));
-    }
-
-    @GetMapping("/exchange-rate/hkd/krw/status")
-    @Operation(summary = "홍콩달러/원 환율 현재가 조회", description = "USD/KRW, USD/HKD 실시간 데이터를 이용하여 홍콩달러/원 현재가를 계산하여 조회합니다.")
-    public ResponseEntity<SuccessResponse<ExchangeRateStatusDto>> getHkdKrwExchangeRateStatus() {
-        ExchangeRateStatusDto data = kisMacroService.getExchangeRateStatus(ExchangeRateCode.HKD_KRW);
-        return ResponseEntity.ok(new SuccessResponse<>(true, "홍콩달러/원 환율 현재가 조회 성공", data));
-    }
-
-    @PostMapping("/exchange-rate/hkd/krw/init")
-    @Operation(summary = "홍콩달러/원 환율 데이터 초기화/업데이트", description = "USD/KRW, USD/HKD 데이터를 이용하여 HKD/KRW 환율을 계산하고 DB에 저장합니다.")
-    public ResponseEntity<SuccessResponse<Void>> initHkdKrwExchangeRate(
-            @RequestParam String startDate,
-            @RequestParam String endDate) {
-        kisMacroService.calcAndSaveHkdKrwRate(startDate, endDate);
-        return ResponseEntity.ok(new SuccessResponse<>(true, "홍콩달러/원 환율 데이터 계산 및 저장 성공", null));
+        kisMacroService.fetchAndSaveExchangeRate("JPY", startDate, endDate);
+        return ResponseEntity.ok(new SuccessResponse<>(true, "원/엔 환율 데이터 저장 성공", null));
     }
 
     @GetMapping("/exchange-rate/eur")
-    @Operation(summary = "유로(USD/EUR) 환율 조회", description = "한국투자증권 API를 통해 달러 대비 유로(USD/EUR) 환율을 조회합니다.")
+    @Operation(summary = "원/유로 환율 조회", description = "한국은행 ECOS API 기반 원/유로 환율을 조회합니다.")
     public ResponseEntity<SuccessResponse<List<MacroIndicatorDto>>> getEurExchangeRate(
             @RequestParam String startDate,
             @RequestParam String endDate) {
-        List<MacroIndicatorDto> data = kisMacroService.fetchExchangeRate("FX@EUR", startDate, endDate);
-        return ResponseEntity.ok(new SuccessResponse<>(true, "유로(USD/EUR) 환율 조회 성공", data));
+        List<MacroIndicatorDto> data = kisMacroService.fetchExchangeRate("EUR", startDate, endDate);
+        return ResponseEntity.ok(new SuccessResponse<>(true, "원/유로 환율 조회 성공", data));
     }
 
-    @GetMapping("/exchange-rate/eur/krw")
-    @Operation(summary = "유로/원 환율 조회", description = "DB에 저장된 유로/원(EUR/KRW) 환율을 조회합니다.")
-    public ResponseEntity<SuccessResponse<List<MacroIndicatorDto>>> getEurKrwExchangeRate(
+    @GetMapping("/exchange-rate/eur/status")
+    @Operation(summary = "원/유로 환율 현재가 조회", description = "DB에 저장된 최신 원/유로 환율 및 전일 대비 변동 정보를 조회합니다.")
+    public ResponseEntity<SuccessResponse<ExchangeRateStatusDto>> getEurExchangeRateStatus() {
+        ExchangeRateStatusDto data = kisMacroService.getExchangeRateStatus(ExchangeRateCode.EUR);
+        return ResponseEntity.ok(new SuccessResponse<>(true, "원/유로 환율 현재가 조회 성공", data));
+    }
+
+    @PostMapping("/exchange-rate/eur/init")
+    @Operation(summary = "원/유로 환율 데이터 초기화/업데이트", description = "한국은행 ECOS API에서 원/유로 환율 데이터를 가져와 DB에 저장합니다.")
+    public ResponseEntity<SuccessResponse<Void>> initEurExchangeRate(
             @RequestParam String startDate,
             @RequestParam String endDate) {
-        List<MacroIndicatorDto> data = kisMacroService.fetchExchangeRate("EUR/KRW", startDate, endDate);
-        return ResponseEntity.ok(new SuccessResponse<>(true, "유로/원 환율 조회 성공", data));
+        kisMacroService.fetchAndSaveExchangeRate("EUR", startDate, endDate);
+        return ResponseEntity.ok(new SuccessResponse<>(true, "원/유로 환율 데이터 저장 성공", null));
     }
 
-    @GetMapping("/exchange-rate/eur/krw/status")
-    @Operation(summary = "유로/원 환율 현재가 조회", description = "USD/KRW, USD/EUR 실시간 데이터를 이용하여 유로/원 현재가를 계산하여 조회합니다.")
-    public ResponseEntity<SuccessResponse<ExchangeRateStatusDto>> getEurKrwExchangeRateStatus() {
-        ExchangeRateStatusDto data = kisMacroService.getExchangeRateStatus(ExchangeRateCode.EUR_KRW);
-        return ResponseEntity.ok(new SuccessResponse<>(true, "유로/원 환율 현재가 조회 성공", data));
-    }
-
-    @PostMapping("/exchange-rate/eur/krw/init")
-    @Operation(summary = "유로/원 환율 데이터 초기화/업데이트", description = "USD/KRW, USD/EUR 데이터를 이용하여 EUR/KRW 환율을 계산하고 DB에 저장합니다.")
-    public ResponseEntity<SuccessResponse<Void>> initEurKrwExchangeRate(
+    @GetMapping("/exchange-rate/hkd")
+    @Operation(summary = "원/홍콩달러 환율 조회", description = "한국은행 ECOS API 기반 원/홍콩달러 환율을 조회합니다.")
+    public ResponseEntity<SuccessResponse<List<MacroIndicatorDto>>> getHkdExchangeRate(
             @RequestParam String startDate,
             @RequestParam String endDate) {
-        kisMacroService.calcAndSaveEurKrwRate(startDate, endDate);
-        return ResponseEntity.ok(new SuccessResponse<>(true, "유로/원 환율 데이터 계산 및 저장 성공", null));
+        List<MacroIndicatorDto> data = kisMacroService.fetchExchangeRate("HKD", startDate, endDate);
+        return ResponseEntity.ok(new SuccessResponse<>(true, "원/홍콩달러 환율 조회 성공", data));
+    }
+
+    @GetMapping("/exchange-rate/hkd/status")
+    @Operation(summary = "원/홍콩달러 환율 현재가 조회", description = "DB에 저장된 최신 원/홍콩달러 환율 및 전일 대비 변동 정보를 조회합니다.")
+    public ResponseEntity<SuccessResponse<ExchangeRateStatusDto>> getHkdExchangeRateStatus() {
+        ExchangeRateStatusDto data = kisMacroService.getExchangeRateStatus(ExchangeRateCode.HKD);
+        return ResponseEntity.ok(new SuccessResponse<>(true, "원/홍콩달러 환율 현재가 조회 성공", data));
+    }
+
+    @PostMapping("/exchange-rate/hkd/init")
+    @Operation(summary = "원/홍콩달러 환율 데이터 초기화/업데이트", description = "한국은행 ECOS API에서 원/홍콩달러 환율 데이터를 가져와 DB에 저장합니다.")
+    public ResponseEntity<SuccessResponse<Void>> initHkdExchangeRate(
+            @RequestParam String startDate,
+            @RequestParam String endDate) {
+        kisMacroService.fetchAndSaveExchangeRate("HKD", startDate, endDate);
+        return ResponseEntity.ok(new SuccessResponse<>(true, "원/홍콩달러 환율 데이터 저장 성공", null));
+    }
+
+    @GetMapping("/exchange-rate/cny")
+    @Operation(summary = "원/위안 환율 조회", description = "한국은행 ECOS API 기반 원/위안 환율을 조회합니다.")
+    public ResponseEntity<SuccessResponse<List<MacroIndicatorDto>>> getCnyExchangeRate(
+            @RequestParam String startDate,
+            @RequestParam String endDate) {
+        List<MacroIndicatorDto> data = kisMacroService.fetchExchangeRate("CNY", startDate, endDate);
+        return ResponseEntity.ok(new SuccessResponse<>(true, "원/위안 환율 조회 성공", data));
+    }
+
+    @GetMapping("/exchange-rate/cny/status")
+    @Operation(summary = "원/위안 환율 현재가 조회", description = "DB에 저장된 최신 원/위안 환율 및 전일 대비 변동 정보를 조회합니다.")
+    public ResponseEntity<SuccessResponse<ExchangeRateStatusDto>> getCnyExchangeRateStatus() {
+        ExchangeRateStatusDto data = kisMacroService.getExchangeRateStatus(ExchangeRateCode.CNY);
+        return ResponseEntity.ok(new SuccessResponse<>(true, "원/위안 환율 현재가 조회 성공", data));
+    }
+
+    @PostMapping("/exchange-rate/cny/init")
+    @Operation(summary = "원/위안 환율 데이터 초기화/업데이트", description = "한국은행 ECOS API에서 원/위안 환율 데이터를 가져와 DB에 저장합니다.")
+    public ResponseEntity<SuccessResponse<Void>> initCnyExchangeRate(
+            @RequestParam String startDate,
+            @RequestParam String endDate) {
+        kisMacroService.fetchAndSaveExchangeRate("CNY", startDate, endDate);
+        return ResponseEntity.ok(new SuccessResponse<>(true, "원/위안 환율 데이터 저장 성공", null));
     }
 
     @GetMapping("/m2")

@@ -1,9 +1,17 @@
 import requests
 import time
+import os
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
+N_ETF_URL = os.environ.get('N_ETF_URL')
 
 
-def scrape_naver_etfs_to_sql(output_file="naver_etf_list.sql"):
-    base_url = "https://m.stock.naver.com/front-api/worldstock/etf/list"
+def scrape_n_etfs_to_sql(output_file="n_etf_list.sql"):
+    base_url = N_ETF_URL
     all_sql_statements = []
     page = 1
 
@@ -53,7 +61,7 @@ def scrape_naver_etfs_to_sql(output_file="naver_etf_list.sql"):
                 break
 
             page += 1
-            time.sleep(0.3)  # 네이버 서버 부하 방지
+            time.sleep(0.3)  # 서버 부하 방지
 
         except Exception as e:
             print(f"오류 발생: {e}")
@@ -67,4 +75,4 @@ def scrape_naver_etfs_to_sql(output_file="naver_etf_list.sql"):
 
 
 # 실행
-scrape_naver_etfs_to_sql()
+scrape_n_etfs_to_sql()

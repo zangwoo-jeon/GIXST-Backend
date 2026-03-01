@@ -28,11 +28,11 @@ public class OverseasStockFinancialScheduler {
     public void scheduledUpdateOverseasFinancials() {
         log.info("Starting scheduled update for overseas stock financial data...");
 
-        // 1. 손익계산서 업데이트 (fetch_financials_hankyung.py)
-        runPythonScript("fetch_financials_hankyung.py", "Income Statement (Hankyung)");
+        // 1. 손익계산서 업데이트 (fetch_financials.py)
+        runPythonScript("fetch_financials.py", "Income Statement");
 
-        // 2. 재무상태표 업데이트 (fetch_balance_hankyung.py)
-        runPythonScript("fetch_balance_hankyung.py", "Balance Sheet (Hankyung)");
+        // 2. 재무상태표 업데이트 (fetch_balance.py)
+        runPythonScript("fetch_balance.py", "Balance Sheet");
 
         // 3. 현금흐름표 (자사주 매입/배당금) 업데이트 (fetch_us_cash_flow.py)
         runPythonScript("fetch_us_cash_flow.py", "Cash Flow (Buyback & Dividend)");
@@ -47,11 +47,10 @@ public class OverseasStockFinancialScheduler {
     public void scheduledUpdateOverseasMetrics() {
         log.info("Starting scheduled overseas stock metrics update (PEG, EV/EBITDA)...");
 
-        // 1. Yahoo Finance PEG Ratio
-        runPythonScript("fetch_yahoo_metrics.py", "PEG Ratio (Yahoo)");
+        //Yahoo Finance PEG Ratio
+        runPythonScript("fetch_yahoo_metrics.py", "PEG Ratio");
 
-        // 2. Hankyung EV/EBITDA
-        runPythonScript("fetch_ev_ebitda_hankyung.py", "EV/EBITDA (Hankyung)");
+        runPythonScript("fetch_ev_ebitda.py", "EV/EBITDA");
 
         log.info("Completed scheduled overseas stock metrics update.");
     }

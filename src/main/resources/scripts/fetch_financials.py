@@ -4,17 +4,25 @@ from bs4 import BeautifulSoup
 from tqdm import tqdm
 import time
 import pandas as pd
+import os
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 # DB Configuration
 DB_CONFIG = {
-    'host': '100.77.73.46',
-    'port': 3306,
-    'user': 'user',
-    'password': '0717',
-    'db': 'aisa_portfolio',
+    'host': os.environ.get('DB_HOST', '127.0.0.1'),
+    'port': int(os.environ.get('DB_PORT', '3306')),
+    'user': os.environ['DB_USER'],
+    'password': os.environ['DB_PASSWORD'],
+    'db': os.environ.get('DB_NAME', 'aisa_portfolio'),
     'charset': 'utf8',
     'cursorclass': pymysql.cursors.DictCursor
 }
+
+H_BASE_URL = os.environ.get('H_BASE_URL')
 
 # Request Headers
 HEADERS = {
@@ -94,7 +102,7 @@ def save_to_db(connection, stock_code, data, div_code):
     # 각 항목별 데이터 리스트 가져오기 (없으면 빈 리스트)
     revenues = data.get('매출액', [])
     op_incomes = data.get('영업이익', [])
-    net_incomes = data.get('순이익', []) # HANKYUNG에서는 '순이익' 또는 '당기순이익' 확인 필요. 보통 '순이익'
+    net_incomes = data.get('순이익', []) # '순이익' 또는 '당기순이익' 확인 필요. 보통 '순이익'
 
     # 데이터 길이 불일치 방지 (dates 길이만큼 loop)
     # 데이터 길이 불일치 방지 (dates 길이만큼 loop)
@@ -105,7 +113,6 @@ def save_to_db(connection, stock_code, data, div_code):
             if i >= len(revenues): break
             
             # 날짜 파싱 (2024-12-31 or 2024/12/31 etc)
-            # Hankyung usually: 2021/12, 2022/12 ... (Monthly implied?) or 2024-12-31
             # User example: 2024-12-31
             stac_yymm = raw_date.replace('-', '').replace('/', '')
             
@@ -143,7 +150,7 @@ def save_to_db(connection, stock_code, data, div_code):
             cursor.execute(sql, (stock_code, stac_yymm, div_code, rev, op_inc, net_inc))
 
 def main():
-    print("🚀 Starting Financials update from Hankyung...")
+    print("🚀 Starting Financials update...")
     
     # 1. 대상 종목 가져오기
     stocks = get_overseas_stock_list()
@@ -159,9 +166,9 @@ def main():
         for stock_code in tqdm(stocks, desc="Processing"):
             try:
                 # URL 생성 (대부분 americas로 가정)
-                # handle special cases like 'BRK.A' -> 'brka' for Hankyung URL
+                # handle special cases like 'BRK.A' -> 'brka'
                 formatted_code = stock_code.lower().replace('.', '')
-                url = f"https://www.hankyung.com/globalmarket/equities/americas/{formatted_code}"
+                url = f"{H_BASE_URL}/{formatted_code}"
                 
                 res = requests.get(url, headers=HEADERS, timeout=10)
                 if res.status_code != 200:
@@ -170,14 +177,6 @@ def main():
                 
                 soup = BeautifulSoup(res.text, 'html.parser')
 
-                # 연간/분기 컨테이너 찾기
-                # User provided classes: finance-statements-quarter, finance-statements-year
-                # 그러나 사이트 구조 변경 가능성 있음. 
-                # User script uses: 
-                # q_container = soup.find('div', class_='finance-statements-quarter')
-                # y_container = soup.find('div', class_='finance-statements-year')
-                
-                # 실제 한경 글로벌마켓 페이지 소스 구조 확인 필요하나, 유저 제공 코드 신뢰.
                 q_container = soup.find('div', class_='finance-statements-quarter')
                 y_container = soup.find('div', class_='finance-statements-year')
 

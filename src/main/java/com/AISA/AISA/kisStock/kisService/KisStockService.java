@@ -34,6 +34,7 @@ import org.springframework.cache.CacheManager;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -756,7 +757,7 @@ public class KisStockService {
 
     public void refreshTopMarketCapPrices() {
         List<StockMarketCap> top100 = stockMarketCapRepository.findByStockStockTypeOrderByMarketCapDesc(
-                Stock.StockType.DOMESTIC, org.springframework.data.domain.PageRequest.of(0, 100));
+                Stock.StockType.DOMESTIC, PageRequest.of(0, 100));
         log.info("Warming up prices for Top {} Domestic Market Cap stocks...", top100.size());
 
         for (StockMarketCap smc : top100) {

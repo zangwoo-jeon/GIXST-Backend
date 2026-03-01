@@ -34,3 +34,4 @@ bin/
 
 ### Configuration Files ###
 application.yml
+src/main/resources/scripts/.env

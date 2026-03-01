@@ -4,17 +4,25 @@ from bs4 import BeautifulSoup
 from tqdm import tqdm
 import time
 import pandas as pd
+import os
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 # DB Configuration
 DB_CONFIG = {
-    'host': '100.77.73.46',
-    'port': 3306,
-    'user': 'user',
-    'password': '0717',
-    'db': 'aisa_portfolio',
+    'host': os.environ.get('DB_HOST', '127.0.0.1'),
+    'port': int(os.environ.get('DB_PORT', '3306')),
+    'user': os.environ['DB_USER'],
+    'password': os.environ['DB_PASSWORD'],
+    'db': os.environ.get('DB_NAME', 'aisa_portfolio'),
     'charset': 'utf8',
     'cursorclass': pymysql.cursors.DictCursor
 }
+
+H_BASE_URL = os.environ.get('H_BASE_URL')
 
 # Request Headers
 HEADERS = {
@@ -132,7 +140,7 @@ def main():
         for stock_code in tqdm(stocks, desc="Processing"):
             try:
                 formatted_code = stock_code.lower().replace('.', '')
-                url = f"https://www.hankyung.com/globalmarket/equities/americas/{formatted_code}"
+                url = f"{H_BASE_URL}/{formatted_code}"
                 res = requests.get(url, headers=HEADERS, timeout=10)
                 if res.status_code != 200: continue
                 

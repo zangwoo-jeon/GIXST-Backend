@@ -29,7 +29,7 @@ public class AnalysisController {
                         "**지원 자산 타입 및 예시:**<br>" +
                         "- **STOCK**: 주식 (예: 005930, 000660)<br>" +
                         "- **INDEX**: 지수 (예: KOSPI, KOSDAQ, NASDAQ, SP500, NIKKEI, HANGSENG, EUROSTOXX50)<br>" +
-                        "- **EXCHANGE**: 환율 (예: FX@KRW)<br>" +
+                        "- **EXCHANGE**: 환율 (예: USD, JPY, EUR, HKD, CNY)<br>" +
                         "- **BASE_RATE**: 기준금리 (예: BASE_RATE)<br>" +
                         "- **BOND**: 국채 금리 (예: KR_3Y, US_10Y)<br>" +
                         "- **CPI**: 소비자물가지수 (예: CPI)<br>" +

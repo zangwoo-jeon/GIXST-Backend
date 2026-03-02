@@ -57,14 +57,18 @@ public class FredIndexService {
         List<OverseasIndexDailyData> dbData = repository
                 .findAllByMarketNameAndDateBetweenOrderByDateAsc(index.getMarketName(), start, end);
 
-        if (!dbData.isEmpty()) {
-            return dbData.stream().map(this::toDto).collect(Collectors.toList());
+        if (dbData.isEmpty()) {
+            fetchAndSave(index, startDate, endDate);
+            dbData = repository.findAllByMarketNameAndDateBetweenOrderByDateAsc(index.getMarketName(), start, end);
         }
 
-        fetchAndSave(index, startDate, endDate);
+        List<MacroIndicatorDto> exchangeRateList = kisMacroService.fetchExchangeRate("USD", startDate, endDate);
+        Map<String, BigDecimal> exchangeRateMap = exchangeRateList.stream()
+                .collect(Collectors.toMap(MacroIndicatorDto::getDate, dto -> new BigDecimal(dto.getValue())));
 
-        dbData = repository.findAllByMarketNameAndDateBetweenOrderByDateAsc(index.getMarketName(), start, end);
-        return dbData.stream().map(this::toDto).collect(Collectors.toList());
+        return dbData.stream()
+                .map(entity -> toDto(entity, exchangeRateMap))
+                .collect(Collectors.toList());
     }
 
     @Transactional
@@ -124,15 +128,11 @@ public class FredIndexService {
     public List<FredIndexDataDto> getFredIndexChartKrw(FredIndex index, String startDate, String endDate) {
         List<FredIndexDataDto> usdData = getFredIndexChart(index, startDate, endDate);
 
-        List<MacroIndicatorDto> exchangeRateList = kisMacroService.fetchExchangeRate("USD", startDate, endDate);
-        Map<String, BigDecimal> exchangeRateMap = exchangeRateList.stream()
-                .collect(Collectors.toMap(MacroIndicatorDto::getDate, dto -> new BigDecimal(dto.getValue())));
-
         return usdData.stream()
-                .filter(dto -> exchangeRateMap.containsKey(dto.getDate()))
+                .filter(dto -> dto.getExchangeRate() != null)
                 .map(dto -> {
                     BigDecimal usdPrice = new BigDecimal(dto.getPrice());
-                    BigDecimal exchangeRate = exchangeRateMap.get(dto.getDate());
+                    BigDecimal exchangeRate = new BigDecimal(dto.getExchangeRate());
                     BigDecimal krwPrice = usdPrice.multiply(exchangeRate)
                             .divide(new BigDecimal(1000), 2, RoundingMode.HALF_UP);
                     return FredIndexDataDto.builder()
@@ -144,10 +144,18 @@ public class FredIndexService {
                 .collect(Collectors.toList());
     }
 
-    private FredIndexDataDto toDto(OverseasIndexDailyData entity) {
+    @CacheEvict(value = {"fredIndex", "fredIndexKrw"}, allEntries = true)
+    public void evictAllCaches() {
+        log.info("FRED index caches evicted.");
+    }
+
+    private FredIndexDataDto toDto(OverseasIndexDailyData entity, Map<String, BigDecimal> exchangeRateMap) {
+        String dateStr = entity.getDate().format(APP_FMT);
+        BigDecimal exchangeRate = exchangeRateMap.get(dateStr);
         return FredIndexDataDto.builder()
-                .date(entity.getDate().format(APP_FMT))
+                .date(dateStr)
                 .price(entity.getClosingPrice().toPlainString())
+                .exchangeRate(exchangeRate != null ? exchangeRate.toPlainString() : null)
                 .build();
     }
 }

@@ -2,6 +2,7 @@ package com.AISA.AISA.kisStock.kisController;
 
 import com.AISA.AISA.global.response.SuccessResponse;
 
+import com.AISA.AISA.kisStock.dto.StockPrice.StockChartPriceDto;
 import com.AISA.AISA.kisStock.dto.StockPrice.StockPriceDto;
 import com.AISA.AISA.kisStock.dto.StockSimpleSearchResponseDto; // Simplified DTO
 import com.AISA.AISA.kisStock.dto.VolumeRank.VolumeRankDto;
@@ -73,16 +74,27 @@ public class KisStockController {
     public ResponseEntity<SuccessResponse<String>> initHistoricalData(
             @PathVariable String stockCode,
             @RequestParam String startDate,
-            @RequestParam(defaultValue = "UN") String marketCode) {
+            @RequestParam(defaultValue = "J") String marketCode) {
         kisStockService.fetchAndSaveHistoricalStockData(stockCode, startDate, marketCode);
         return ResponseEntity.ok(new SuccessResponse<>(true, "초기 데이터 구축 시작", null));
+    }
+
+    @GetMapping("/{stockCode}/chart/excluding-latest")
+    @Operation(summary = "주식 차트 데이터 조회 (최신 데이터 제외)", description = "특정 주식의 차트 데이터를 조회합니다. DB에 저장된 가장 최신 날짜의 데이터는 제외됩니다. (예: 최신 데이터가 2026-02-27이면 2026-02-26까지만 반환)")
+    public ResponseEntity<SuccessResponse<List<StockChartPriceDto>>> getStockChartExcludingLatest(
+            @PathVariable String stockCode,
+            @RequestParam String startDate,
+            @RequestParam String endDate,
+            @RequestParam(defaultValue = "D") String dateType) {
+        List<StockChartPriceDto> priceList = kisStockService.getStockChartExcludingLatest(stockCode, startDate, endDate, dateType);
+        return ResponseEntity.ok(new SuccessResponse<>(true, "주식 차트 데이터 조회 성공 (최신 제외)", priceList));
     }
 
     @PostMapping("/init-history/all")
     @Operation(summary = "전체 주식 초기 데이터 구축", description = "모든 주식에 대해 현재부터 특정 과거 시점까지의 데이터를 반복적으로 수집하여 DB에 저장합니다. (비동기 실행 권장)")
     public ResponseEntity<SuccessResponse<String>> initHistoricalDataAll(
             @RequestParam String startDate,
-            @RequestParam(defaultValue = "UN") String marketCode) {
+            @RequestParam(defaultValue = "J") String marketCode) {
         new Thread(() -> kisStockService.fetchAllStocksHistoricalData(startDate, marketCode)).start();
 
         return ResponseEntity
@@ -95,7 +107,7 @@ public class KisStockController {
             @RequestParam Long startId,
             @RequestParam Long endId,
             @RequestParam String startDate,
-            @RequestParam(defaultValue = "UN") String marketCode) {
+            @RequestParam(defaultValue = "J") String marketCode) {
 
         new Thread(() -> kisStockService.fetchStocksHistoricalDataByRange(startId, endId, startDate, marketCode)).start();
 

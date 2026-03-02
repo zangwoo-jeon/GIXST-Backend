@@ -1,22 +1,13 @@
 package com.AISA.AISA.kisStock.kisService;
 
 import com.AISA.AISA.kisStock.Entity.Index.IndexDailyData;
-import com.AISA.AISA.kisStock.Entity.Index.OverseasIndexDailyData;
 import com.AISA.AISA.kisStock.config.KisApiProperties;
-import com.AISA.AISA.kisOverseasStock.config.KisOverseasApiProperties;
 import com.AISA.AISA.kisStock.dto.Index.IndexChartInfoDto;
 import com.AISA.AISA.kisStock.dto.Index.IndexChartPriceDto;
 import com.AISA.AISA.kisStock.dto.Index.IndexChartResponseDto;
 import com.AISA.AISA.kisStock.dto.Index.KisIndexChartApiResponse;
-import com.AISA.AISA.kisStock.enums.ExchangeRateCode;
 import com.AISA.AISA.kisStock.exception.KisApiErrorCode;
 import com.AISA.AISA.kisStock.repository.IndexDailyDataRepository;
-import com.AISA.AISA.kisStock.enums.OverseasIndex;
-import com.AISA.AISA.kisStock.repository.OverseasIndexDailyDataRepository;
-import com.AISA.AISA.kisStock.dto.Macro.KisOverseasDailyPriceDto;
-import com.AISA.AISA.kisStock.dto.Macro.KisOverseasDailyPriceResponseDto;
-import com.AISA.AISA.kisStock.dto.Macro.KisOverseasIndexBasicInfoDto;
-import com.AISA.AISA.kisStock.dto.Index.OverseasIndexStatusDto;
 import com.AISA.AISA.global.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -47,9 +38,7 @@ public class KisIndexService {
 
     private final WebClient webClient;
     private final KisApiProperties kisApiProperties;
-    private final KisOverseasApiProperties overseasApiProperties; // Inject
     private final IndexDailyDataRepository indexDailyDataRepository;
-    private final OverseasIndexDailyDataRepository overseasIndexDailyDataRepository;
     private final KisMacroService kisMacroService;
     private final KisApiClient kisApiClient;
 
@@ -290,6 +279,46 @@ public class KisIndexService {
         }
     }
 
+    public List<IndexChartPriceDto> getIndexChartExcludingLatest(String marketCode, String startDate,
+            String endDate, String dateType) {
+        return excludeLatestDate(getIndexChart(marketCode, startDate, endDate, dateType).getPriceList());
+    }
+
+    public List<IndexChartPriceDto> getKospiUsdRatioExcludingLatest(String startDate, String endDate) {
+        return excludeLatestDate(getKospiUsdRatio(startDate, endDate));
+    }
+
+    public List<IndexChartPriceDto> getKosdaqUsdRatioExcludingLatest(String startDate, String endDate) {
+        return excludeLatestDate(getKosdaqUsdRatio(startDate, endDate));
+    }
+
+    public List<IndexChartPriceDto> getVkospiUsdRatioExcludingLatest(String startDate, String endDate) {
+        return excludeLatestDate(getVkospiUsdRatio(startDate, endDate));
+    }
+
+    private List<IndexChartPriceDto> excludeLatestDate(List<IndexChartPriceDto> priceList) {
+        if (priceList == null || priceList.isEmpty()) {
+            return priceList;
+        }
+
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
+
+        LocalDate latestDate = priceList.stream()
+                .map(dto -> LocalDate.parse(dto.getDate(), formatter))
+                .max(LocalDate::compareTo)
+                .orElse(null);
+
+        if (latestDate == null) {
+            return priceList;
+        }
+
+        final String latestDateStr = latestDate.format(formatter);
+
+        return priceList.stream()
+                .filter(dto -> !dto.getDate().equals(latestDateStr))
+                .collect(Collectors.toList());
+    }
+
     @Cacheable(value = "indexStatus", key = "#marketCode")
     public IndexChartInfoDto getIndexStatus(String marketCode) {
         // 오늘 날짜 기준으로 API 호출하여 최신 상태 정보만 가져옴
@@ -369,236 +398,6 @@ public class KisIndexService {
                 .info(chartInfoDto)
                 .priceList(chartPriceList)
                 .build();
-    }
-
-    // 변경: 반환 타입을 List<DTO>로 변경하지 않고, 아래에서 IndexChartPriceDto 등을 반환하도록 수정 예정이나
-    // 메서드 시그니처 변경 필요. 일단 내부 로직부터 변경.
-    // 하지만 Controller에서 List<MacroIndicatorDto>를 받고 있으므로, Controller 수정과 맞물려야 함.
-    // 일단 여기서는 IndexChartPriceDto (OHLC) 리스트를 반환하도록 변경하고 Controller도 수정하는게 맞음.
-    // 기존 DTO 재활용: IndexChartPriceDto
-    @Cacheable(value = "overseasIndex", key = "#index.name() + '-' + #startDate + '-' + #endDate")
-    public List<IndexChartPriceDto> fetchOverseasIndex(OverseasIndex index, String startDate, String endDate) {
-        // 1. Fetch Index Data
-        List<IndexChartPriceDto> indexList = fetchOverseasIndexData(index.getSymbol(), "N", index.getSymbol(),
-                startDate, endDate);
-
-        // 2. Determine Currency Code
-        String currencyCode = switch (index) {
-            case NASDAQ, SP500 -> ExchangeRateCode.USD.getSymbol();
-            case NIKKEI -> ExchangeRateCode.JPY.getSymbol();
-            case HANGSENG -> ExchangeRateCode.HKD.getSymbol();
-            case EUROSTOXX50 -> ExchangeRateCode.EUR.getSymbol();
-            default -> ExchangeRateCode.USD.getSymbol();
-        };
-
-        try {
-            // 3. Fetch Exchange Rate Data
-            List<MacroIndicatorDto> exchangeRateList = kisMacroService.fetchExchangeRate(currencyCode, startDate,
-                    endDate);
-            Map<String, String> exchangeRateMap = exchangeRateList.stream()
-                    .collect(Collectors.toMap(MacroIndicatorDto::getDate, MacroIndicatorDto::getValue, (v1, v2) -> v1));
-
-            // 4. Map Exchange Rate to Index Data
-            for (IndexChartPriceDto dto : indexList) {
-                if (exchangeRateMap.containsKey(dto.getDate())) {
-                    dto.setExchangeRate(exchangeRateMap.get(dto.getDate()));
-                }
-            }
-        } catch (Exception e) {
-            log.warn("Failed to fetch exchange rate for overseas index {}: {}", index, e.getMessage());
-            // Fail silently for exchange rate, main data is still returned
-        }
-
-        return indexList;
-    }
-
-    @Cacheable(value = "overseasIndexStatus", key = "#index.name()")
-    public OverseasIndexStatusDto getOverseasIndexStatus(OverseasIndex index) {
-        KisOverseasIndexBasicInfoDto latest = fetchOverseasIndexBasicInfo(index.getSymbol());
-
-        return OverseasIndexStatusDto.builder()
-                .date(latest.getDate())
-                .price(latest.getPrice())
-                .priceChange(latest.getPriceChange())
-                .changeRate(latest.getChangeRate())
-                .build();
-    }
-
-    @Transactional
-    public void fetchAndSaveOverseasIndex(OverseasIndex index, String startDateStr, String endDateStr) {
-        fetchAndSaveOverseasIndexData(index.getSymbol(), "N", index.getSymbol(), startDateStr, endDateStr);
-    }
-
-    private List<IndexChartPriceDto> fetchOverseasIndexData(String itemCode, String marketDivCode,
-            String symbol, String startDate, String endDate) {
-        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
-        LocalDate start = LocalDate.parse(startDate, formatter);
-        LocalDate end = LocalDate.parse(endDate, formatter);
-
-        // 1. Try to fetch from DB
-        List<OverseasIndexDailyData> dbData = overseasIndexDailyDataRepository
-                .findAllByMarketNameAndDateBetweenOrderByDateAsc(itemCode, start, end); // itemCode stores symbol/market
-                                                                                        // name
-
-        if (!dbData.isEmpty()) {
-            return dbData.stream()
-                    .map(this::convertOverseasEntityToDto)
-                    .collect(Collectors.toList());
-        }
-
-        // 2. If DB is empty, fetch from API and save
-        fetchAndSaveOverseasIndexData(itemCode, marketDivCode, symbol, startDate, endDate);
-
-        // 3. Re-fetch from DB
-        dbData = overseasIndexDailyDataRepository.findAllByMarketNameAndDateBetweenOrderByDateAsc(
-                itemCode, start, end);
-
-        return dbData.stream()
-                .map(this::convertOverseasEntityToDto)
-                .collect(Collectors.toList());
-    }
-
-    private IndexChartPriceDto convertOverseasEntityToDto(
-            OverseasIndexDailyData entity) {
-        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
-        return IndexChartPriceDto.builder()
-                .date(entity.getDate().format(formatter))
-                .price(entity.getClosingPrice().toString())
-                .openPrice(entity.getOpeningPrice().toString())
-                .highPrice(entity.getHighPrice().toString())
-                .lowPrice(entity.getLowPrice().toString())
-                .volume(entity.getVolume() != null ? entity.getVolume().toString() : "0")
-                .build();
-    }
-
-    private void fetchAndSaveOverseasIndexData(String itemCode, String marketDivCode, String symbol,
-            String startDateStr, String endDateStr) {
-        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
-        LocalDate targetStartDate = LocalDate.parse(startDateStr, formatter);
-        LocalDate currentDate = LocalDate.parse(endDateStr, formatter);
-
-        log.info("Starting bulk fetch for Oversea Index {} from {} to {}", symbol, startDateStr, endDateStr);
-
-        while (!currentDate.isBefore(targetStartDate)) {
-            String currentDateStr = currentDate.format(formatter);
-            LocalDate queryStartDate = currentDate.minusDays(99); // 100 days limit
-            if (queryStartDate.isBefore(targetStartDate)) {
-                queryStartDate = targetStartDate;
-            }
-            String queryStartDateStr = queryStartDate.format(formatter);
-
-            log.info("Fetching data from {} to {}", queryStartDateStr, currentDateStr);
-
-            try {
-                List<KisOverseasDailyPriceDto> apiList = fetchOverseasFromApi(marketDivCode, symbol, queryStartDateStr,
-                        currentDateStr);
-
-                if (apiList != null && !apiList.isEmpty()) {
-                    for (KisOverseasDailyPriceDto dto : apiList) {
-                        LocalDate date = LocalDate.parse(dto.getDate(), formatter);
-
-                        boolean exists = overseasIndexDailyDataRepository
-                                .findByMarketNameAndDate(itemCode, date)
-                                .isPresent();
-
-                        if (!exists) {
-                            OverseasIndexDailyData entity = OverseasIndexDailyData
-                                    .builder()
-                                    .marketName(itemCode)
-                                    .date(date)
-                                    .closingPrice(new BigDecimal(dto.getClosePrice()))
-                                    .openingPrice(new BigDecimal(dto.getOpenPrice()))
-                                    .highPrice(new BigDecimal(dto.getHighPrice()))
-                                    .lowPrice(new BigDecimal(dto.getLowPrice()))
-                                    .volume(new BigDecimal(dto.getVolume()))
-                                    .priceChange(BigDecimal.ZERO) // API doesn't provide this in list
-                                    .changeRate(0.0) // API doesn't provide this in list
-                                    .build();
-                            overseasIndexDailyDataRepository.save(entity);
-                        }
-                    }
-                }
-
-                // Move back
-                currentDate = queryStartDate.minusDays(1);
-                Thread.sleep(100); // Rate limit
-
-            } catch (Exception e) {
-                log.error("Error fetching overseas index data: {}", e.getMessage());
-                break; // Stop on error
-            }
-        }
-        log.info("Finished bulk fetch.");
-    }
-
-    private List<KisOverseasDailyPriceDto> fetchOverseasFromApi(String marketDivCode, String symbol, String startDate,
-            String endDate) {
-        KisOverseasDailyPriceResponseDto response = kisApiClient.fetch(token -> webClient.get()
-                .uri(uriBuilder -> uriBuilder
-                        .path(overseasApiProperties.getOverseaUrl())
-                        .queryParam("FID_COND_MRKT_DIV_CODE", marketDivCode)
-                        .queryParam("FID_INPUT_ISCD", symbol)
-                        .queryParam("FID_INPUT_DATE_1", startDate)
-                        .queryParam("FID_INPUT_DATE_2", endDate)
-                        .queryParam("FID_PERIOD_DIV_CODE", "D")
-                        .build())
-                .header("authorization", token)
-                .header("appkey", kisApiProperties.getAppkey())
-                .header("appsecret", kisApiProperties.getAppsecret())
-                .header("tr_id", "FHKST03030100")
-                .header("custtype", "P"), KisOverseasDailyPriceResponseDto.class);
-
-        if (response == null || !"0".equals(response.getReturnCode())) {
-            log.error("KIS API Error: RtCd={}, Msg={}",
-                    response != null ? response.getReturnCode() : "null",
-                    response != null ? response.getMessage() : "null response");
-            throw new BusinessException(KisApiErrorCode.STOCK_PRICE_FETCH_FAILED);
-        }
-
-        return response.getDailyPriceList();
-    }
-
-    private KisOverseasIndexBasicInfoDto fetchOverseasIndexBasicInfo(String symbol) {
-        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
-        String today = LocalDate.now().format(formatter);
-
-        KisOverseasDailyPriceResponseDto response = kisApiClient.fetch(token -> webClient.get()
-                .uri(uriBuilder -> uriBuilder
-                        .path(overseasApiProperties.getOverseaUrl()) // Use the same URL as history fetch
-                                                                     // (FHKST03030100)
-                        .queryParam("FID_COND_MRKT_DIV_CODE", "N")
-                        .queryParam("FID_INPUT_ISCD", symbol)
-                        .queryParam("FID_INPUT_DATE_1", today)
-                        .queryParam("FID_INPUT_DATE_2", today)
-                        .queryParam("FID_PERIOD_DIV_CODE", "D")
-                        .build())
-                .header("authorization", token)
-                .header("appkey", kisApiProperties.getAppkey())
-                .header("appsecret", kisApiProperties.getAppsecret())
-                .header("tr_id", "FHKST03030100") // Use the correct TR ID
-                .header("custtype", "P"), KisOverseasDailyPriceResponseDto.class);
-
-        if (response == null || !"0".equals(response.getReturnCode())) {
-            log.error("KIS API Error: RtCd={}, Msg={}",
-                    response != null ? response.getReturnCode() : "null",
-                    response != null ? response.getMessage() : "null response");
-            throw new BusinessException(KisApiErrorCode.STOCK_PRICE_FETCH_FAILED);
-        }
-
-        if (response.getOutput1() == null) {
-            throw new BusinessException(KisApiErrorCode.STOCK_PRICE_FETCH_FAILED);
-        }
-
-        // Output1 might not have date, so we can inject it or use what's available.
-        if (response.getOutput1().getDate() == null && response.getDailyPriceList() != null
-                && !response.getDailyPriceList().isEmpty()) {
-            // If output1 doesn't have date, try to get from output2(daily list) first item
-            response.getOutput1().setDate(response.getDailyPriceList().get(0).getDate());
-        } else if (response.getOutput1().getDate() == null) {
-            response.getOutput1().setDate(today);
-        }
-
-        return response.getOutput1();
     }
 
     private Set<String> getCoveredPeriods(List<IndexChartPriceDto> dtoList, String dateType) {
@@ -692,7 +491,7 @@ public class KisIndexService {
                         dto -> dto));
 
         // 2. Fetch Exchange Rate Data (from KIS API)
-        List<MacroIndicatorDto> exchangeRateData = kisMacroService.fetchExchangeRate("FX@KRW", startDate, endDate);
+        List<MacroIndicatorDto> exchangeRateData = kisMacroService.fetchExchangeRate("USD", startDate, endDate);
         Map<String, BigDecimal> exchangeRateMap = exchangeRateData.stream()
                 .collect(Collectors.toMap(
                         MacroIndicatorDto::getDate,
@@ -742,7 +541,7 @@ public class KisIndexService {
                         dto -> dto));
 
         // 2. Fetch Exchange Rate Data (from KIS API)
-        List<MacroIndicatorDto> exchangeRateData = kisMacroService.fetchExchangeRate("FX@KRW", startDate, endDate);
+        List<MacroIndicatorDto> exchangeRateData = kisMacroService.fetchExchangeRate("USD", startDate, endDate);
         Map<String, BigDecimal> exchangeRateMap = exchangeRateData.stream()
                 .collect(Collectors.toMap(
                         MacroIndicatorDto::getDate,
@@ -792,7 +591,7 @@ public class KisIndexService {
                         dto -> dto));
 
         // 2. Fetch Exchange Rate Data (from KIS API)
-        List<MacroIndicatorDto> exchangeRateData = kisMacroService.fetchExchangeRate("FX@KRW", startDate, endDate);
+        List<MacroIndicatorDto> exchangeRateData = kisMacroService.fetchExchangeRate("USD", startDate, endDate);
         Map<String, BigDecimal> exchangeRateMap = exchangeRateData.stream()
                 .collect(Collectors.toMap(
                         MacroIndicatorDto::getDate,

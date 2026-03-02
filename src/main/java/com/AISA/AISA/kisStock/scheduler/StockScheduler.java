@@ -3,7 +3,6 @@ package com.AISA.AISA.kisStock.scheduler;
 import com.AISA.AISA.analysis.scheduler.MarketValuationScheduler;
 import com.AISA.AISA.kisOverseasStock.service.KisOverseasStockInformationService;
 import com.AISA.AISA.kisStock.kisService.KisRankService;
-import com.AISA.AISA.kisStock.enums.OverseasIndex;
 import com.AISA.AISA.kisStock.kisService.KisInvestorService;
 import com.AISA.AISA.kisStock.kisService.KisStockService;
 import com.AISA.AISA.kisStock.kisService.KisIndexService;
@@ -14,6 +13,8 @@ import com.AISA.AISA.portfolio.macro.service.EcosService;
 import com.AISA.AISA.kisStock.kisService.DividendService;
 import com.AISA.AISA.kisStock.kisService.KisInformationService;
 import com.AISA.AISA.kisStock.kisService.Auth.KisAuthService;
+import com.AISA.AISA.fred.service.FredIndexService;
+import com.AISA.AISA.fred.enums.FredIndex;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.ClassPathResource;
@@ -52,6 +53,29 @@ public class StockScheduler {
     private final KisOverseasStockInformationService kisOverseasStockInformationService;
     private final MarketValuationScheduler marketValuationScheduler;
     private final KisRankService kisRankService;
+    private final FredIndexService fredIndexService;
+
+    // Run at 10 AM every day Mon-Sat (After US market close: ET 4PM = KST next day 6AM)
+    @Scheduled(cron = "0 0 10 * * MON-SAT")
+    public void updateFredIndexData() {
+        log.info("Starting scheduled FRED index data update...");
+
+        LocalDate endDate = LocalDate.now();
+        LocalDate startDate = endDate.minusDays(7);
+        String endDateStr = endDate.format(DateTimeFormatter.ofPattern("yyyyMMdd"));
+        String startDateStr = startDate.format(DateTimeFormatter.ofPattern("yyyyMMdd"));
+
+        for (FredIndex index : FredIndex.values()) {
+            try {
+                fredIndexService.fetchAndSave(index, startDateStr, endDateStr);
+                Thread.sleep(500);
+            } catch (Exception e) {
+                log.error("Failed to update FRED index data for {}: {}", index, e.getMessage());
+            }
+        }
+
+        log.info("Completed scheduled FRED index data update.");
+    }
 
     // Run at 2 AM every day
     @Scheduled(cron = "0 0 2 * * *")
@@ -62,7 +86,7 @@ public class StockScheduler {
         LocalDate targetStartDate = LocalDate.now().minusWeeks(1);
         String targetStartDateStr = targetStartDate.format(DateTimeFormatter.ofPattern("yyyyMMdd"));
 
-        kisStockService.fetchAllStocksHistoricalData(targetStartDateStr, "UN");
+        kisStockService.fetchAllStocksHistoricalData(targetStartDateStr, "J");
 
         log.info("Completed scheduled stock data update.");
     }
@@ -136,27 +160,6 @@ public class StockScheduler {
         log.info("Completed scheduled stock list crawling.");
     }
 
-    // Run at 10 AM every day (After US market close)
-    @Scheduled(cron = "0 0 10 * * *")
-    public void updateOverseasIndexData() {
-        log.info("Starting scheduled overseas index data update...");
-
-        // Fetch data for the last 7 days to ensure recent data is captured
-        LocalDate endDate = LocalDate.now();
-        LocalDate startDate = endDate.minusDays(7);
-        String endDateStr = endDate.format(DateTimeFormatter.ofPattern("yyyyMMdd"));
-        String startDateStr = startDate.format(DateTimeFormatter.ofPattern("yyyyMMdd"));
-
-        for (OverseasIndex index : OverseasIndex.values()) {
-            try {
-                kisIndexService.fetchAndSaveOverseasIndex(index, startDateStr, endDateStr);
-                Thread.sleep(1000); // Reduce API load
-            } catch (Exception e) {
-                log.error("Failed to update overseas index: {}", index, e);
-            }
-        }
-        log.info("Completed scheduled overseas index data update.");
-    }
 
     // Run at 4 PM every weekday (After Korean market close)
     @Scheduled(cron = "0 0 16 * * MON-FRI")

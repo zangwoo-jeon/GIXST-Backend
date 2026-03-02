@@ -24,6 +24,7 @@ public class MarketValuationDto {
 
     private ValuationInfo valuation;
     private ScoreDetails scoreDetails;
+    @JsonIgnore
     private InvestorTrendInfo investorTrend;
     private MetadataInfo metadata;
     private List<TimeSeriesPoint> timeSeries;

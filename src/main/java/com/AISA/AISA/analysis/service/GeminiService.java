@@ -173,7 +173,9 @@ public class GeminiService {
         sb.append(
                 "3. [COMBINED_STRATEGY]: Integrate Valuation and Trend to provide a final Investment Strategy based on the Final Combined Signal.\n");
         sb.append(
-                "Constraint: Use the exact tags [VALUATION_STRATEGY], [TREND_STRATEGY], and [COMBINED_STRATEGY] to separate sections.\n\n");
+                "Constraint: Use the exact tags [VALUATION_STRATEGY], [TREND_STRATEGY], and [COMBINED_STRATEGY] to separate sections.\n");
+        sb.append(
+                "IMPORTANT: 출력 문장에 코스피, 코스닥, VKOSPI의 현재 지수 수치는 절대 포함하지 마세요. VKOSPI는 반드시 구간 표현(예: '공포 구간', '경계 수준')으로만 서술하세요.\n\n");
 
         sb.append("Input Data:\n");
         sb.append("- Market: ").append(dto.getMarket()).append("\n");
@@ -221,7 +223,7 @@ public class GeminiService {
                     vkLevel = "경계 (높은 변동성)";
                 else
                     vkLevel = "공포 구간 (극단적 고변동성, 코로나급)";
-                sb.append("- VKOSPI: ").append(vk).append(" [").append(vkLevel).append("]\n");
+                sb.append("- VKOSPI Level: [").append(vkLevel).append("]\n");
                 sb.append("  * VKOSPI 해석 기준: ≤15 매우 안정, 15-20 안정, 20-30 보통, 30-40 경계, ≥40 공포 구간. ")
                         .append("40 이상은 시장 참여자들의 극단적 불안감을 반영하며, 급락 리스크 경고 신호입니다. ")
                         .append("상승장에서 VKOSPI가 높으면 '과열+불안' 공존 상태로 해석해야 합니다.\n");

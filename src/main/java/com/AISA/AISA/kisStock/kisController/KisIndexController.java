@@ -7,17 +7,13 @@ import com.AISA.AISA.kisStock.dto.Index.IndexChartResponseDto;
 import com.AISA.AISA.kisStock.enums.MarketType;
 import com.AISA.AISA.kisStock.kisService.KisIndexService;
 import com.AISA.AISA.analysis.service.MarketValuationService;
-import com.AISA.AISA.kisStock.dto.Index.OverseasIndexStatusDto;
-
-import com.AISA.AISA.kisStock.enums.OverseasIndex;
-import com.AISA.AISA.kisStock.dto.Index.IndexChartPriceDto; // [NEW] added
+import com.AISA.AISA.kisStock.dto.Index.IndexChartPriceDto;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 
 import com.AISA.AISA.kisStock.kisService.MarketStatusHistoryService;
-import com.AISA.AISA.portfolio.macro.service.MacroService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -30,7 +26,6 @@ import org.springframework.web.bind.annotation.*;
 @Tag(name = "지수 API", description = "지수 관련 API")
 public class KisIndexController {
     private final KisIndexService kisIndexService;
-    private final MacroService macroService;
     private final MarketStatusHistoryService marketStatusHistoryService;
     private final MarketValuationService marketValuationService;
 
@@ -66,6 +61,17 @@ public class KisIndexController {
         return ResponseEntity.ok(new SuccessResponse<>(true, "기간별 지수 정보 조회 성공", chartData));
     }
 
+    @GetMapping("/{marketCode}/chart/excluding-latest")
+    @Operation(summary = "지수 조회 (최신 데이터 제외)", description = "코스피(kospi) / 코스닥(kosdaq)의 날짜별 정보를 조회합니다. DB에 저장된 가장 최신 날짜의 데이터는 제외됩니다. (예: 최신 데이터가 2026-02-27이면 2026-02-26까지만 반환)")
+    public ResponseEntity<SuccessResponse<List<IndexChartPriceDto>>> getIndexChartExcludingLatest(
+            @PathVariable String marketCode,
+            @RequestParam String startDate,
+            @RequestParam String endDate,
+            @RequestParam(defaultValue = "D") String dateType) {
+        List<IndexChartPriceDto> priceList = kisIndexService.getIndexChartExcludingLatest(marketCode, startDate, endDate, dateType);
+        return ResponseEntity.ok(new SuccessResponse<>(true, "기간별 지수 정보 조회 성공 (최신 제외)", priceList));
+    }
+
     @PostMapping("/{marketCode}/save")
     @Operation(summary = "지수 데이터 저장", description = "특정 날짜의 지수 데이터를 조회하여 DB에 저장합니다.")
     public ResponseEntity<SuccessResponse<Void>> saveIndexDailyData(
@@ -85,47 +91,6 @@ public class KisIndexController {
         return ResponseEntity.ok(new SuccessResponse<>(true, "초기 데이터 구축 시작", null));
     }
 
-    @GetMapping("/overseas/{indexName}")
-    @Operation(summary = "해외 지수 조회", description = "주요 해외 지수(NASDAQ, SP500, NIKKEI, HANGSENG, EUROSTOXX50)를 조회합니다.")
-    public ResponseEntity<SuccessResponse<List<IndexChartPriceDto>>> getOverseasIndex(
-            @PathVariable String indexName,
-            @RequestParam String startDate,
-            @RequestParam String endDate) {
-        OverseasIndex index = OverseasIndex.valueOf(indexName.toUpperCase());
-        List<IndexChartPriceDto> data = kisIndexService.fetchOverseasIndex(index, startDate, endDate);
-        return ResponseEntity.ok(new SuccessResponse<>(true, index.getDescription() + " 조회 성공", data));
-    }
-
-    @GetMapping("/overseas/{indexName}/status")
-    @Operation(summary = "해외 지수 현재가 조회", description = "해외 지수(NASDAQ, SP500, NIKKEI, HANGSENG, EUROSTOXX50)의 최신 종가를 KIS API에서 실시간으로 조회합니다.")
-    public ResponseEntity<SuccessResponse<OverseasIndexStatusDto>> getOverseasIndexStatus(
-            @PathVariable String indexName) {
-        OverseasIndex index = OverseasIndex.valueOf(indexName.toUpperCase());
-        OverseasIndexStatusDto data = kisIndexService.getOverseasIndexStatus(index);
-        return ResponseEntity.ok(new SuccessResponse<>(true, index.getDescription() + " 현재가 조회 성공", data));
-    }
-
-    @PostMapping("/overseas/init")
-    @Operation(summary = "해외 지수 데이터 초기화/업데이트", description = "해외 지수 데이터(NASDAQ, SP500, NIKKEI, HANGSENG, EUROSTOXX50)를 KIS API에서 가져와 DB에 저장합니다.")
-    public ResponseEntity<SuccessResponse<Void>> initOverseasIndex(
-            @RequestParam String indexName,
-            @RequestParam String startDate,
-            @RequestParam String endDate) {
-        OverseasIndex index = OverseasIndex.valueOf(indexName.toUpperCase());
-        kisIndexService.fetchAndSaveOverseasIndex(index, startDate, endDate);
-        return ResponseEntity.ok(new SuccessResponse<>(true, index.getDescription() + " 데이터 저장 성공", null));
-    }
-
-    @GetMapping("/overseas/{indexName}/krw")
-    @Operation(summary = "원화 환산 해외 지수 조회", description = "해외 지수(NASDAQ, SP500, NIKKEI, HANGSENG, EUROSTOXX50)를 원화 가치로 환산하여 조회합니다. 계산식: (지수 * 환율) / 1000")
-    public ResponseEntity<SuccessResponse<List<IndexChartPriceDto>>> getOverseasIndexKrw(
-            @PathVariable String indexName,
-            @RequestParam String startDate,
-            @RequestParam String endDate) {
-        List<IndexChartPriceDto> data = macroService.getWonConvertedOverseasIndex(indexName, startDate, endDate);
-        return ResponseEntity.ok(new SuccessResponse<>(true, indexName + " 원화 환산 조회 성공", data));
-    }
-
     @GetMapping("/kospi-usd-ratio")
     @Operation(summary = "달러 환산 코스피 지수 조회", description = "코스피 지수를 원/달러 환율로 나누어 달러 기준 가치를 계산합니다. (KOSPI / (환율 / 1000))")
     public ResponseEntity<SuccessResponse<List<IndexChartPriceDto>>> getKospiUsdRatio(
@@ -133,6 +98,15 @@ public class KisIndexController {
             @RequestParam String endDate) {
         List<IndexChartPriceDto> ratioList = kisIndexService.getKospiUsdRatio(startDate, endDate);
         return ResponseEntity.ok(new SuccessResponse<>(true, "달러 환산 코스피 조회 성공", ratioList));
+    }
+
+    @GetMapping("/kospi-usd-ratio/excluding-latest")
+    @Operation(summary = "달러 환산 코스피 지수 조회 (최신 데이터 제외)", description = "코스피 지수를 원/달러 환율로 나누어 달러 기준 가치를 계산합니다. 가장 최신 날짜의 데이터는 제외됩니다.")
+    public ResponseEntity<SuccessResponse<List<IndexChartPriceDto>>> getKospiUsdRatioExcludingLatest(
+            @RequestParam String startDate,
+            @RequestParam String endDate) {
+        List<IndexChartPriceDto> ratioList = kisIndexService.getKospiUsdRatioExcludingLatest(startDate, endDate);
+        return ResponseEntity.ok(new SuccessResponse<>(true, "달러 환산 코스피 조회 성공 (최신 제외)", ratioList));
     }
 
     @GetMapping("/kosdaq-usd-ratio")
@@ -144,6 +118,15 @@ public class KisIndexController {
         return ResponseEntity.ok(new SuccessResponse<>(true, "달러 환산 코스닥 조회 성공", ratioList));
     }
 
+    @GetMapping("/kosdaq-usd-ratio/excluding-latest")
+    @Operation(summary = "달러 환산 코스닥 지수 조회 (최신 데이터 제외)", description = "코스닥 지수를 원/달러 환율로 나누어 달러 기준 가치를 계산합니다. 가장 최신 날짜의 데이터는 제외됩니다.")
+    public ResponseEntity<SuccessResponse<List<IndexChartPriceDto>>> getKosdaqUsdRatioExcludingLatest(
+            @RequestParam String startDate,
+            @RequestParam String endDate) {
+        List<IndexChartPriceDto> ratioList = kisIndexService.getKosdaqUsdRatioExcludingLatest(startDate, endDate);
+        return ResponseEntity.ok(new SuccessResponse<>(true, "달러 환산 코스닥 조회 성공 (최신 제외)", ratioList));
+    }
+
     @GetMapping("/vkospi-usd-ratio")
     @Operation(summary = "달러 환산 VKOSPI 지수 조회", description = "VKOSPI 지수를 원/달러 환율로 나누어 달러 기준 가치를 계산합니다. (VKOSPI / (환율 / 1000))")
     public ResponseEntity<SuccessResponse<List<IndexChartPriceDto>>> getVkospiUsdRatio(
@@ -151,6 +134,15 @@ public class KisIndexController {
             @RequestParam String endDate) {
         List<IndexChartPriceDto> ratioList = kisIndexService.getVkospiUsdRatio(startDate, endDate);
         return ResponseEntity.ok(new SuccessResponse<>(true, "달러 환산 VKOSPI 조회 성공", ratioList));
+    }
+
+    @GetMapping("/vkospi-usd-ratio/excluding-latest")
+    @Operation(summary = "달러 환산 VKOSPI 지수 조회 (최신 데이터 제외)", description = "VKOSPI 지수를 원/달러 환율로 나누어 달러 기준 가치를 계산합니다. 가장 최신 날짜의 데이터는 제외됩니다.")
+    public ResponseEntity<SuccessResponse<List<IndexChartPriceDto>>> getVkospiUsdRatioExcludingLatest(
+            @RequestParam String startDate,
+            @RequestParam String endDate) {
+        List<IndexChartPriceDto> ratioList = kisIndexService.getVkospiUsdRatioExcludingLatest(startDate, endDate);
+        return ResponseEntity.ok(new SuccessResponse<>(true, "달러 환산 VKOSPI 조회 성공 (최신 제외)", ratioList));
     }
 
     @GetMapping("/status/history")

@@ -130,6 +130,8 @@ jobs:
               -e JWT_REFRESH_TOKEN_EXPIRATION_TIME="1209600000" \
               -e ECOS_BASE_URL="http://ecos.bok.or.kr/api" \
               -e ECOS_API_KEY="${{ secrets.ECOS_API_KEY }}" \
+              -e FRED_BASE_URL="https://api.stlouisfed.org/fred" \
+              -e FRED_API_KEY="${{ secrets.FRED_API_KEY }}" \
               \
               -e SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GOOGLE_CLIENT_ID="${{ secrets.GOOGLE_CLIENT_ID }}" \
               -e SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GOOGLE_CLIENT_SECRET="${{ secrets.GOOGLE_CLIENT_SECRET }}" \

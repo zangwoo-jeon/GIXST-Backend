@@ -87,7 +87,7 @@ public class KisStockService {
             apiResponse = kisApiClient.fetch(token -> webClient.get()
                     .uri(uriBuilder -> uriBuilder
                             .path(kisApiProperties.getPriceUrl())
-                            .queryParam("fid_cond_mrkt_div_code", "UN")
+                            .queryParam("fid_cond_mrkt_div_code", "J")
                             .queryParam("fid_input_iscd", stockCode)
                             .build())
                     .header("Authorization", token)
@@ -210,22 +210,64 @@ public class KisStockService {
         }
     }
 
-    private String mergeJsonArrays(String json1, String json2) {
-        // Handle nulls or empty strings
-        boolean isEmpty1 = (json1 == null || json1.equals("[]") || json1.isEmpty());
-        boolean isEmpty2 = (json2 == null || json2.equals("[]") || json2.isEmpty());
+    // DB-only: 하이브리드 경로를 거치지 않고 DB 데이터만 사용
+    public List<StockChartPriceDto> getStockChartExcludingLatest(String stockCode, String startDate,
+            String endDate, String dateType) {
+        validateDomesticStock(stockCode);
+        String json = getPastStockChartJson(stockCode, startDate, endDate, dateType);
+        try {
+            List<StockChartPriceDto> priceList = objectMapper.readValue(json,
+                    objectMapper.getTypeFactory().constructCollectionType(List.class, StockChartPriceDto.class));
+            return excludeLatestDate(priceList);
+        } catch (Exception e) {
+            log.error("Failed to parse stock chart JSON for {}", stockCode, e);
+            return Collections.emptyList();
+        }
+    }
 
-        if (isEmpty1 && isEmpty2)
+    private List<StockChartPriceDto> excludeLatestDate(List<StockChartPriceDto> priceList) {
+        if (priceList == null || priceList.isEmpty()) {
+            return priceList;
+        }
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
+        LocalDate latestDate = priceList.stream()
+                .map(dto -> LocalDate.parse(dto.getDate(), formatter))
+                .max(LocalDate::compareTo)
+                .orElse(null);
+        if (latestDate == null) {
+            return priceList;
+        }
+        final String latestDateStr = latestDate.format(formatter);
+        return priceList.stream()
+                .filter(dto -> !dto.getDate().equals(latestDateStr))
+                .collect(Collectors.toList());
+    }
+
+    @Cacheable(value = "stockChartTodayJson", key = "#stockCode")
+    public String getTodayStockChartJson(String stockCode, LocalDate prevCloseDate) {
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
+        LocalDate today = LocalDate.now();
+        String todayStr = today.format(formatter);
+
+        try {
+            StockChartResponseDto apiResponse = fetchStockChartFromApi(
+                    stockCode, todayStr, todayStr, "D", "J");
+            if (apiResponse.getPriceList() == null || apiResponse.getPriceList().isEmpty()) {
+                return "[]";
+            }
+            return objectMapper.writeValueAsString(apiResponse.getPriceList());
+        } catch (Exception e) {
+            log.warn("Failed to fetch today's live data for {}: {}", stockCode, e.getMessage());
             return "[]";
-        if (isEmpty1)
-            return json2;
-        if (isEmpty2)
-            return json1;
+        }
+    }
 
-        // Remove closing bracket of json1 and opening bracket of json2
-        // json1: "[{...}]" -> "[{...}"
-        // json2: "[{...}]" -> ",{...}]"
-        return json1.substring(0, json1.length() - 1) + "," + json2.substring(1);
+    private String mergeJsonArrays(String firstJson, String secondJson) {
+        if ("[]".equals(firstJson)) return secondJson;
+        if ("[]".equals(secondJson)) return firstJson;
+        return firstJson.substring(0, firstJson.lastIndexOf(']'))
+                + ","
+                + secondJson.substring(secondJson.indexOf('[') + 1);
     }
 
     @Cacheable(value = "stockChartJson", key = "#stockCode + '-' + #startDate + '-' + #endDate + '-' + #dateType")
@@ -234,94 +276,22 @@ public class KisStockService {
         LocalDate targetStartDate = LocalDate.parse(startDate, formatter);
         LocalDate targetEndDate = LocalDate.parse(endDate, formatter);
 
-        Stock stock = stockRepository.findByStockCode(stockCode)
-                .orElseThrow(() -> new BusinessException(KisApiErrorCode.STOCK_NOT_FOUND));
+        List<StockDailyData> dataList = stockDailyDataRepository
+                .findAllByStock_StockCodeAndDateBetweenOrderByDateDesc(
+                        stockCode, targetStartDate, targetEndDate);
 
-        List<StockChartPriceDto> resultList = null;
+        dataList = filterHistoricalData(dataList, dateType);
 
-        try {
-            LocalDate apiStartDate = targetEndDate.minusDays(150);
-            if (apiStartDate.isBefore(targetStartDate)) {
-                apiStartDate = targetStartDate;
-            }
-            String apiStartDateStr = apiStartDate.format(formatter);
+        List<StockChartPriceDto> dtos = dataList.stream()
+                .map(this::convertToDto)
+                .collect(Collectors.toList());
 
-            StockChartResponseDto apiResponse = fetchStockChartFromApi(stockCode, apiStartDateStr, endDate,
-                    dateType, "UN");
-
-            if (apiResponse.getPriceList() != null && !apiResponse.getPriceList().isEmpty()) {
-                saveDailyDataWithCalculation(stock, apiResponse.getPriceList());
-            }
-
-            List<StockChartPriceDto> filteredApiList = new ArrayList<>();
-            if (apiResponse.getPriceList() != null) {
-                filteredApiList = apiResponse.getPriceList().stream()
-                        .filter(dto -> {
-                            LocalDate dtoDate = LocalDate.parse(dto.getDate(), formatter);
-                            return !dtoDate.isBefore(targetStartDate)
-                                    && !dtoDate.isAfter(targetEndDate);
-                        })
-                        .collect(Collectors.toList());
-            }
-
-            List<StockChartPriceDto> dbPriceList = new ArrayList<>();
-            if (!filteredApiList.isEmpty()) {
-                String oldestApiDateStr = filteredApiList.get(filteredApiList.size() - 1).getDate();
-                LocalDate oldestApiDate = LocalDate.parse(oldestApiDateStr, formatter);
-
-                if (oldestApiDate.isAfter(targetStartDate)) {
-                    List<StockDailyData> pastDataList = stockDailyDataRepository
-                            .findAllByStock_StockCodeAndDateBetweenOrderByDateDesc(
-                                    stockCode, targetStartDate,
-                                    oldestApiDate.minusDays(1));
-
-                    pastDataList = filterHistoricalData(pastDataList, dateType);
-
-                    dbPriceList = pastDataList.stream()
-                            .map(this::convertToDto)
-                            .collect(Collectors.toList());
-                }
-            } else {
-                List<StockDailyData> pastDataList = stockDailyDataRepository
-                        .findAllByStock_StockCodeAndDateBetweenOrderByDateDesc(
-                                stockCode, targetStartDate, targetEndDate);
-
-                pastDataList = filterHistoricalData(pastDataList, dateType);
-
-                dbPriceList = pastDataList.stream()
-                        .map(this::convertToDto)
-                        .collect(Collectors.toList());
-            }
-
-            List<StockChartPriceDto> mergedList = new ArrayList<>(filteredApiList);
-            mergedList.addAll(dbPriceList);
-
-            // Apply USD Conversion before caching
-            resultList = applyUsdConversion(mergedList, startDate, endDate);
-
-        } catch (Exception e) {
-            log.warn("API 조회 실패, DB 데이터로 대체합니다: {}", e.getMessage());
-            List<StockDailyData> pastDataList = stockDailyDataRepository
-                    .findAllByStock_StockCodeAndDateBetweenOrderByDateDesc(
-                            stockCode, targetStartDate, targetEndDate);
-
-            pastDataList = filterHistoricalData(pastDataList, dateType);
-
-            List<StockChartPriceDto> dtos = pastDataList.stream()
-                    .map(this::convertToDto)
-                    .collect(Collectors.toList());
-
-            // Apply USD Conversion before caching
-            resultList = applyUsdConversion(dtos, startDate, endDate);
-        }
-
-        if (resultList == null)
-            return "[]";
+        List<StockChartPriceDto> resultList = applyUsdConversion(dtos, startDate, endDate);
 
         try {
             return objectMapper.writeValueAsString(resultList);
         } catch (Exception e) {
-            log.error("JSON Serialization Failed for Past Chart", e);
+            log.error("JSON Serialization Failed for Chart", e);
             return "[]";
         }
     }
@@ -392,32 +362,7 @@ public class KisStockService {
         }
     }
 
-    @Cacheable(value = "stockChartTodayJson", key = "#stockCode", sync = true)
-    public String getTodayStockChartJson(String stockCode, LocalDate pastEndDate) {
-        String today = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
-        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
-        try {
-            StockChartResponseDto response = fetchStockChartFromApi(stockCode, today, today, "D", "UN");
-            if (response.getPriceList() != null && !response.getPriceList().isEmpty()) {
-                StockChartPriceDto todayData = response.getPriceList().get(0);
-                // 비거래일(주말/공휴일)에는 직전 거래일 데이터가 반환됨
-                // pastJson에 이미 포함된 날짜면 중복이므로 skip
-                LocalDate dataDate = LocalDate.parse(todayData.getDate(), formatter);
-                if (!dataDate.isAfter(pastEndDate)) {
-                    return "[]";
-                }
-                List<StockChartPriceDto> singleList = new ArrayList<>();
-                singleList.add(todayData);
-                List<StockChartPriceDto> converted = applyUsdConversion(singleList, today, today);
-                return objectMapper.writeValueAsString(converted);
-            }
-        } catch (Exception e) {
-            log.warn("Failed to fetch today's data for {}: {}", stockCode, e.getMessage());
-        }
-        return "[]";
-    }
-
-    private StockChartResponseDto fetchStockChartFromApi(String stockCode, String startDate, String endDate,
+private StockChartResponseDto fetchStockChartFromApi(String stockCode, String startDate, String endDate,
             String dateType, String marketDivCode) {
         StockChartResponseDto apiResponse;
         try {
@@ -469,11 +414,13 @@ public class KisStockService {
             throw new BusinessException(KisApiErrorCode.INVALID_STOCK_TYPE);
         }
 
+        if (stockDailyDataRepository.existsByStock_StockCodeAndDateGreaterThanEqual(stockCode, targetStartDate)) {
+            log.info("Data already exists for {} from {}. Skipping.", stockCode, targetStartDate);
+            return;
+        }
+
         int consecutiveFailures = 0;
         final int MAX_CONSECUTIVE_FAILURES = 5;
-        final int FALLBACK_THRESHOLD = 3;
-        final String[] effectiveMarketCode = { marketCode };
-        boolean fallbackAttempted = false;
 
         while (currentDate.isAfter(targetStartDate)) {
             String currentDateStr = currentDate.format(formatter);
@@ -484,28 +431,17 @@ public class KisStockService {
             String queryStartDateStr = queryStartDate.format(formatter);
 
             log.info("Fetching data for {} from {} to {} (market={})",
-                    stockCode, queryStartDateStr, currentDateStr, effectiveMarketCode[0]);
+                    stockCode, queryStartDateStr, currentDateStr, marketCode);
 
             try {
                 StockChartResponseDto response = fetchStockChartFromApi(stockCode, queryStartDateStr,
-                        currentDateStr, "D", effectiveMarketCode[0]);
+                        currentDateStr, "D", marketCode);
 
                 if (response.getPriceList() == null || response.getPriceList().isEmpty()) {
                     log.warn("No data returned for {} from {} to {}. Retrying with previous period.",
                             stockCode, queryStartDateStr, currentDateStr);
                     currentDate = queryStartDate.minusDays(1);
                     consecutiveFailures++;
-
-                    // UN으로 연속 빈 응답 시 J로 자동 전환 (NXT 미상장 종목)
-                    if (!fallbackAttempted && "UN".equals(marketCode)
-                            && consecutiveFailures >= FALLBACK_THRESHOLD) {
-                        log.info("[{}] UN → J 자동 전환 (연속 {}회 빈 응답)", stockCode, consecutiveFailures);
-                        effectiveMarketCode[0] = "J";
-                        fallbackAttempted = true;
-                        currentDate = LocalDate.now();
-                        consecutiveFailures = 0;
-                        continue;
-                    }
 
                     if (consecutiveFailures > MAX_CONSECUTIVE_FAILURES) {
                         log.error("Too many consecutive failures ({}). Stopping.",
@@ -538,23 +474,12 @@ public class KisStockService {
                 currentDate = currentDate.minusDays(1);
                 consecutiveFailures++;
 
-                // UN으로 연속 오류 시 J로 자동 전환
-                if (!fallbackAttempted && "UN".equals(marketCode)
-                        && consecutiveFailures >= FALLBACK_THRESHOLD) {
-                    log.info("[{}] UN → J 자동 전환 (연속 {}회 오류)", stockCode, consecutiveFailures);
-                    effectiveMarketCode[0] = "J";
-                    fallbackAttempted = true;
-                    currentDate = LocalDate.now();
-                    consecutiveFailures = 0;
-                    continue;
-                }
-
                 if (consecutiveFailures > MAX_CONSECUTIVE_FAILURES) {
                     break;
                 }
             }
         }
-        log.info("Finished historical stock data fetch for {} (finalMarket={})", stockCode, effectiveMarketCode[0]);
+        log.info("Finished historical stock data fetch for {} (market={})", stockCode, marketCode);
     }
 
     public void fetchAllStocksHistoricalData(String startDateStr, String marketCode) {

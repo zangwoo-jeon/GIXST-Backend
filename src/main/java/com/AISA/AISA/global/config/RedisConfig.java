@@ -96,7 +96,6 @@ public class RedisConfig {
                 configMap.put("kosdaqUsdRatio", longTermConfig);
                 configMap.put("stockChart", longTermConfig);
                 configMap.put("stockChartJson", longTermConfig);
-                configMap.put("stockChartToday", shortTermConfig);
                 configMap.put("stockChartTodayJson", shortTermConfig);
                 configMap.put("stockPrice", shortTermConfig);
                 configMap.put("stockMetrics", longTermConfig);
@@ -119,6 +118,8 @@ public class RedisConfig {
                 configMap.put("overseasMarketCapRank", longTermConfig);
                 configMap.put("overseasShareholderReturnRank", longTermConfig);
                 configMap.put("investorRanking", longTermConfig);
+                configMap.put("fredIndex", longTermConfig);
+                configMap.put("fredIndexKrw", longTermConfig);
 
                 return RedisCacheManager.builder(connectionFactory)
                                 .cacheDefaults(defaultConfig)

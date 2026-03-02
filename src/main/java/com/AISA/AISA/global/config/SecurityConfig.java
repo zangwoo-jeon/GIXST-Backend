@@ -88,6 +88,7 @@ public class SecurityConfig {
                                                 .requestMatchers(HttpMethod.GET, "/api/stocks/search",
                                                                 "/api/stocks/volume-rank",
                                                                 "/api/stocks/*/price", "/api/stocks/*/chart",
+                                                                "/api/stocks/*/chart/excluding-latest",
                                                                 "/api/stocks/financial/**",
                                                                 "/api/rank/financial/**", "/api/dividend/*/dividend",
                                                                 "/api/dividend/*/detail",
@@ -98,10 +99,14 @@ public class SecurityConfig {
                                                                 "/api/macro/cpi", "/api/macro/bond/**",
                                                                 "/api/indices/{marketCode}/status",
                                                                 "/api/indices/{marketCode}/chart",
+                                                                "/api/indices/{marketCode}/chart/excluding-latest",
                                                                 "/api/indices/overseas/**",
                                                                 "/api/indices/kospi-usd-ratio",
+                                                                "/api/indices/kospi-usd-ratio/excluding-latest",
                                                                 "/api/indices/kosdaq-usd-ratio",
+                                                                "/api/indices/kosdaq-usd-ratio/excluding-latest",
                                                                 "/api/indices/vkospi-usd-ratio",
+                                                                "/api/indices/vkospi-usd-ratio/excluding-latest",
                                                                 "/api/analysis/valuation/*/static-report",
                                                                 "/api/stocks/financial/investor-trend/daily/*",
                                                                 "/api/stocks/investor/*/accumulated",
@@ -121,7 +126,9 @@ public class SecurityConfig {
                                                                 "/api/analysis/overseas/static-analysis/*",
                                                                 "/api/etf/*/detail",
                                                                 "/api/etf/*/constituents",
-                                                                "/api/etf/*/related")
+                                                                "/api/etf/*/related",
+                                                                "/api/indices/fred/*",
+                                                                "/api/indices/fred/*/krw")
                                                 .permitAll()
                                                 .anyRequest().authenticated())
                                 .oauth2Login(oauth2 -> oauth2

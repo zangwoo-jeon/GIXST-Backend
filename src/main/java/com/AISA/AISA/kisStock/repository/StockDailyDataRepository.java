@@ -92,4 +92,6 @@ public interface StockDailyDataRepository extends JpaRepository<StockDailyData, 
         default Optional<java.math.BigDecimal> findLatestPriceByStock(Stock stock) {
                 return findFirstByStockOrderByDateDesc(stock).map(StockDailyData::getClosingPrice);
         }
+
+        boolean existsByStock_StockCodeAndDateGreaterThanEqual(String stockCode, LocalDate date);
 }

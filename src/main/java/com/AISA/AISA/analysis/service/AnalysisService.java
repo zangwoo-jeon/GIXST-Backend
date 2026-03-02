@@ -6,13 +6,14 @@ import com.AISA.AISA.kisOverseasStock.entity.OverseasStockDailyData;
 import com.AISA.AISA.kisOverseasStock.repository.KisOverseasStockDailyDataRepository;
 import com.AISA.AISA.kisStock.Entity.stock.Stock;
 import com.AISA.AISA.kisStock.Entity.stock.StockDailyData;
+import com.AISA.AISA.fred.dto.FredIndexDataDto;
+import com.AISA.AISA.fred.enums.FredIndex;
+import com.AISA.AISA.fred.service.FredIndexService;
 import com.AISA.AISA.kisStock.enums.BondYield;
-import com.AISA.AISA.kisStock.enums.OverseasIndex;
 import com.AISA.AISA.kisStock.kisService.KisMacroService;
 import com.AISA.AISA.kisStock.kisService.KisIndexService;
 import com.AISA.AISA.kisStock.repository.StockDailyDataRepository;
 import com.AISA.AISA.kisStock.repository.StockRepository;
-import com.AISA.AISA.kisStock.dto.Index.IndexChartPriceDto;
 import com.AISA.AISA.portfolio.macro.dto.MacroIndicatorDto;
 import com.AISA.AISA.portfolio.macro.service.EcosService;
 import lombok.RequiredArgsConstructor;
@@ -44,7 +45,8 @@ public class AnalysisService {
     private final KisOverseasStockDailyDataRepository overseasStockDailyDataRepository;
     private final StockRepository stockRepository;
     private final KisMacroService kisMacroService;
-    private final KisIndexService kisIndexService; // Inject KisIndexService
+    private final KisIndexService kisIndexService;
+    private final FredIndexService fredIndexService;
     private final EcosService ecosService;
 
     private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyyMMdd");
@@ -457,9 +459,9 @@ public class AnalysisService {
                     }
                 }
             } else {
-                OverseasIndex index = OverseasIndex.valueOf(code);
-                List<IndexChartPriceDto> data = kisIndexService.fetchOverseasIndex(index, startDate, endDate);
-                for (IndexChartPriceDto d : data) {
+                FredIndex fredIndex = FredIndex.valueOf(code);
+                List<FredIndexDataDto> data = fredIndexService.getFredIndexChart(fredIndex, startDate, endDate);
+                for (FredIndexDataDto d : data) {
                     try {
                         dataMap.put(LocalDate.parse(d.getDate(), FORMATTER), Double.parseDouble(d.getPrice()));
                     } catch (NumberFormatException e) {

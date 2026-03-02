@@ -162,7 +162,7 @@ public class PortfolioDiagnosisService {
                 rawSignals, kospiSeries, "국내 시장", portfolioStockCodes, portfolioComposition);
 
         // Factor 5: USD Exchange Rate (Currency Risk - 5 Years)
-        analyzeFactorAdaptive(portfolioSeries, "EXCHANGE", "FX@KRW", "달러 환율", 5, factorResults, rawSignals,
+        analyzeFactorAdaptive(portfolioSeries, "EXCHANGE", "USD", "달러 환율", 5, factorResults, rawSignals,
                 portfolioStockCodes, portfolioComposition);
 
         // Factor 6: KR Base Rate (Monetary Policy - 5 Years)

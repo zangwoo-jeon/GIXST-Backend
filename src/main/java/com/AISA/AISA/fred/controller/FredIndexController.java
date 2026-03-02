@@ -61,4 +61,14 @@ public class FredIndexController {
         fredIndexService.fetchAndSave(index, startDate, endDate);
         return ResponseEntity.ok(new SuccessResponse<>(true, index.getDescription() + " 데이터 저장 성공", null));
     }
+
+    @DeleteMapping("/cache")
+    @Operation(
+            summary = "FRED 지수 캐시 초기화",
+            description = "fredIndex, fredIndexKrw 캐시를 전체 삭제합니다."
+    )
+    public ResponseEntity<SuccessResponse<Void>> evictFredCache() {
+        fredIndexService.evictAllCaches();
+        return ResponseEntity.ok(new SuccessResponse<>(true, "FRED 캐시 초기화 성공", null));
+    }
 }

@@ -1,4 +1,4 @@
-b# 📈 AISA (AI-driven ISA Portfolio Manager)
+# 📈 AISA (AI-driven ISA Portfolio Manager)
 
 > **낮은 변동성, 안정적인 수익률**을 위한 개인 맞춤형 포트폴리오 관리 서비스
 

@@ -1,4 +1,6 @@
-b# 📈 AISA (AI-driven ISA Portfolio Manager)
+# 📈 AISA (AI-driven ISA Portfolio Manager)
+
+주소 : https://gixst.vercel.app/
 
 > **낮은 변동성, 안정적인 수익률**을 위한 개인 맞춤형 포트폴리오 관리 서비스
 
@@ -22,8 +24,8 @@ b# 📈 AISA (AI-driven ISA Portfolio Manager)
 - **나만의 포트폴리오 구성**: 관심 종목으로 포트폴리오를 구성하고 관리
 - **포트폴리오 배당 캘린더** : 포트폴리오 내의 종목들의 배당락일, 배당지급일, 배당금, 배당률을 달력 형태로 제공
 - **포트폴리오 진단**:
-  - **자산 상관관계 분석**: 포트폴리오 내 자산 간의 상관계수(Pearson) 분석 및 시각화 (히트맵)
-  - **변동성 분석**: 시장 지수 대비 포트폴리오의 변동성 비교
+  - **자산 상관관계 분석**: 포트폴리오 내 자산 간의 상관계수(Pearson, rolling) 분석 및 시각화 (히트맵)
+  - **변동성 분석**: 롤링 beta/상관계수 분석으로 포트폴리오의 변동성 분석
 - **백테스팅 (Backtesting)**: 구성한 포트폴리오의 과거 성과(수익률, MDD, Sharpe Ratio) 시뮬레이션
 
 ### 3. 💰 ISA 특화 기능 (ISA Specialization)

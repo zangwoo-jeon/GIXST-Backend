@@ -28,4 +28,10 @@ public interface PortStockRepository extends JpaRepository<PortStock, UUID> {
     long countByPortfolio_PortId(UUID portId);
 
     List<PortStock> findByPortfolio_PortIdAndSequenceGreaterThan(UUID portId, int sequence);
+
+    @Query("SELECT ps FROM PortStock ps JOIN FETCH ps.stock WHERE ps.portfolio.portId = :portId ORDER BY ps.sequence ASC")
+    List<PortStock> findByPortfolio_PortIdWithStockOrderBySequenceAsc(@Param("portId") UUID portId);
+
+    @Query("SELECT ps FROM PortStock ps JOIN FETCH ps.stock WHERE ps.portfolio = :portfolio")
+    List<PortStock> findByPortfolioWithStock(@Param("portfolio") Portfolio portfolio);
 }

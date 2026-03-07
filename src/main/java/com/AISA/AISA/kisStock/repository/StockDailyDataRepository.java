@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 public interface StockDailyDataRepository extends JpaRepository<StockDailyData, Long> {
         Optional<StockDailyData> findByStockAndDate(Stock stock, LocalDate date);
@@ -94,4 +95,10 @@ public interface StockDailyDataRepository extends JpaRepository<StockDailyData, 
         }
 
         boolean existsByStock_StockCodeAndDateGreaterThanEqual(String stockCode, LocalDate date);
+
+        @Query("SELECT sdd.date FROM StockDailyData sdd WHERE sdd.stock.stockCode = :stockCode AND sdd.date BETWEEN :startDate AND :endDate")
+        Set<LocalDate> findDateSetByStockCodeAndDateBetween(
+                        @RequestParam("stockCode") String stockCode,
+                        @RequestParam("startDate") LocalDate startDate,
+                        @RequestParam("endDate") LocalDate endDate);
 }

@@ -138,7 +138,7 @@ public class PortStockService {
         Portfolio portfolio = portfolioRepository.findById(portId)
                 .orElseThrow(() -> new BusinessException(PortfolioErrorCode.PORTFOLIO_NOT_FOUND));
 
-        List<PortStock> portStocks = portStockRepository.findByPortfolio_PortIdOrderBySequenceAsc(portId);
+        List<PortStock> portStocks = portStockRepository.findByPortfolio_PortIdWithStockOrderBySequenceAsc(portId);
 
         // 최신 환율 정보 가져오기
         Double latestRate = kisMacroService.getLatestExchangeRate();

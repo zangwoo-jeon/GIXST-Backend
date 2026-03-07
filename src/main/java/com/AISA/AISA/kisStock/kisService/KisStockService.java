@@ -44,6 +44,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 import java.time.temporal.WeekFields;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -414,11 +415,6 @@ private StockChartResponseDto fetchStockChartFromApi(String stockCode, String st
             throw new BusinessException(KisApiErrorCode.INVALID_STOCK_TYPE);
         }
 
-        if (stockDailyDataRepository.existsByStock_StockCodeAndDateGreaterThanEqual(stockCode, targetStartDate)) {
-            log.info("Data already exists for {} from {}. Skipping.", stockCode, targetStartDate);
-            return;
-        }
-
         int consecutiveFailures = 0;
         final int MAX_CONSECUTIVE_FAILURES = 5;
 
@@ -429,6 +425,20 @@ private StockChartResponseDto fetchStockChartFromApi(String stockCode, String st
                 queryStartDate = targetStartDate;
             }
             String queryStartDateStr = queryStartDate.format(formatter);
+
+            // 청크 내 DB에 이미 존재하는 날짜 조회
+            Set<LocalDate> existingDatesInChunk = stockDailyDataRepository
+                    .findDateSetByStockCodeAndDateBetween(stockCode, queryStartDate, currentDate);
+
+            // 예상 거래일 수 (달력 일수의 5/7 근사, 공휴일 감안 여유 포함)
+            long approxTradingDays = ChronoUnit.DAYS.between(queryStartDate, currentDate) * 5 / 7;
+
+            if (!existingDatesInChunk.isEmpty() && existingDatesInChunk.size() >= approxTradingDays) {
+                log.debug("Chunk [{} ~ {}] already covered ({} records). Skipping API call.",
+                        queryStartDateStr, currentDateStr, existingDatesInChunk.size());
+                currentDate = queryStartDate.minusDays(1);
+                continue;
+            }
 
             log.info("Fetching data for {} from {} to {} (market={})",
                     stockCode, queryStartDateStr, currentDateStr, marketCode);
@@ -453,7 +463,20 @@ private StockChartResponseDto fetchStockChartFromApi(String stockCode, String st
 
                 consecutiveFailures = 0;
 
-                saveDailyDataWithCalculation(stock, response.getPriceList());
+                // DB에 없는 날짜만 필터링하여 저장
+                List<StockChartPriceDto> missingData = response.getPriceList().stream()
+                        .filter(dto -> !existingDatesInChunk.contains(
+                                LocalDate.parse(dto.getDate(), formatter)))
+                        .collect(Collectors.toList());
+
+                if (!missingData.isEmpty()) {
+                    saveDailyDataWithCalculation(stock, missingData);
+                    log.info("Saved {} missing records for {} in chunk [{} ~ {}]",
+                            missingData.size(), stockCode, queryStartDateStr, currentDateStr);
+                } else {
+                    log.info("No missing data for {} in chunk [{} ~ {}]",
+                            stockCode, queryStartDateStr, currentDateStr);
+                }
 
                 String oldestDateStr = response.getPriceList().get(response.getPriceList().size() - 1)
                         .getDate();

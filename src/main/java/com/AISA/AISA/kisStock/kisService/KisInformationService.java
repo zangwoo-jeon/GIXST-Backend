@@ -137,6 +137,17 @@ public class KisInformationService {
 
             stockBalanceSheetRepository.saveAll(entitiesToSave);
 
+            // divCode=0(연간)일 때, 12월 결산 데이터가 있는 연도의 비결산 데이터 삭제
+            if ("0".equals(divCode)) {
+                for (StockBalanceSheet entity : entitiesToSave) {
+                    if (entity.getStacYymm() != null && entity.getStacYymm().endsWith("12")) {
+                        String year = entity.getStacYymm().substring(0, 4);
+                        stockBalanceSheetRepository.deleteNonDecemberAnnualDataForYear(
+                                stockCode, divCode, year, entity.getStacYymm());
+                    }
+                }
+            }
+
             return entitiesToSave.stream()
                     .map(entity -> BalanceSheetDto.builder()
                             .stacYymm(entity.getStacYymm())
@@ -409,6 +420,17 @@ public class KisInformationService {
                 log.warn("Save error for financial ratio {}: {}", stockCode, e.getMessage());
             }
 
+            // divCode=0(연간)일 때, 12월 결산 데이터가 있는 연도의 비결산 데이터 삭제
+            if ("0".equals(divCode)) {
+                for (StockFinancialRatio entity : entitiesToSave) {
+                    if (entity.getStacYymm() != null && entity.getStacYymm().endsWith("12")) {
+                        String year = entity.getStacYymm().substring(0, 4);
+                        stockFinancialRatioRepository.deleteNonDecemberAnnualDataForYear(
+                                stockCode, divCode, year, entity.getStacYymm());
+                    }
+                }
+            }
+
             return entitiesToSave;
 
         } catch (Exception e) {
@@ -668,6 +690,17 @@ public class KisInformationService {
                 log.warn("Save error for income statement {}: {}", stockCode, e.getMessage());
             }
 
+            // divCode=0(연간)일 때, 12월 결산 데이터가 있는 연도의 비결산 데이터 삭제
+            if ("0".equals(divCode)) {
+                for (StockFinancialStatement entity : entitiesToSave) {
+                    if (entity.getStacYymm() != null && entity.getStacYymm().endsWith("12")) {
+                        String year = entity.getStacYymm().substring(0, 4);
+                        stockFinancialStatementRepository.deleteNonDecemberAnnualDataForYear(
+                                stockCode, divCode, year, entity.getStacYymm());
+                    }
+                }
+            }
+
             // Sort ASC for calculation
             entitiesToSave.sort((o1, o2) -> o1.getStacYymm().compareTo(o2.getStacYymm()));
             return convertToFinancialStatementDto(entitiesToSave, divCode);
@@ -676,6 +709,53 @@ public class KisInformationService {
             log.warn("Failed to fetch income statement from KIS for {}: {}", stockCode, e.getMessage());
             return new ArrayList<>();
         }
+    }
+
+    @Transactional
+    public void cleanupNonDecemberAnnualData() {
+        log.info("Starting cleanup of non-December annual data");
+
+        // 12월 결산 데이터가 있는 경우, 같은 종목+연도의 비결산 연간 데이터 삭제
+        List<StockFinancialStatement> annualStatements = stockFinancialStatementRepository.findAllByDivCode("0");
+        Set<String> decemberKeys = annualStatements.stream()
+                .filter(s -> s.getStacYymm().endsWith("12"))
+                .map(s -> s.getStockCode() + "_" + s.getStacYymm().substring(0, 4))
+                .collect(Collectors.toSet());
+
+        annualStatements.stream()
+                .filter(s -> !s.getStacYymm().endsWith("12"))
+                .filter(s -> decemberKeys.contains(s.getStockCode() + "_" + s.getStacYymm().substring(0, 4)))
+                .forEach(s -> stockFinancialStatementRepository.deleteNonDecemberAnnualDataForYear(
+                        s.getStockCode(), "0", s.getStacYymm().substring(0, 4),
+                        s.getStacYymm().substring(0, 4) + "12"));
+
+        List<StockBalanceSheet> annualBalanceSheets = stockBalanceSheetRepository.findAllByDivCode("0");
+        Set<String> bsDecemberKeys = annualBalanceSheets.stream()
+                .filter(s -> s.getStacYymm().endsWith("12"))
+                .map(s -> s.getStockCode() + "_" + s.getStacYymm().substring(0, 4))
+                .collect(Collectors.toSet());
+
+        annualBalanceSheets.stream()
+                .filter(s -> !s.getStacYymm().endsWith("12"))
+                .filter(s -> bsDecemberKeys.contains(s.getStockCode() + "_" + s.getStacYymm().substring(0, 4)))
+                .forEach(s -> stockBalanceSheetRepository.deleteNonDecemberAnnualDataForYear(
+                        s.getStockCode(), "0", s.getStacYymm().substring(0, 4),
+                        s.getStacYymm().substring(0, 4) + "12"));
+
+        List<StockFinancialRatio> annualRatios = stockFinancialRatioRepository.findAllByDivCode("0");
+        Set<String> ratioDecemberKeys = annualRatios.stream()
+                .filter(s -> s.getStacYymm().endsWith("12"))
+                .map(s -> s.getStockCode() + "_" + s.getStacYymm().substring(0, 4))
+                .collect(Collectors.toSet());
+
+        annualRatios.stream()
+                .filter(s -> !s.getStacYymm().endsWith("12"))
+                .filter(s -> ratioDecemberKeys.contains(s.getStockCode() + "_" + s.getStacYymm().substring(0, 4)))
+                .forEach(s -> stockFinancialRatioRepository.deleteNonDecemberAnnualDataForYear(
+                        s.getStockCode(), "0", s.getStacYymm().substring(0, 4),
+                        s.getStacYymm().substring(0, 4) + "12"));
+
+        log.info("Completed cleanup of non-December annual data");
     }
 
     public void refreshAllIncomeStatements(String divCode) {

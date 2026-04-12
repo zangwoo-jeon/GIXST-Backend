@@ -91,6 +91,15 @@ public class KisInformationController {
                                                 "Started background task"));
         }
 
+        @PostMapping("/cleanup/non-december-annual")
+        @Operation(summary = "비결산 연간 데이터 정리", description = "12월 결산 데이터가 존재하는 연도에서 12월이 아닌 연간(divCode=0) 데이터를 삭제합니다. (예: 202512가 있으면 202509 삭제)")
+        public ResponseEntity<SuccessResponse<String>> cleanupNonDecemberAnnualData() {
+                new Thread(() -> kisInformationService.cleanupNonDecemberAnnualData()).start();
+                return ResponseEntity
+                                .ok(new SuccessResponse<>(true, "비결산 연간 데이터 정리 시작 (백그라운드 실행)",
+                                                "Started background cleanup task"));
+        }
+
         @PostMapping("/ratio/init-all")
         @Operation(summary = "전체 주식 재무비율(ROE/EPS 등) 갱신", description = "모든 주식에 대해 KIS API를 통해 재무비율을 조회하고 DB에 저장합니다. (분기/연간 선택 가능)")
         public ResponseEntity<SuccessResponse<String>> initAllFinancialRatios(

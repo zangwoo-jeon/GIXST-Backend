@@ -27,7 +27,7 @@ jobs:
       # 1. 워크로드 아이덴티티(WIF) 인증 (키 파일 없이 인증)
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v1
+        uses: google-github-actions/auth@v2
         with:
           token_format: 'access_token'
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}

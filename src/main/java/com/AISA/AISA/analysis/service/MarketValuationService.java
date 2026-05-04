@@ -1086,7 +1086,9 @@ public class MarketValuationService {
                 return CombinedSignal.AGGRESSIVE_SELL;
             if (trend == TrendSignal.HEALTHY_BULL)
                 return CombinedSignal.HOLD;
-            return CombinedSignal.CAUTION;
+            if (valuation == ValuationSignal.EXTREME_GREED)
+                return CombinedSignal.CAUTION;
+            return CombinedSignal.HOLD;
         }
 
         if (trend == TrendSignal.HEALTHY_BULL)
@@ -1111,8 +1113,12 @@ public class MarketValuationService {
         // 외국인 상대 강도: relativeStrength가 이미 (5d*4/20d) → 1.0이 중립
         double foreignRS = trend.getForeignRelativeStrength();
 
-        // 1. HEALTHY_BULL: 추세 우위 + 외국인 가속 매수 + breadth 상승
-        if (score >= 60 && foreignRS > 1.2 && breadthZ > 0.5) {
+        // 1. HEALTHY_BULL: 추세 점수 통과 + 수급/breadth 중 2개 이상 긍정
+        boolean strongScore = score >= 55;
+        boolean foreignAccum = foreignRS > 1.05;
+        boolean breadthPositive = breadthZ > 0.2;
+        int healthyCount = (strongScore ? 1 : 0) + (foreignAccum ? 1 : 0) + (breadthPositive ? 1 : 0);
+        if (score >= 60 && healthyCount >= 2) {
             return TrendSignal.HEALTHY_BULL;
         }
 

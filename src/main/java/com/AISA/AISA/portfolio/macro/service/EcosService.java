@@ -38,6 +38,18 @@ public class EcosService {
     private static final String STAT_CODE_CPI = "901Y009"; // 소비자물가지수 (2020=100)
     private static final String ITEM_CODE_CPI_TOTAL = "0"; // 총지수 (API 문서상 '0' 또는 'A01' 등이 아닌 최상위 코드 확인 필요, 보통 '0'이 총지수)
 
+    private static final String STAT_CODE_CSI = "511Y002"; // 소비자동향조사 (전국, 월, 2008.9~)
+    private static final String ITEM_CODE_CSI = "FME"; // 소비자심리지수 (CSI)
+
+    // 예금은행 지역별 연체율 (1.2.3.7). 4개 시리즈 모두 동일 statCode, itemCode1로 구분.
+    // itemCode2는 X00(전국)을 항상 사용.
+    private static final String STAT_CODE_DELINQUENCY = "141Y005";
+    private static final String ITEM_CODE_DELINQ_CORPORATE = "R4AB00"; // 기업대출 연체율(전체1M)
+    private static final String ITEM_CODE_DELINQ_LARGE = "R4AB11"; // 대기업대출 연체율(전체1M)
+    private static final String ITEM_CODE_DELINQ_SMALL = "R4AB12"; // 중소기업대출 연체율(전체1M)
+    private static final String ITEM_CODE_DELINQ_HOUSEHOLD = "R5AB00"; // 가계대출 연체율(전체1M)
+    private static final String ITEM_CODE_DELINQ_REGION_NATIONAL = "X00"; // 전국
+
     @Transactional(readOnly = true)
     @Cacheable(value = "macroM2", key = "#startDateStr + '-' + #endDateStr")
     public List<MacroIndicatorDto> fetchM2MoneySupply(String startDateStr, String endDateStr) {
@@ -62,6 +74,46 @@ public class EcosService {
         return getMacroDataFromDb(STAT_CODE_CPI, ITEM_CODE_CPI_TOTAL, startMonth, endMonth, "M");
     }
 
+    @Transactional(readOnly = true)
+    @Cacheable(value = "macroCSI", key = "#startDateStr + '-' + #endDateStr")
+    public List<MacroIndicatorDto> fetchCSI(String startDateStr, String endDateStr) {
+        String startMonth = startDateStr.substring(0, 6);
+        String endMonth = endDateStr.substring(0, 6);
+        return getMacroDataFromDb(STAT_CODE_CSI, ITEM_CODE_CSI, startMonth, endMonth, "M");
+    }
+
+    @Transactional(readOnly = true)
+    @Cacheable(value = "macroDelinqCorporate", key = "#startDateStr + '-' + #endDateStr")
+    public List<MacroIndicatorDto> fetchDelinquencyCorporate(String startDateStr, String endDateStr) {
+        String startMonth = startDateStr.substring(0, 6);
+        String endMonth = endDateStr.substring(0, 6);
+        return getMacroDataFromDb(STAT_CODE_DELINQUENCY, ITEM_CODE_DELINQ_CORPORATE, startMonth, endMonth, "M");
+    }
+
+    @Transactional(readOnly = true)
+    @Cacheable(value = "macroDelinqLarge", key = "#startDateStr + '-' + #endDateStr")
+    public List<MacroIndicatorDto> fetchDelinquencyLarge(String startDateStr, String endDateStr) {
+        String startMonth = startDateStr.substring(0, 6);
+        String endMonth = endDateStr.substring(0, 6);
+        return getMacroDataFromDb(STAT_CODE_DELINQUENCY, ITEM_CODE_DELINQ_LARGE, startMonth, endMonth, "M");
+    }
+
+    @Transactional(readOnly = true)
+    @Cacheable(value = "macroDelinqSmall", key = "#startDateStr + '-' + #endDateStr")
+    public List<MacroIndicatorDto> fetchDelinquencySmall(String startDateStr, String endDateStr) {
+        String startMonth = startDateStr.substring(0, 6);
+        String endMonth = endDateStr.substring(0, 6);
+        return getMacroDataFromDb(STAT_CODE_DELINQUENCY, ITEM_CODE_DELINQ_SMALL, startMonth, endMonth, "M");
+    }
+
+    @Transactional(readOnly = true)
+    @Cacheable(value = "macroDelinqHousehold", key = "#startDateStr + '-' + #endDateStr")
+    public List<MacroIndicatorDto> fetchDelinquencyHousehold(String startDateStr, String endDateStr) {
+        String startMonth = startDateStr.substring(0, 6);
+        String endMonth = endDateStr.substring(0, 6);
+        return getMacroDataFromDb(STAT_CODE_DELINQUENCY, ITEM_CODE_DELINQ_HOUSEHOLD, startMonth, endMonth, "M");
+    }
+
     @Transactional
     public void saveM2Data(String startDateStr, String endDateStr) {
         String startMonth = startDateStr.substring(0, 6);
@@ -81,6 +133,45 @@ public class EcosService {
         String startMonth = startDateStr.substring(0, 6);
         String endMonth = endDateStr.substring(0, 6);
         fetchAndSaveFromApi(STAT_CODE_CPI, "M", ITEM_CODE_CPI_TOTAL, startMonth, endMonth);
+    }
+
+    @Transactional
+    public void saveCSI(String startDateStr, String endDateStr) {
+        String startMonth = startDateStr.substring(0, 6);
+        String endMonth = endDateStr.substring(0, 6);
+        fetchAndSaveFromApi(STAT_CODE_CSI, "M", ITEM_CODE_CSI, startMonth, endMonth);
+    }
+
+    @Transactional
+    public void saveDelinquencyCorporate(String startDateStr, String endDateStr) {
+        String startMonth = startDateStr.substring(0, 6);
+        String endMonth = endDateStr.substring(0, 6);
+        fetchAndSaveFromApi(STAT_CODE_DELINQUENCY, "M", ITEM_CODE_DELINQ_CORPORATE,
+                ITEM_CODE_DELINQ_REGION_NATIONAL, startMonth, endMonth);
+    }
+
+    @Transactional
+    public void saveDelinquencyLarge(String startDateStr, String endDateStr) {
+        String startMonth = startDateStr.substring(0, 6);
+        String endMonth = endDateStr.substring(0, 6);
+        fetchAndSaveFromApi(STAT_CODE_DELINQUENCY, "M", ITEM_CODE_DELINQ_LARGE,
+                ITEM_CODE_DELINQ_REGION_NATIONAL, startMonth, endMonth);
+    }
+
+    @Transactional
+    public void saveDelinquencySmall(String startDateStr, String endDateStr) {
+        String startMonth = startDateStr.substring(0, 6);
+        String endMonth = endDateStr.substring(0, 6);
+        fetchAndSaveFromApi(STAT_CODE_DELINQUENCY, "M", ITEM_CODE_DELINQ_SMALL,
+                ITEM_CODE_DELINQ_REGION_NATIONAL, startMonth, endMonth);
+    }
+
+    @Transactional
+    public void saveDelinquencyHousehold(String startDateStr, String endDateStr) {
+        String startMonth = startDateStr.substring(0, 6);
+        String endMonth = endDateStr.substring(0, 6);
+        fetchAndSaveFromApi(STAT_CODE_DELINQUENCY, "M", ITEM_CODE_DELINQ_HOUSEHOLD,
+                ITEM_CODE_DELINQ_REGION_NATIONAL, startMonth, endMonth);
     }
 
     private List<MacroIndicatorDto> getMacroDataFromDb(String statCode, String itemCode, String reqStartDateStr,
@@ -124,6 +215,24 @@ public class EcosService {
                 itemCode != null ? itemCode : "");
 
         fetchAndProcessUrl(url, statCode, cycle, itemCode);
+    }
+
+    /**
+     * itemCode1 + itemCode2 동시 지정. 연체율 시리즈처럼 itemCode2(지역코드 X00 등)가 필요한 경우 사용.
+     */
+    private void fetchAndSaveFromApi(String statCode, String cycle, String itemCode1, String itemCode2,
+            String startDate, String endDate) {
+        String url = String.format("%s/StatisticSearch/%s/json/kr/1/10000/%s/%s/%s/%s/%s/%s",
+                ecosApiProperties.getBaseUrl(),
+                ecosApiProperties.getApiKey(),
+                statCode,
+                cycle,
+                startDate,
+                endDate,
+                itemCode1 != null ? itemCode1 : "",
+                itemCode2 != null ? itemCode2 : "");
+
+        fetchAndProcessUrl(url, statCode, cycle, itemCode1);
     }
 
     private void fetchCpiMonthly(String statCode, String cycle, String itemCode, String startDateStr,

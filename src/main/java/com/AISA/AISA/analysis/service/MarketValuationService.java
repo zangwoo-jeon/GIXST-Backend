@@ -7,6 +7,7 @@ import com.AISA.AISA.kisStock.Entity.stock.StockBalanceSheet;
 import com.AISA.AISA.kisStock.Entity.stock.StockFinancialStatement;
 import com.AISA.AISA.kisStock.Entity.stock.StockMarketCap;
 import com.AISA.AISA.kisStock.dto.Index.IndexChartInfoDto;
+import com.AISA.AISA.kisStock.dto.StockPrice.StockPriceDto;
 import com.AISA.AISA.kisStock.enums.MarketType;
 import com.AISA.AISA.kisStock.kisService.KisIndexService;
 import com.AISA.AISA.kisStock.kisService.KisStockService;
@@ -33,8 +34,13 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
+import java.util.Map.Entry;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 
 @Service
@@ -51,6 +57,7 @@ public class MarketValuationService {
     private final MarketInvestorDailyRepository marketInvestorDailyRepository;
     private final FuturesInvestorDailyRepository futuresInvestorDailyRepository;
     private final KisMacroService kisMacroService;
+    private final com.AISA.AISA.portfolio.macro.service.EcosService ecosService;
     private final StockDailyDataRepository stockDailyDataRepository;
     private final GeminiService geminiService;
     private final KisIndexService kisIndexService;
@@ -250,8 +257,10 @@ public class MarketValuationService {
                     : null;
 
             // 7. Scoring and Time Series
+            // 월별 CPI YoY 맵을 한 번 빌드해서 generateTimeSeries와 current 값 양쪽에 재사용
+            Map<YearMonth, BigDecimal> cpiYoyMonthlyMap = buildCpiYoyMonthlyMap(getMonthlyCpiMap());
             List<MarketValuationDto.TimeSeriesPoint> timeSeries = generateTimeSeries(market, currentCape, bondYield,
-                    annualAdjSums, marketCaps, stocksWithHistory, cpiMap, currentCpi);
+                    annualAdjSums, marketCaps, stocksWithHistory, cpiMap, currentCpi, cpiYoyMonthlyMap);
             List<BigDecimal> sortedCapes = timeSeries.stream().map(MarketValuationDto.TimeSeriesPoint::getCape)
                     .filter(Objects::nonNull).sorted().collect(Collectors.toList());
             List<BigDecimal> chronCapes = timeSeries.stream().map(MarketValuationDto.TimeSeriesPoint::getCape)
@@ -332,7 +341,9 @@ public class MarketValuationService {
                     .scoreDetails(scoreDetails)
                     .investorTrend(trend)
                     .predictionReport(
-                            calculateTrendProbability(currentCape, yieldGap, valuationScore, trendResult.score,
+                            calculateTrendProbability(currentCape, yieldGap,
+                                    computeCurrentCpiYoyMonthly(cpiYoyMonthlyMap),
+                                    valuationScore, trendResult.score,
                                     trend, timeSeries, market))
                     .metadata(MarketValuationDto.MetadataInfo.builder()
                             .stockCount(marketCaps.size())
@@ -344,10 +355,40 @@ public class MarketValuationService {
                                     .tenYearMedian(median).build())
                             .build())
                     .timeSeries(timeSeries)
+                    .theoreticalAnchor(calculateTheoreticalAnchor(currentCape))
+                    .domesticEconomy(calculateDomesticEconomy())
                     .build();
 
+            // 8-1. KNN 결과 분리 처리:
+            //  - outcomeDistribution이 매트릭스를 명확히 반박할 때만 신호 강등 (rebuttalReasons)
+            //  - OOD/winRateCI 불확실성은 강등 없이 flag로만 분리 표시 (현재 진단은 추세대로 유지)
+            SignalAdjustment adjustment = applyKnnAdjustment(cSignal, dto.getPredictionReport());
+            boolean signalDegraded = adjustment.adjustedSignal != adjustment.originalSignal;
+            if (signalDegraded || adjustment.oodFlag || adjustment.uncertaintyFlag) {
+                InvestmentStrategy.InvestmentStrategyBuilder invBuilder = dto.getInvestmentStrategy()
+                        .toBuilder();
+                if (signalDegraded) {
+                    invBuilder.finalActionSignal(adjustment.adjustedSignal)
+                            .preKnnAdjustmentSignal(adjustment.originalSignal)
+                            .knnAdjustmentReasons(adjustment.rebuttalReasons);
+                    cSignal = adjustment.adjustedSignal;
+                }
+                if (adjustment.oodFlag) {
+                    invBuilder.oodFlag(true);
+                }
+                if (adjustment.uncertaintyFlag) {
+                    invBuilder.uncertaintyFlag(true);
+                }
+                if (!adjustment.uncertaintyReasons.isEmpty()) {
+                    invBuilder.uncertaintyReasons(adjustment.uncertaintyReasons);
+                }
+                dto = dto.toBuilder().investmentStrategy(invBuilder.build()).build();
+            }
+
             // 9. AI Strategy (Split)
-            GeminiService.StrategyResult aiRes = geminiService.generateMarketStrategy(dto);
+            // KOSDAQ 등 자체 VKOSPI가 없는 시장도 KOSPI VKOSPI 차용하여 일관성 유지
+            BigDecimal effectiveVkospi = getEffectiveVkospi(dto.getInvestorTrend());
+            GeminiService.StrategyResult aiRes = geminiService.generateMarketStrategy(dto, effectiveVkospi);
             String fallbackV = determineStrategy(valuationScore)
                     + " " + getValuationSentimentContext(vSignal)
                     + " " + getTrendSentimentContext(tSignal);
@@ -372,11 +413,49 @@ public class MarketValuationService {
                     .combinedStrategyText(finalCombinedStrategy)
                     .build();
 
-            return dto.toBuilder()
+            MarketValuationDto finalDto = dto.toBuilder()
                     .valuationAnalysis(finalVAnalysis)
                     .trendAnalysis(finalTAnalysis)
                     .investmentStrategy(finalInvStrategy)
                     .build();
+
+            // theoreticalAnchor.explanation을 한국 시장 컨텍스트 기반 Gemini explanation으로 enrich.
+            // 실패 시 calculateTheoreticalAnchor의 정적 fallback explanation 유지.
+            if (finalDto.getTheoreticalAnchor() != null) {
+                String geminiExp = geminiService.generateTheoreticalAnchorExplanation(
+                        market, currentCape, finalDto.getTheoreticalAnchor(),
+                        finalDto.getMetadata() != null ? finalDto.getMetadata().getHistoricalStats() : null,
+                        finalDto.getScoreDetails() != null ? finalDto.getScoreDetails().getDistributionPercentile() : null);
+                if (geminiExp != null && !geminiExp.isBlank()) {
+                    MarketValuationDto.TheoreticalAnchor enrichedAnchor = finalDto.getTheoreticalAnchor()
+                            .toBuilder().explanation(geminiExp).build();
+                    finalDto = finalDto.toBuilder().theoreticalAnchor(enrichedAnchor).build();
+                }
+            }
+
+            // VERY_LOW (OOD) 상황에서만 시나리오 추천 생성. 캐시에 함께 저장됨.
+            // effectiveVkospi는 위 generateMarketStrategy 호출 시 이미 계산했으므로 재사용
+            if (finalDto.getPredictionReport() != null
+                    && finalDto.getPredictionReport().getKnnStats() != null
+                    && finalDto.getPredictionReport().getKnnStats()
+                            .getConfidence() == MarketValuationDto.KnnConfidence.VERY_LOW
+                    && finalDto.getPredictionReport().getOutcomeDistribution() != null) {
+                MarketValuationDto.ScenarioRecommendation scenarioRec = geminiService
+                        .generateScenarioRecommendation(finalDto, effectiveVkospi);
+                if (scenarioRec != null) {
+                    finalDto = finalDto.toBuilder().scenarioRecommendation(scenarioRec).build();
+                }
+            }
+
+            // 종합 분석 narrative 생성 — 모든 dto 데이터가 채워진 후 마지막 단계에서 호출.
+            // 4축(밸류에이션·추세·리스크·내수) + 종합 전략 + 한 줄 요약 + 행동 지침을 구조화된 객체로 반환.
+            MarketValuationDto.ComprehensiveAnalysis comprehensive = geminiService
+                    .generateComprehensiveAnalysis(finalDto, effectiveVkospi);
+            if (comprehensive != null) {
+                finalDto = finalDto.toBuilder().comprehensiveAnalysis(comprehensive).build();
+            }
+
+            return finalDto;
 
         } catch (Exception e) {
             log.error("Error calculating market valuation for {}: {}", market, e.getMessage(), e);
@@ -393,11 +472,14 @@ public class MarketValuationService {
         DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyyMMdd");
 
         try {
-            List<MacroIndicatorDto> cpiList = kisMacroService.fetchMacroData(STAT_CODE_CPI, ITEM_CODE_CPI, "X", "CPI",
-                    start.format(fmt), end.format(fmt));
+            // ecosService.fetchCPI는 DB 적재된 ECOS CPI를 반환 (kisMacroService 경로는 빈 결과 반환)
+            List<MacroIndicatorDto> cpiList = ecosService.fetchCPI(start.format(fmt), end.format(fmt));
 
-            if (cpiList == null)
+            if (cpiList == null || cpiList.isEmpty()) {
+                log.warn("CPI fetch returned empty from ecosService.fetchCPI ({} ~ {})",
+                        start.format(fmt), end.format(fmt));
                 return Collections.emptyMap();
+            }
 
             Map<Integer, List<BigDecimal>> annualValues = new HashMap<>();
             for (MacroIndicatorDto dto : cpiList) {
@@ -411,6 +493,10 @@ public class MarketValuationService {
                         .divide(new BigDecimal(values.size()), 4, RoundingMode.HALF_UP);
                 resultMap.put(year, avg);
             });
+            log.info("CPI annual map loaded: {} years ({} ~ {})",
+                    resultMap.size(),
+                    resultMap.keySet().stream().mapToInt(Integer::intValue).min().orElse(-1),
+                    resultMap.keySet().stream().mapToInt(Integer::intValue).max().orElse(-1));
             return resultMap;
         } catch (Exception e) {
             log.warn("Failed to fetch CPI map: {}", e.getMessage());
@@ -421,7 +507,8 @@ public class MarketValuationService {
     private List<MarketValuationDto.TimeSeriesPoint> generateTimeSeries(MarketType market, BigDecimal currentCape,
             BigDecimal currentBondYield, Map<Integer, BigDecimal> annualAdjSums,
             List<StockMarketCap> marketCaps, Set<String> stocksWithHistory,
-            Map<Integer, BigDecimal> cpiMap, BigDecimal currentCpi) {
+            Map<Integer, BigDecimal> cpiMap, BigDecimal currentCpi,
+            Map<YearMonth, BigDecimal> cpiYoyMonthlyMap) {
         List<MarketValuationDto.TimeSeriesPoint> points = new ArrayList<>();
         LocalDate end = LocalDate.now();
         LocalDate start = end.minusYears(10);
@@ -451,6 +538,12 @@ public class MarketValuationService {
                 .reduce(BigDecimal.ZERO, BigDecimal::add)
                 .multiply(new BigDecimal("100000000"));
 
+        // KNN 특성용 시계열 데이터 로드 — 일별 데이터를 한 번에 끌어와서 5일 윈도우 미리 계산
+        TreeMap<LocalDate, Long> foreignNet5dByDate = buildForeignNet5dByDate(market, start, end);
+        TreeMap<LocalDate, BigDecimal> vkospiByDate = buildVkospiByDate(start, end);
+        TreeMap<LocalDate, Double> breadth5dByDate = buildBreadth5dByDate(market);
+        // CPI YoY는 외부에서 월별 trailing 12개월 YoY 맵으로 전달받음 (인플레이션 trend 정밀 추적)
+
         Map<String, IndexDailyData> monthlySamples = new TreeMap<>();
         for (IndexDailyData d : indexData) {
             DateTimeFormatter yyyyMM = DateTimeFormatter.ofPattern("yyyy-MM");
@@ -458,11 +551,12 @@ public class MarketValuationService {
             monthlySamples.putIfAbsent(key, d);
         }
 
-        for (Map.Entry<String, IndexDailyData> entry : monthlySamples.entrySet()) {
+        for (Entry<String, IndexDailyData> entry : monthlySamples.entrySet()) {
             IndexDailyData d = entry.getValue();
             String fullDate = d.getDate().toString();
             String monthKey = entry.getKey();
             int pointYear = d.getDate().getYear();
+            LocalDate sampleDate = d.getDate();
 
             BigDecimal indexPrice = d.getClosingPrice();
 
@@ -491,13 +585,255 @@ public class MarketValuationService {
                 }
             }
 
+            // KNN 특성 매칭: 샘플 시점 이전 가장 가까운 영업일의 5일 누적/평균값 사용
+            Long sampleForeignNet5d = null;
+            Entry<LocalDate, Long> fE = foreignNet5dByDate.floorEntry(sampleDate);
+            if (fE != null)
+                sampleForeignNet5d = fE.getValue();
+
+            BigDecimal sampleVkospi = null;
+            Entry<LocalDate, BigDecimal> vE = vkospiByDate.floorEntry(sampleDate);
+            if (vE != null)
+                sampleVkospi = vE.getValue();
+
+            BigDecimal sampleBreadth5d = null;
+            Entry<LocalDate, Double> bE = breadth5dByDate.floorEntry(sampleDate);
+            if (bE != null)
+                sampleBreadth5d = BigDecimal.valueOf(bE.getValue()).setScale(2, RoundingMode.HALF_UP);
+
+            // 월별 trailing 12M YoY로 정밀 조회 (같은 연도 내에서도 월별로 다른 값)
+            YearMonth sampleYm = YearMonth.from(sampleDate);
+            BigDecimal sampleCpiYoy = (cpiYoyMonthlyMap != null)
+                    ? cpiYoyMonthlyMap.get(sampleYm)
+                    : null;
+
             points.add(MarketValuationDto.TimeSeriesPoint.builder()
                     .date(fullDate)
                     .cape(historicalCape)
                     .yieldGap(historicalYieldGap)
+                    .vkospi(sampleVkospi)
+                    .foreignNet5d(sampleForeignNet5d)
+                    .breadth5d(sampleBreadth5d)
+                    .cpiYoy(sampleCpiYoy)
                     .build());
         }
         return points;
+    }
+
+    /**
+     * 외국인 5일 누적 순매수 시계열 구축.
+     * 일별 marketInvestorDaily에서 직전 5영업일 합을 미리 계산해 TreeMap으로 반환.
+     */
+    private TreeMap<LocalDate, Long> buildForeignNet5dByDate(MarketType market, LocalDate start, LocalDate end) {
+        TreeMap<LocalDate, Long> result = new TreeMap<>();
+        try {
+            String marketCode = (market == MarketType.KOSPI) ? "0001" : "1001";
+            List<MarketInvestorDaily> investorData = marketInvestorDailyRepository
+                    .findAllByMarketCodeAndDateBetweenOrderByDateAsc(marketCode, start, end);
+            for (int i = 4; i < investorData.size(); i++) {
+                long sum = 0;
+                for (int j = i - 4; j <= i; j++) {
+                    BigDecimal v = investorData.get(j).getForeignerNetBuy();
+                    if (v != null)
+                        sum += v.longValue();
+                }
+                result.put(investorData.get(i).getDate(), sum);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to build foreignNet5d series for {}: {}", market, e.getMessage());
+        }
+        return result;
+    }
+
+    /**
+     * VKOSPI 일별 종가 시계열 구축.
+     * KOSDAQ도 KOSPI VKOSPI를 차용 (한국 시장 전체 위험 지표로 간주).
+     */
+    private TreeMap<LocalDate, BigDecimal> buildVkospiByDate(LocalDate start, LocalDate end) {
+        TreeMap<LocalDate, BigDecimal> result = new TreeMap<>();
+        try {
+            List<IndexDailyData> vkospiData = indexDailyDataRepository
+                    .findAllByMarketNameAndDateBetweenOrderByDateDesc("VKOSPI", start, end);
+            for (IndexDailyData v : vkospiData) {
+                if (v.getDate() != null && v.getClosingPrice() != null) {
+                    result.put(v.getDate(), v.getClosingPrice());
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Failed to build VKOSPI series: {}", e.getMessage());
+        }
+        return result;
+    }
+
+    /**
+     * Breadth 5일 평균 시계열 구축.
+     * StockDailyData에서 모든 영업일의 (상승종목-하락종목)/전체 비율을 집계 후 5일 평균.
+     */
+    private TreeMap<LocalDate, Double> buildBreadth5dByDate(MarketType market) {
+        TreeMap<LocalDate, Double> result = new TreeMap<>();
+        try {
+            List<LocalDate> allDates = stockDailyDataRepository.findDistinctDatesByMarketName(market,
+                    PageRequest.of(0, 5000));
+            if (allDates.isEmpty())
+                return result;
+            List<BreadthHistoryDto> history = stockDailyDataRepository.findBreadthHistoryByDates(market, allDates);
+            // findBreadthHistoryByDates는 date desc 정렬 — 5일 윈도우 계산을 위해 asc로 뒤집음
+            history.sort(Comparator.comparing(BreadthHistoryDto::getDate));
+            for (int i = 4; i < history.size(); i++) {
+                double sum = 0.0;
+                for (int j = i - 4; j <= i; j++) {
+                    sum += history.get(j).getBreadthIndex();
+                }
+                result.put(history.get(i).getDate(), sum / 5.0);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to build breadth5d series for {}: {}", market, e.getMessage());
+        }
+        return result;
+    }
+
+    /**
+     * 월별 CPI 맵 조회 (YearMonth → CPI 값).
+     * ecosService.fetchCPI 응답(yyyyMMdd 형식)을 YearMonth 키로 매핑.
+     */
+    private Map<YearMonth, BigDecimal> getMonthlyCpiMap() {
+        LocalDate end = LocalDate.now();
+        LocalDate start = end.minusYears(21);
+        DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyyMMdd");
+
+        try {
+            List<MacroIndicatorDto> cpiList = ecosService.fetchCPI(start.format(fmt), end.format(fmt));
+            if (cpiList == null || cpiList.isEmpty()) {
+                log.warn("Monthly CPI fetch returned empty");
+                return Collections.emptyMap();
+            }
+            Map<YearMonth, BigDecimal> map = new HashMap<>();
+            for (MacroIndicatorDto dto : cpiList) {
+                try {
+                    int year = Integer.parseInt(dto.getDate().substring(0, 4));
+                    int month = Integer.parseInt(dto.getDate().substring(4, 6));
+                    map.put(YearMonth.of(year, month), new BigDecimal(dto.getValue()));
+                } catch (Exception ignored) {
+                }
+            }
+            log.info("Monthly CPI map loaded: {} months", map.size());
+            return map;
+        } catch (Exception e) {
+            log.warn("Failed to fetch monthly CPI: {}", e.getMessage());
+            return Collections.emptyMap();
+        }
+    }
+
+    /**
+     * 월별 YoY 맵에서 가장 최근 월의 trailing YoY 반환 (currentCpiYoy로 사용).
+     */
+    private BigDecimal computeCurrentCpiYoyMonthly(Map<YearMonth, BigDecimal> monthlyYoyMap) {
+        if (monthlyYoyMap == null || monthlyYoyMap.isEmpty())
+            return null;
+        YearMonth latest = monthlyYoyMap.keySet().stream()
+                .max(YearMonth::compareTo).orElse(null);
+        return latest != null ? monthlyYoyMap.get(latest) : null;
+    }
+
+    /**
+     * 월별 trailing 12개월 YoY 맵 빌드.
+     * yoy[YYYY-MM] = (cpi[YYYY-MM] - cpi[YYYY-1-MM]) / cpi[YYYY-1-MM] * 100
+     * 같은 연도 내에서도 월별로 값이 변함 (인플레 trend 정밀 추적).
+     */
+    private Map<YearMonth, BigDecimal> buildCpiYoyMonthlyMap(
+            Map<YearMonth, BigDecimal> monthlyCpi) {
+        Map<YearMonth, BigDecimal> yoyMap = new HashMap<>();
+        if (monthlyCpi == null || monthlyCpi.isEmpty())
+            return yoyMap;
+        for (Entry<YearMonth, BigDecimal> e : monthlyCpi.entrySet()) {
+            YearMonth ym = e.getKey();
+            BigDecimal curr = e.getValue();
+            BigDecimal prev = monthlyCpi.get(ym.minusYears(1));
+            if (curr == null || prev == null || prev.compareTo(BigDecimal.ZERO) == 0)
+                continue;
+            BigDecimal yoy = curr.subtract(prev)
+                    .divide(prev, 6, RoundingMode.HALF_UP)
+                    .multiply(new BigDecimal(100))
+                    .setScale(2, RoundingMode.HALF_UP);
+            yoyMap.put(ym, yoy);
+        }
+        return yoyMap;
+    }
+
+    /**
+     * 현재 시점의 CPI YoY 추정. cpiMap에서 가장 최근 가용 연도의 YoY를 반환.
+     * 현재 연도의 CPI가 부분 데이터로 들어와 있다면 그것의 YoY를 우선 사용.
+     */
+    private BigDecimal computeCurrentCpiYoy(Map<Integer, BigDecimal> cpiMap) {
+        if (cpiMap == null || cpiMap.isEmpty())
+            return null;
+        Map<Integer, BigDecimal> yoyMap = buildCpiYoyMap(cpiMap);
+        if (yoyMap.isEmpty())
+            return null;
+        int latest = yoyMap.keySet().stream().mapToInt(Integer::intValue).max().orElse(-1);
+        return latest >= 0 ? yoyMap.get(latest) : null;
+    }
+
+    /**
+     * 연간 CPI YoY 변화율 맵 빌드. yoy[year] = (cpi[year] - cpi[year-1]) / cpi[year-1] * 100
+     * cpiMap이 비어있거나 데이터 부족 시 빈 Map 반환.
+     */
+    private Map<Integer, BigDecimal> buildCpiYoyMap(Map<Integer, BigDecimal> cpiMap) {
+        Map<Integer, BigDecimal> yoyMap = new HashMap<>();
+        if (cpiMap == null || cpiMap.isEmpty())
+            return yoyMap;
+        for (Entry<Integer, BigDecimal> e : cpiMap.entrySet()) {
+            int year = e.getKey();
+            BigDecimal curr = e.getValue();
+            BigDecimal prev = cpiMap.get(year - 1);
+            if (curr == null || prev == null || prev.compareTo(BigDecimal.ZERO) == 0)
+                continue;
+            BigDecimal yoy = curr.subtract(prev)
+                    .divide(prev, 6, RoundingMode.HALF_UP)
+                    .multiply(new BigDecimal(100))
+                    .setScale(2, RoundingMode.HALF_UP);
+            yoyMap.put(year, yoy);
+        }
+        return yoyMap;
+    }
+
+    /**
+     * 효과적 VKOSPI 조회. trendInfo.vkospi가 null이면 (KOSDAQ 등) KOSPI VKOSPI를 차용.
+     * 실시간 API → DB fallback 순서.
+     */
+    private BigDecimal getEffectiveVkospi(MarketValuationDto.InvestorTrendInfo trendInfo) {
+        BigDecimal vkospi = (trendInfo != null) ? trendInfo.getVkospi() : null;
+        if (vkospi != null)
+            return vkospi;
+        try {
+            IndexChartInfoDto vkospiStatus = kisIndexService.getIndexStatus("VKOSPI");
+            if (vkospiStatus != null && vkospiStatus.getCurrentIndices() != null) {
+                return new BigDecimal(vkospiStatus.getCurrentIndices());
+            }
+        } catch (Exception e) {
+            log.warn("Failed to fetch real-time VKOSPI, falling back to DB: {}", e.getMessage());
+        }
+        return indexDailyDataRepository
+                .findFirstByMarketNameOrderByDateDesc("VKOSPI")
+                .map(IndexDailyData::getClosingPrice).orElse(null);
+    }
+
+    /**
+     * 선형 보간 기반 백분위수 계산. sortedValues는 오름차순 정렬 가정.
+     * percentile은 0-100 범위. R-7 방식 (numpy.percentile 기본값과 동일).
+     */
+    private double percentileOf(double[] sortedValues, double percentile) {
+        if (sortedValues.length == 0)
+            return 0.0;
+        if (sortedValues.length == 1)
+            return sortedValues[0];
+        double rank = (percentile / 100.0) * (sortedValues.length - 1);
+        int lowerIdx = (int) Math.floor(rank);
+        int upperIdx = (int) Math.ceil(rank);
+        if (lowerIdx == upperIdx)
+            return sortedValues[lowerIdx];
+        double weight = rank - lowerIdx;
+        return sortedValues[lowerIdx] * (1.0 - weight) + sortedValues[upperIdx] * weight;
     }
 
     /**
@@ -624,6 +960,264 @@ public class MarketValuationService {
         if (score >= 20)
             return "UNDERVALUED";
         return "EXTREME_FEAR";
+    }
+
+    /**
+     * Shiller CAPE 기반 10년 연환산 기대 실질 수익률 추정.
+     * 학계 표준: E[10Y annualized real return] ≈ 1/CAPE × 100 (earnings yield).
+     * S&P 500 백테스트(1881~) R²≈0.40. ±1σ 추정치는 약 ±2.5%p.
+     * KNN과 독립적이라 OOD 상황에서도 valid한 anchor — 단기 KNN이 침묵해도 장기 답 제공.
+     */
+    private MarketValuationDto.TheoreticalAnchor calculateTheoreticalAnchor(BigDecimal cape) {
+        if (cape == null || cape.compareTo(BigDecimal.ZERO) <= 0)
+            return null;
+
+        BigDecimal earningsYield = BigDecimal.ONE
+                .divide(cape, 6, RoundingMode.HALF_UP)
+                .multiply(new BigDecimal("100"))
+                .setScale(2, RoundingMode.HALF_UP);
+
+        BigDecimal sigma = new BigDecimal("2.5"); // %p, 학술 회귀 표준오차 근사
+        BigDecimal lowerBound = earningsYield.subtract(sigma).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal upperBound = earningsYield.add(sigma).setScale(2, RoundingMode.HALF_UP);
+
+        // CAPE regime 분류 — Shiller 자신의 1881~ 분포 기반
+        String regime;
+        if (cape.compareTo(new BigDecimal("12")) <= 0)
+            regime = "UNDERVALUED"; // 역사적 저점 (1932, 1982, 2008 같은 시기)
+        else if (cape.compareTo(new BigDecimal("20")) <= 0)
+            regime = "FAIR"; // 역사 평균 약 16~17 부근
+        else if (cape.compareTo(new BigDecimal("30")) <= 0)
+            regime = "EXPENSIVE"; // 거품 진입 영역
+        else
+            regime = "EXTREME"; // 1929, 2000, 2021 같은 역사적 극단
+
+        String interpretation;
+        // 정적 explanation은 Gemini 호출 실패 시 fallback. 해외 시장 사례 인용 없는 안전 버전.
+        String explanation;
+        if (regime.equals("EXTREME")) {
+            interpretation = String.format(
+                    "CAPE %.2f는 역사적 상위 5%% 영역. 향후 10년 연환산 실질 수익률은 약 %.1f%% (±%.1f%%p)로 매우 낮은 수준이 기대됨.",
+                    cape.doubleValue(), earningsYield.doubleValue(), sigma.doubleValue());
+            explanation = String.format(
+                    "현재 시장은 우리 데이터 10년 분포에서 최상위 고평가 영역에 진입했습니다. "
+                            + "Shiller CAPE 모델은 향후 10년 연환산 실질 수익률을 약 %.1f%%로 추정하며, "
+                            + "이 수준에서 시작한 장기 투자는 평균 이하의 수익률에 그칠 가능성이 시사됩니다. "
+                            + "다만 이 모델은 미국 시장 100년 데이터 기반이라 한국 시장 적용은 방향성 참고 수준에 그칩니다.",
+                    earningsYield.doubleValue());
+        } else if (regime.equals("EXPENSIVE")) {
+            interpretation = String.format(
+                    "CAPE %.2f는 고평가 영역. 향후 10년 연환산 실질 수익률은 약 %.1f%% (±%.1f%%p)로 역사 평균(~6%%) 하회 가능성 높음.",
+                    cape.doubleValue(), earningsYield.doubleValue(), sigma.doubleValue());
+            explanation = String.format(
+                    "현재 시장은 우리 데이터 10년 분포에서 상위 영역의 고평가 구간에 위치합니다. "
+                            + "Shiller CAPE 모델은 향후 10년 연환산 실질 수익률을 약 %.1f%%로 추정하며, "
+                            + "역사 평균을 하회할 가능성이 시사됩니다. "
+                            + "이 모델은 미국 시장 100년 데이터 기반이라 한국 시장 적용은 방향성 참고 수준에 그칩니다.",
+                    earningsYield.doubleValue());
+        } else if (regime.equals("FAIR")) {
+            interpretation = String.format(
+                    "CAPE %.2f는 적정 영역. 향후 10년 연환산 실질 수익률은 약 %.1f%% (±%.1f%%p)로 역사 평균 수준 기대.",
+                    cape.doubleValue(), earningsYield.doubleValue(), sigma.doubleValue());
+            explanation = String.format(
+                    "현재 시장은 우리 데이터 10년 분포의 중간 영역에서 거래되고 있습니다. "
+                            + "Shiller CAPE 모델은 향후 10년 연환산 실질 수익률을 약 %.1f%%로 추정하며, "
+                            + "장기적으로는 평균 수준의 수익률이 기대됩니다. "
+                            + "이 모델은 미국 시장 100년 데이터 기반이라 한국 시장 적용은 방향성 참고 수준에 그칩니다.",
+                    earningsYield.doubleValue());
+        } else {
+            interpretation = String.format(
+                    "CAPE %.2f는 저평가 영역. 향후 10년 연환산 실질 수익률은 약 %.1f%% (±%.1f%%p)로 역사 평균 상회 기대.",
+                    cape.doubleValue(), earningsYield.doubleValue(), sigma.doubleValue());
+            explanation = String.format(
+                    "현재 시장은 우리 데이터 10년 분포에서 하위 저평가 영역에 위치합니다. "
+                            + "Shiller CAPE 모델은 향후 10년 연환산 실질 수익률을 약 %.1f%%로 추정하며, "
+                            + "역사 평균을 상회할 가능성이 시사됩니다. "
+                            + "이 모델은 미국 시장 100년 데이터 기반이라 한국 시장 적용은 방향성 참고 수준에 그칩니다.",
+                    earningsYield.doubleValue());
+        }
+
+        String basis = "Shiller(1996, 2000) earnings yield 모델: 장기 연환산 수익률 ≈ 1/CAPE. "
+                + "S&P 500 1881~ 백테스트 R²≈0.40. 한국 시장 적용은 방향성 valid, 절대치는 약한 외삽.";
+
+        return MarketValuationDto.TheoreticalAnchor.builder()
+                .expectedReturn10YAnnual(earningsYield)
+                .lowerBound(lowerBound)
+                .upperBound(upperBound)
+                .capeRegime(regime)
+                .interpretation(interpretation)
+                .basis(basis)
+                .explanation(explanation)
+                .build();
+    }
+
+    /**
+     * 한국 내수 펀더멘털 종합 — 연체율 4종 + 소비자심리지수.
+     * 한국은행 ECOS 데이터(2019-12~)의 최신 시점값을 학계/한국은행 공식 평시 임계값과 비교.
+     * 우리 6년 데이터로 백분위 뽑지 않고 *학계 임계값*과 비교 → 정직성·해석성 모두 확보.
+     */
+    private MarketValuationDto.DomesticEconomy calculateDomesticEconomy() {
+        try {
+            LocalDate end = LocalDate.now();
+            LocalDate start = end.minusYears(1);
+            DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyyMMdd");
+            String startStr = start.format(fmt);
+            String endStr = end.format(fmt);
+
+            // 학계/한국은행 공식 평시 임계값 (NORMAL → BORDERLINE → RISK 분기점)
+            MarketValuationDto.DelinquencyMetric household = buildDelinquencyMetric(
+                    ecosService.fetchDelinquencyHousehold(startStr, endStr),
+                    "0.2~0.4%", new double[] { 0.4, 0.7 });
+            MarketValuationDto.DelinquencyMetric corporate = buildDelinquencyMetric(
+                    ecosService.fetchDelinquencyCorporate(startStr, endStr),
+                    "0.4~0.7%", new double[] { 0.7, 1.0 });
+            MarketValuationDto.DelinquencyMetric large = buildDelinquencyMetric(
+                    ecosService.fetchDelinquencyLarge(startStr, endStr),
+                    "0.05~0.15%", new double[] { 0.15, 0.3 });
+            MarketValuationDto.DelinquencyMetric small = buildDelinquencyMetric(
+                    ecosService.fetchDelinquencySmall(startStr, endStr),
+                    "0.6~0.9%", new double[] { 0.9, 1.3 });
+
+            MarketValuationDto.ConsumerSentimentMetric csi = buildConsumerSentimentMetric(
+                    ecosService.fetchCSI(startStr, endStr));
+
+            String interpretation = buildDomesticEconomyInterpretation(
+                    household, corporate, large, small, csi);
+
+            return MarketValuationDto.DomesticEconomy.builder()
+                    .delinquencyHousehold(household)
+                    .delinquencyCorporate(corporate)
+                    .delinquencyLarge(large)
+                    .delinquencySmall(small)
+                    .consumerSentiment(csi)
+                    .interpretation(interpretation)
+                    .build();
+        } catch (Exception e) {
+            log.warn("Failed to calculate domesticEconomy: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * MacroIndicatorDto 리스트에서 최신 시점값을 추출해 DelinquencyMetric으로 변환.
+     * thresholds[0] 미만 = NORMAL, thresholds[1] 미만 = BORDERLINE, 그 이상 = RISK.
+     */
+    private MarketValuationDto.DelinquencyMetric buildDelinquencyMetric(
+            List<com.AISA.AISA.portfolio.macro.dto.MacroIndicatorDto> data,
+            String normalRange, double[] thresholds) {
+        if (data == null || data.isEmpty())
+            return null;
+        com.AISA.AISA.portfolio.macro.dto.MacroIndicatorDto latest = data.stream()
+                .max(Comparator.comparing(com.AISA.AISA.portfolio.macro.dto.MacroIndicatorDto::getDate))
+                .orElse(null);
+        if (latest == null || latest.getValue() == null)
+            return null;
+        try {
+            BigDecimal value = new BigDecimal(latest.getValue()).setScale(2, RoundingMode.HALF_UP);
+            double v = value.doubleValue();
+            String regime;
+            if (v < thresholds[0])
+                regime = "NORMAL";
+            else if (v < thresholds[1])
+                regime = "BORDERLINE";
+            else
+                regime = "RISK";
+            return MarketValuationDto.DelinquencyMetric.builder()
+                    .value(value)
+                    .asOfDate(formatEcosDate(latest.getDate()))
+                    .regime(regime)
+                    .normalRange(normalRange)
+                    .build();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private MarketValuationDto.ConsumerSentimentMetric buildConsumerSentimentMetric(
+            List<com.AISA.AISA.portfolio.macro.dto.MacroIndicatorDto> data) {
+        if (data == null || data.isEmpty())
+            return null;
+        com.AISA.AISA.portfolio.macro.dto.MacroIndicatorDto latest = data.stream()
+                .max(Comparator.comparing(com.AISA.AISA.portfolio.macro.dto.MacroIndicatorDto::getDate))
+                .orElse(null);
+        if (latest == null || latest.getValue() == null)
+            return null;
+        try {
+            BigDecimal value = new BigDecimal(latest.getValue()).setScale(1, RoundingMode.HALF_UP);
+            double v = value.doubleValue();
+            String regime;
+            if (v < 90.0)
+                regime = "PESSIMISTIC";
+            else if (v <= 110.0)
+                regime = "NEUTRAL";
+            else
+                regime = "OPTIMISTIC";
+            return MarketValuationDto.ConsumerSentimentMetric.builder()
+                    .value(value)
+                    .asOfDate(formatEcosDate(latest.getDate()))
+                    .regime(regime)
+                    .baseline("100 기준 (한국은행 소비자동향조사)")
+                    .build();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private String formatEcosDate(String yyyymmdd) {
+        if (yyyymmdd == null || yyyymmdd.length() < 8)
+            return yyyymmdd;
+        return yyyymmdd.substring(0, 4) + "-" + yyyymmdd.substring(4, 6) + "-" + yyyymmdd.substring(6, 8);
+    }
+
+    /**
+     * 4개 연체율 + CSI를 종합해 평이한 진단 텍스트 생성.
+     * 가장 위험한 regime을 기준으로 첫 문장 결정 → 각 지표 요약 → CSI 요약.
+     */
+    private String buildDomesticEconomyInterpretation(
+            MarketValuationDto.DelinquencyMetric household,
+            MarketValuationDto.DelinquencyMetric corporate,
+            MarketValuationDto.DelinquencyMetric large,
+            MarketValuationDto.DelinquencyMetric small,
+            MarketValuationDto.ConsumerSentimentMetric csi) {
+        boolean anyRisk = isRegime(household, "RISK") || isRegime(corporate, "RISK")
+                || isRegime(large, "RISK") || isRegime(small, "RISK");
+        boolean anyBorderline = isRegime(household, "BORDERLINE") || isRegime(corporate, "BORDERLINE")
+                || isRegime(large, "BORDERLINE") || isRegime(small, "BORDERLINE");
+
+        StringBuilder sb = new StringBuilder();
+        if (anyRisk) {
+            sb.append("내수 펀더멘털에 시스템 리스크 신호가 감지됩니다.");
+        } else if (anyBorderline) {
+            sb.append("내수 펀더멘털은 평시 정상 상단 경계에 위치합니다.");
+        } else {
+            sb.append("내수 펀더멘털은 전반적으로 평시 정상 수준입니다.");
+        }
+        sb.append(" 연체율 현황 — ");
+        if (small != null)
+            sb.append("중소기업 ").append(small.getValue()).append("%(").append(small.getRegime()).append("), ");
+        if (corporate != null)
+            sb.append("기업 전체 ").append(corporate.getValue()).append("%(").append(corporate.getRegime()).append("), ");
+        if (large != null)
+            sb.append("대기업 ").append(large.getValue()).append("%(").append(large.getRegime()).append("), ");
+        if (household != null)
+            sb.append("가계 ").append(household.getValue()).append("%(").append(household.getRegime()).append(")");
+        if (sb.charAt(sb.length() - 2) == ',')
+            sb.setLength(sb.length() - 2);
+        sb.append(".");
+        if (csi != null) {
+            sb.append(" 소비자심리지수 ").append(csi.getValue());
+            if ("PESSIMISTIC".equals(csi.getRegime()))
+                sb.append("로 비관 우세, 소비 위축 신호.");
+            else if ("OPTIMISTIC".equals(csi.getRegime()))
+                sb.append("로 낙관 우세.");
+            else
+                sb.append("로 중립 영역.");
+        }
+        return sb.toString();
+    }
+
+    private boolean isRegime(MarketValuationDto.DelinquencyMetric m, String regime) {
+        return m != null && regime.equals(m.getRegime());
     }
 
     private String determineStrategy(BigDecimal valuationScore) {
@@ -832,13 +1426,13 @@ public class MarketValuationService {
 
             // Fetch intraday prices in parallel with a basic delay to respect rate limits
             // (approx 20 req/sec)
-            java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newFixedThreadPool(10);
-            List<java.util.concurrent.CompletableFuture<Double>> futures = new ArrayList<>();
+            ExecutorService executor = Executors.newFixedThreadPool(10);
+            List<CompletableFuture<Double>> futures = new ArrayList<>();
 
             for (Stock stock : domesticCommonStocks) {
-                futures.add(java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+                futures.add(CompletableFuture.supplyAsync(() -> {
                     try {
-                        com.AISA.AISA.kisStock.dto.StockPrice.StockPriceDto priceDto = kisStockService
+                        StockPriceDto priceDto = kisStockService
                                 .getStockPrice(stock.getStockCode());
                         if (priceDto != null && priceDto.getChangeRate() != null) {
                             return Double.parseDouble(priceDto.getChangeRate());
@@ -856,7 +1450,7 @@ public class MarketValuationService {
                 }
             }
 
-            for (java.util.concurrent.CompletableFuture<Double> f : futures) {
+            for (CompletableFuture<Double> f : futures) {
                 try {
                     Double changeRate = f.get();
                     if (changeRate != null) {
@@ -1099,6 +1693,122 @@ public class MarketValuationService {
         return CombinedSignal.HOLD;
     }
 
+    private static class SignalAdjustment {
+        final CombinedSignal originalSignal;
+        final CombinedSignal adjustedSignal;
+        final List<String> rebuttalReasons; // KNN이 매트릭스를 명확히 반박해 강등한 사유 (강등 발생 시에만)
+        final boolean oodFlag;
+        final boolean uncertaintyFlag;
+        final List<String> uncertaintyReasons; // OOD/통계 유의성 부족 등 미래 예측 불확실성 caveat
+
+        SignalAdjustment(CombinedSignal original, CombinedSignal adjusted,
+                List<String> rebuttalReasons, boolean oodFlag, boolean uncertaintyFlag,
+                List<String> uncertaintyReasons) {
+            this.originalSignal = original;
+            this.adjustedSignal = adjusted;
+            this.rebuttalReasons = rebuttalReasons;
+            this.oodFlag = oodFlag;
+            this.uncertaintyFlag = uncertaintyFlag;
+            this.uncertaintyReasons = uncertaintyReasons;
+        }
+    }
+
+    /**
+     * KNN 통계 결과 → 신호 보정 분리 처리.
+     *
+     * - 현재 진단(추세/valuation)이 명확하면 매트릭스 결과 유지.
+     * - KNN outcomeDistribution이 매트릭스 결과를 *명확히 반박*할 때만 신호 강등.
+     *   (예: 매도 신호인데 bullCase가 |bearCase|의 2배 이상)
+     * - VERY_LOW(OOD), winRateCI 50% 포함 등은 강등이 아닌 flag로만 분리 표시
+     *   → 사용자는 "현재 진단은 매도지만 미래는 모름" 둘 다 확인 가능.
+     */
+    private SignalAdjustment applyKnnAdjustment(CombinedSignal base, MarketValuationDto.PredictionReport pr) {
+        if (pr == null) {
+            return new SignalAdjustment(base, base, Collections.emptyList(), false, false,
+                    Collections.emptyList());
+        }
+
+        // 1. 미래 예측 불확실성 flag (강등과 무관)
+        boolean oodFlag = false;
+        boolean uncertaintyFlag = false;
+        List<String> uncertaintyReasons = new ArrayList<>();
+
+        if (pr.getKnnStats() != null
+                && pr.getKnnStats().getConfidence() == MarketValuationDto.KnnConfidence.VERY_LOW) {
+            oodFlag = true;
+            uncertaintyReasons.add("KNN 신뢰도 VERY_LOW (OOD) — 유사 과거 사례 부족, 미래 예측 신뢰도 낮음");
+        }
+
+        List<BigDecimal> ci = (pr.getMediumTerm() != null) ? pr.getMediumTerm().getWinRateCI() : null;
+        if (ci != null && ci.size() == 2 && ci.get(0) != null && ci.get(1) != null) {
+            BigDecimal lower = ci.get(0);
+            BigDecimal upper = ci.get(1);
+            BigDecimal fifty = new BigDecimal("50");
+            if (lower.compareTo(fifty) <= 0 && upper.compareTo(fifty) >= 0) {
+                uncertaintyFlag = true;
+                uncertaintyReasons.add("Bootstrap winRate 95% CI [" + lower + "%, " + upper
+                        + "%]가 50% 포함 — 30일 후 방향 통계적 유의성 부족");
+            }
+        }
+
+        // 2. 진짜 반박 트리거: outcomeDistribution이 매트릭스 결과와 명확히 반대 방향
+        int rebuttalSteps = 0;
+        List<String> rebuttalReasons = new ArrayList<>();
+        MarketValuationDto.OutcomeDistribution od = pr.getOutcomeDistribution();
+        if (od != null && od.getBearCase() != null && od.getBullCase() != null
+                && od.getBaseCase() != null) {
+            BigDecimal bear = od.getBearCase().getReturnValue();
+            BigDecimal base_ = od.getBaseCase().getReturnValue();
+            BigDecimal bull = od.getBullCase().getReturnValue();
+
+            boolean isSellSignal = base == CombinedSignal.AGGRESSIVE_SELL
+                    || base == CombinedSignal.CAUTION;
+            boolean isBuySignal = base == CombinedSignal.STRONG_BUY
+                    || base == CombinedSignal.ACCUMULATE;
+
+            if (isSellSignal && bull != null && bear != null
+                    && bull.compareTo(BigDecimal.ZERO) > 0
+                    && base_ != null && base_.compareTo(BigDecimal.ZERO) >= 0
+                    && bull.abs().compareTo(bear.abs().multiply(new BigDecimal("2"))) > 0) {
+                rebuttalSteps++;
+                rebuttalReasons.add("매도 신호이나 KNN bullCase(" + bull + "%) > 2·|bearCase|("
+                        + bear + "%) 이고 baseCase(" + base_ + "%)도 비음수 — 상승 모멘텀이 우세");
+            }
+            if (isBuySignal && bear != null && bull != null
+                    && bear.compareTo(BigDecimal.ZERO) < 0
+                    && base_ != null && base_.compareTo(BigDecimal.ZERO) <= 0
+                    && bear.abs().compareTo(bull.abs().multiply(new BigDecimal("2"))) > 0) {
+                rebuttalSteps++;
+                rebuttalReasons.add("매수 신호이나 KNN |bearCase|(" + bear + "%) > 2·bullCase("
+                        + bull + "%) 이고 baseCase(" + base_ + "%)도 비양수 — 하락 리스크가 우세");
+            }
+        }
+
+        CombinedSignal adjusted = base;
+        for (int i = 0; i < Math.min(rebuttalSteps, 2); i++) {
+            adjusted = degradeCombinedSignal(adjusted);
+        }
+
+        return new SignalAdjustment(base, adjusted, rebuttalReasons, oodFlag, uncertaintyFlag,
+                uncertaintyReasons);
+    }
+
+    private CombinedSignal degradeCombinedSignal(CombinedSignal s) {
+        switch (s) {
+            case AGGRESSIVE_SELL:
+                return CombinedSignal.CAUTION;
+            case CAUTION:
+                return CombinedSignal.HOLD;
+            case STRONG_BUY:
+                return CombinedSignal.ACCUMULATE;
+            case ACCUMULATE:
+                return CombinedSignal.HOLD;
+            case HOLD:
+            default:
+                return CombinedSignal.HOLD;
+        }
+    }
+
     private TrendSignal determineTrendSignal(BigDecimal trendScore, InvestorTrendInfo trend) {
         double score = trendScore.doubleValue();
         double breadth = trend.getCommonMarketBreadthIndex().doubleValue();
@@ -1182,6 +1892,7 @@ public class MarketValuationService {
     }
 
     private PredictionReport calculateTrendProbability(BigDecimal currentCape, BigDecimal currentYieldGap,
+            BigDecimal currentCpiYoy,
             BigDecimal valuationScore, BigDecimal trendScore, InvestorTrendInfo trendInfo,
             List<MarketValuationDto.TimeSeriesPoint> timeSeries, MarketType market) {
 
@@ -1190,6 +1901,19 @@ public class MarketValuationService {
             int matches = 0;
             double weightedWinRate = 50.0;
             double weightedAvgReturn = 0.0;
+
+            // KNN 신뢰도/OOD 감지용 — 매칭 실패 시 기본값은 VERY_LOW + OOD 경고
+            Double avgDistance = null;
+            Double minDistance = null;
+            MarketValuationDto.KnnConfidence confidence = MarketValuationDto.KnnConfidence.VERY_LOW;
+            boolean oodWarning = true;
+
+            // Block Bootstrap 결과 — 매칭 실패 시 null
+            MarketValuationDto.BootstrapDistribution bootstrapDistribution = null;
+            List<BigDecimal> winRateCI = null;
+            MarketValuationDto.ReturnStats returnStats = null;
+            MarketValuationDto.OutcomeDistribution outcomeDistribution = null;
+            List<MarketValuationDto.HistoricalMatchCase> topMatches = null;
 
             // KNN parameters
             final int K = 30;
@@ -1210,14 +1934,31 @@ public class MarketValuationService {
 
                     // 1-1. Filter Valid Historical Points & Calculate Stats for Normalization
                     List<MarketValuationDto.TimeSeriesPoint> validPoints = new ArrayList<>();
-                    // Exclude recent points where forward return cannot be calculated
-                    LocalDate latestPossibleDate = LocalDate.now().minusDays(30);
+                    // 90일 cooldown — 30일 포워드 리턴 계산 가능성 + 현재 regime과의 자기상관 누수 차단.
+                    // 현재가 OOD 국면이면 최근 1~3개월이 KNN top을 점유해 "유사 과거"가 아니라 본인 연속이 되는 문제 회피.
+                    LocalDate latestPossibleDate = LocalDate.now().minusDays(90);
+
+                    // CPI YoY 가용성 사전 판정 — 데이터 부족 시 해당 차원 제외 fallback
+                    long pointsWithCpiYoy = timeSeries.stream()
+                            .filter(p -> p != null && p.getCpiYoy() != null).count();
+                    boolean useCpiYoy = currentCpiYoy != null && pointsWithCpiYoy >= 30;
+                    if (!useCpiYoy) {
+                        log.warn("CPI YoY 데이터 부족 (timeSeries={}개, current={}), 해당 차원 제외",
+                                pointsWithCpiYoy, currentCpiYoy);
+                    }
 
                     List<Double> capes = new ArrayList<>();
                     List<Double> yieldGaps = new ArrayList<>();
+                    List<Double> vkospis = new ArrayList<>();
+                    List<Double> foreigns = new ArrayList<>();
+                    List<Double> breadths = new ArrayList<>();
+                    List<Double> cpiYoys = new ArrayList<>();
 
                     for (MarketValuationDto.TimeSeriesPoint p : timeSeries) {
-                        if (p == null || p.getCape() == null || p.getYieldGap() == null || p.getDate() == null)
+                        if (p == null || p.getCape() == null || p.getYieldGap() == null
+                                || p.getVkospi() == null || p.getForeignNet5d() == null || p.getBreadth5d() == null
+                                || (useCpiYoy && p.getCpiYoy() == null)
+                                || p.getDate() == null)
                             continue;
 
                         try {
@@ -1228,12 +1969,28 @@ public class MarketValuationService {
                             validPoints.add(p);
                             capes.add(p.getCape().doubleValue());
                             yieldGaps.add(p.getYieldGap().doubleValue());
+                            vkospis.add(p.getVkospi().doubleValue());
+                            foreigns.add(p.getForeignNet5d().doubleValue());
+                            breadths.add(p.getBreadth5d().doubleValue());
+                            if (useCpiYoy)
+                                cpiYoys.add(p.getCpiYoy().doubleValue());
                         } catch (Exception ignored) {
                         }
                     }
 
-                    if (!validPoints.isEmpty()) {
-                        // Calculate Mean & StdDev
+                    // 현재 상태 변수 — KOSDAQ도 KOSPI VKOSPI를 차용 (trendInfo.vkospi가 null이면 별도 조회)
+                    BigDecimal currentVkospi = getEffectiveVkospi(trendInfo);
+                    Long currentForeignNet5d = (trendInfo != null) ? trendInfo.getForeignNet5d() : null;
+                    BigDecimal currentBreadth5d = (trendInfo != null) ? trendInfo.getBreadth5dAvg() : null;
+
+                    boolean canRunKnn = !validPoints.isEmpty()
+                            && currentVkospi != null
+                            && currentForeignNet5d != null
+                            && currentBreadth5d != null;
+                    // currentCpiYoy는 useCpiYoy=true일 때만 필수 (위 사전 판정에서 확인됨)
+
+                    if (canRunKnn) {
+                        // Calculate Mean & StdDev (5 features)
                         double meanCape = capes.stream().mapToDouble(d -> d).average().orElse(0.0);
                         double stdCape = Math
                                 .sqrt(capes.stream().mapToDouble(d -> Math.pow(d - meanCape, 2)).average().orElse(1.0));
@@ -1246,18 +2003,75 @@ public class MarketValuationService {
                         if (stdYg == 0)
                             stdYg = 1.0;
 
-                        // Normalize Current State
+                        double meanVkospi = vkospis.stream().mapToDouble(d -> d).average().orElse(0.0);
+                        double stdVkospi = Math.sqrt(
+                                vkospis.stream().mapToDouble(d -> Math.pow(d - meanVkospi, 2)).average().orElse(1.0));
+                        if (stdVkospi == 0)
+                            stdVkospi = 1.0;
+
+                        double meanForeign = foreigns.stream().mapToDouble(d -> d).average().orElse(0.0);
+                        double stdForeign = Math.sqrt(
+                                foreigns.stream().mapToDouble(d -> Math.pow(d - meanForeign, 2)).average().orElse(1.0));
+                        if (stdForeign == 0)
+                            stdForeign = 1.0;
+
+                        double meanBreadth = breadths.stream().mapToDouble(d -> d).average().orElse(0.0);
+                        double stdBreadth = Math.sqrt(
+                                breadths.stream().mapToDouble(d -> Math.pow(d - meanBreadth, 2)).average().orElse(1.0));
+                        if (stdBreadth == 0)
+                            stdBreadth = 1.0;
+
+                        // CPI YoY 차원 (useCpiYoy=true일 때만 계산)
+                        // lambda 캡처 위해 중간 final 변수 사용
+                        double meanCpiYoyTmp = 0.0, stdCpiYoyTmp = 1.0, zCpiYoyCurrTmp = 0.0;
+                        if (useCpiYoy) {
+                            final double meanCpiYoyFinal = cpiYoys.stream().mapToDouble(d -> d).average().orElse(0.0);
+                            meanCpiYoyTmp = meanCpiYoyFinal;
+                            stdCpiYoyTmp = Math.sqrt(cpiYoys.stream()
+                                    .mapToDouble(d -> Math.pow(d - meanCpiYoyFinal, 2)).average().orElse(1.0));
+                            if (stdCpiYoyTmp == 0)
+                                stdCpiYoyTmp = 1.0;
+                            zCpiYoyCurrTmp = (currentCpiYoy.doubleValue() - meanCpiYoyTmp) / stdCpiYoyTmp;
+                        }
+                        final double meanCpiYoy = meanCpiYoyTmp;
+                        final double stdCpiYoy = stdCpiYoyTmp;
+                        final double zCpiYoyCurr = zCpiYoyCurrTmp;
+
+                        // Normalize Current State (5 or 6 features)
                         double zCapeCurr = (currentCape.doubleValue() - meanCape) / stdCape;
                         double zYgCurr = (currentYieldGap.doubleValue() - meanYg) / stdYg;
+                        double zVkospiCurr = (currentVkospi.doubleValue() - meanVkospi) / stdVkospi;
+                        double zForeignCurr = (currentForeignNet5d.doubleValue() - meanForeign) / stdForeign;
+                        double zBreadthCurr = (currentBreadth5d.doubleValue() - meanBreadth) / stdBreadth;
 
-                        // 1-2. Calculate Distances (KNN)
+                        // 1-2. Calculate Distances (KNN, conditionally 5 or 6-dimensional)
+                        // CPI YoY 사용 가능: 6D / 불가능 시: 5D fallback (KNN 자체는 유지)
+                        // CPI 차원 final 변수 (lambda 내부에서 안전하게 사용하기 위해)
+                        final double fMeanCpiYoy = meanCpiYoy;
+                        final double fStdCpiYoy = stdCpiYoy;
+                        final double fZCpiYoyCurr = zCpiYoyCurr;
                         List<KnnCandidate> candidates = new ArrayList<>();
 
                         for (MarketValuationDto.TimeSeriesPoint p : validPoints) {
                             double zCape = (p.getCape().doubleValue() - meanCape) / stdCape;
                             double zYg = (p.getYieldGap().doubleValue() - meanYg) / stdYg;
+                            double zVkospi = (p.getVkospi().doubleValue() - meanVkospi) / stdVkospi;
+                            double zForeign = (p.getForeignNet5d().doubleValue() - meanForeign) / stdForeign;
+                            double zBreadth = (p.getBreadth5d().doubleValue() - meanBreadth) / stdBreadth;
 
-                            double distance = Math.sqrt(Math.pow(zCape - zCapeCurr, 2) + Math.pow(zYg - zYgCurr, 2));
+                            double cpiYoyTerm = 0.0;
+                            if (useCpiYoy && p.getCpiYoy() != null) {
+                                double zCpiYoy = (p.getCpiYoy().doubleValue() - fMeanCpiYoy) / fStdCpiYoy;
+                                cpiYoyTerm = Math.pow(zCpiYoy - fZCpiYoyCurr, 2);
+                            }
+
+                            double distance = Math.sqrt(
+                                    Math.pow(zCape - zCapeCurr, 2)
+                                            + Math.pow(zYg - zYgCurr, 2)
+                                            + Math.pow(zVkospi - zVkospiCurr, 2)
+                                            + Math.pow(zForeign - zForeignCurr, 2)
+                                            + Math.pow(zBreadth - zBreadthCurr, 2)
+                                            + cpiYoyTerm);
 
                             // Calculate Future Return
                             LocalDate pDate = LocalDate.parse(p.getDate(), DateTimeFormatter.ofPattern("yyyy-MM-dd"));
@@ -1281,8 +2095,25 @@ public class MarketValuationService {
                         }
 
                         // 1-3. Select Selection & Aggregation
+                        // 거리 오름차순 정렬 후 분기당 최대 1개만 채택 → 동일 regime의 연속 데이터가 top을 점유하는 것 방지.
+                        // K=30개에 도달할 때까지 진행 (분기가 부족하면 K 미달).
                         candidates.sort(Comparator.comparingDouble(c -> c.distance));
-                        List<KnnCandidate> neighbors = candidates.stream().limit(K).collect(Collectors.toList());
+                        Set<String> usedQuarters = new HashSet<>();
+                        List<KnnCandidate> neighbors = new ArrayList<>();
+                        for (KnnCandidate c : candidates) {
+                            try {
+                                LocalDate cDate = LocalDate.parse(c.date,
+                                        DateTimeFormatter.ofPattern("yyyy-MM-dd"));
+                                String quarterKey = cDate.getYear() + "-Q"
+                                        + ((cDate.getMonthValue() - 1) / 3 + 1);
+                                if (!usedQuarters.add(quarterKey))
+                                    continue;
+                                neighbors.add(c);
+                                if (neighbors.size() >= K)
+                                    break;
+                            } catch (Exception ignored) {
+                            }
+                        }
                         matches = neighbors.size();
 
                         if (matches > 0) {
@@ -1297,6 +2128,150 @@ public class MarketValuationService {
 
                             weightedWinRate = (sumWeights > 0) ? (sumWeightedPositive / sumWeights) * 100.0 : 50.0;
                             weightedAvgReturn = (sumWeights > 0) ? (sumWeightedReturn / sumWeights) * 100.0 : 0.0;
+
+                            // topMatches: 거리 가장 가까운 상위 5개 사례 — Gemini narrative에 사용
+                            Map<String, MarketValuationDto.TimeSeriesPoint> validPointByDate = validPoints.stream()
+                                    .collect(Collectors.toMap(MarketValuationDto.TimeSeriesPoint::getDate,
+                                            p -> p, (a, b) -> a));
+                            topMatches = neighbors.stream()
+                                    .limit(5)
+                                    .map(c -> {
+                                        MarketValuationDto.TimeSeriesPoint p = validPointByDate.get(c.date);
+                                        return MarketValuationDto.HistoricalMatchCase.builder()
+                                                .date(c.date)
+                                                .cape(p != null ? p.getCape() : null)
+                                                .vkospi(p != null ? p.getVkospi() : null)
+                                                .yieldGap(p != null ? p.getYieldGap() : null)
+                                                .foreignNet5d(p != null ? p.getForeignNet5d() : null)
+                                                .breadth5d(p != null ? p.getBreadth5d() : null)
+                                                .forwardReturn(BigDecimal.valueOf(c.forwardReturn * 100.0)
+                                                        .setScale(2, RoundingMode.HALF_UP))
+                                                .distance(BigDecimal.valueOf(c.distance)
+                                                        .setScale(3, RoundingMode.HALF_UP))
+                                                .build();
+                                    })
+                                    .collect(Collectors.toList());
+
+                            // 거리 임계값 기반 신뢰도 판정
+                            avgDistance = neighbors.stream().mapToDouble(c -> c.distance).average().orElse(0.0);
+                            minDistance = neighbors.stream().mapToDouble(c -> c.distance).min().orElse(0.0);
+
+                            if (avgDistance < 1.0) {
+                                confidence = MarketValuationDto.KnnConfidence.HIGH;
+                                oodWarning = false;
+                            } else if (avgDistance < 1.5) {
+                                confidence = MarketValuationDto.KnnConfidence.MEDIUM;
+                                oodWarning = false;
+                            } else if (avgDistance < 2.5) {
+                                confidence = MarketValuationDto.KnnConfidence.LOW;
+                                oodWarning = false;
+                            } else {
+                                confidence = MarketValuationDto.KnnConfidence.VERY_LOW;
+                                oodWarning = true;
+                            }
+
+                            // Raw forwardReturn 분포 통계 (검증용)
+                            double[] rawReturns = neighbors.stream()
+                                    .mapToDouble(c -> c.forwardReturn).toArray();
+                            double rawMin = Arrays.stream(rawReturns).min().orElse(0.0);
+                            double rawMax = Arrays.stream(rawReturns).max().orElse(0.0);
+                            double rawMean = Arrays.stream(rawReturns).average().orElse(0.0);
+                            double rawVarSum = 0.0;
+                            for (double r : rawReturns) {
+                                rawVarSum += Math.pow(r - rawMean, 2);
+                            }
+                            double rawStd = Math.sqrt(rawVarSum / rawReturns.length);
+
+                            returnStats = MarketValuationDto.ReturnStats.builder()
+                                    .min(BigDecimal.valueOf(rawMin * 100).setScale(2, RoundingMode.HALF_UP))
+                                    .max(BigDecimal.valueOf(rawMax * 100).setScale(2, RoundingMode.HALF_UP))
+                                    .mean(BigDecimal.valueOf(rawMean * 100).setScale(2, RoundingMode.HALF_UP))
+                                    .std(BigDecimal.valueOf(rawStd * 100).setScale(2, RoundingMode.HALF_UP))
+                                    .build();
+
+                            // outcomeDistribution: 30개 raw return의 p10/p50/p90을 직접 추출
+                            // "실제 발생 가능한 수익률 범위"를 표현 (mean 분포가 아닌 개별 분포)
+                            double[] sortedReturns = rawReturns.clone();
+                            Arrays.sort(sortedReturns);
+                            int n = sortedReturns.length;
+                            double bearReturn = percentileOf(sortedReturns, 10) * 100.0;
+                            double baseReturn = percentileOf(sortedReturns, 50) * 100.0;
+                            double bullReturn = percentileOf(sortedReturns, 90) * 100.0;
+
+                            outcomeDistribution = MarketValuationDto.OutcomeDistribution.builder()
+                                    .bearCase(MarketValuationDto.ScenarioCase.builder()
+                                            .returnValue(BigDecimal.valueOf(bearReturn).setScale(2, RoundingMode.HALF_UP))
+                                            .label("비관")
+                                            .build())
+                                    .baseCase(MarketValuationDto.ScenarioCase.builder()
+                                            .returnValue(BigDecimal.valueOf(baseReturn).setScale(2, RoundingMode.HALF_UP))
+                                            .label("중간")
+                                            .build())
+                                    .bullCase(MarketValuationDto.ScenarioCase.builder()
+                                            .returnValue(BigDecimal.valueOf(bullReturn).setScale(2, RoundingMode.HALF_UP))
+                                            .label("낙관")
+                                            .build())
+                                    .build();
+                            log.info("outcomeDistribution (n={}): bear={}%, base={}%, bull={}%",
+                                    n, String.format("%.2f", bearReturn),
+                                    String.format("%.2f", baseReturn),
+                                    String.format("%.2f", bullReturn));
+
+                            // Block Bootstrap (블록 길이 3, 1000회 재샘플링)
+                            // 자기상관 보존을 위해 날짜순 정렬 후 블록 단위로 추출
+                            if (neighbors.size() >= 3) {
+                                List<KnnCandidate> sortedByDate = neighbors.stream()
+                                        .sorted(Comparator.comparing(c -> c.date))
+                                        .collect(Collectors.toList());
+
+                                final int N = sortedByDate.size();
+                                final int blockSize = 3;
+                                final int iterations = 1000;
+                                Random random = new Random();
+
+                                double[] bootstrapMeans = new double[iterations];
+                                double[] bootstrapWinRates = new double[iterations];
+
+                                for (int it = 0; it < iterations; it++) {
+                                    double sum = 0.0;
+                                    int positive = 0;
+                                    int count = 0;
+                                    while (count < N) {
+                                        int startIdx = random.nextInt(N - blockSize + 1);
+                                        for (int j = 0; j < blockSize && count < N; j++) {
+                                            double r = sortedByDate.get(startIdx + j).forwardReturn;
+                                            sum += r;
+                                            if (r > 0)
+                                                positive++;
+                                            count++;
+                                        }
+                                    }
+                                    bootstrapMeans[it] = sum / N;
+                                    bootstrapWinRates[it] = (double) positive / N;
+                                }
+
+                                Arrays.sort(bootstrapMeans);
+                                Arrays.sort(bootstrapWinRates);
+
+                                // p10/p50/p90 mean return (% 단위)
+                                double p10 = bootstrapMeans[100] * 100.0;
+                                double p50 = bootstrapMeans[500] * 100.0;
+                                double p90 = bootstrapMeans[900] * 100.0;
+
+                                // 95% CI on winRate (% 단위) — [2.5%, 97.5%]
+                                double ciLower = bootstrapWinRates[25] * 100.0;
+                                double ciUpper = bootstrapWinRates[975] * 100.0;
+
+                                bootstrapDistribution = MarketValuationDto.BootstrapDistribution.builder()
+                                        .p10(BigDecimal.valueOf(p10).setScale(2, RoundingMode.HALF_UP))
+                                        .p50(BigDecimal.valueOf(p50).setScale(2, RoundingMode.HALF_UP))
+                                        .p90(BigDecimal.valueOf(p90).setScale(2, RoundingMode.HALF_UP))
+                                        .build();
+
+                                winRateCI = List.of(
+                                        BigDecimal.valueOf(ciLower).setScale(2, RoundingMode.HALF_UP),
+                                        BigDecimal.valueOf(ciUpper).setScale(2, RoundingMode.HALF_UP));
+                            }
                         }
                     }
                 }
@@ -1375,17 +2350,38 @@ public class MarketValuationService {
                 }
             }
 
+            MarketValuationDto.KnnStats knnStats = MarketValuationDto.KnnStats.builder()
+                    .avgDistance(avgDistance != null
+                            ? BigDecimal.valueOf(avgDistance).setScale(3, RoundingMode.HALF_UP)
+                            : null)
+                    .minDistance(minDistance != null
+                            ? BigDecimal.valueOf(minDistance).setScale(3, RoundingMode.HALF_UP)
+                            : null)
+                    .confidence(confidence)
+                    .oodWarning(oodWarning)
+                    .returnStats(returnStats)
+                    .build();
+
             return PredictionReport.builder()
                     .shortTerm(ProbabilityInfo.builder()
                             .upProbability(pShort).downProbability(100 - pShort)
-                            .primaryReason(pShort > 50 ? "모멘텀 및 수급 양호" : "수급 악화 및 하락 에너지 우세").build())
+                            .primaryReason(pShort > 50 ? "모멘텀 및 수급 양호" : "수급 악화 및 하락 에너지 우세")
+                            .distribution(bootstrapDistribution)
+                            .winRateCI(winRateCI)
+                            .build())
                     .mediumTerm(ProbabilityInfo.builder()
                             .upProbability(pMedium).downProbability(100 - pMedium)
-                            .primaryReason(matches > 5 ? "역사적 유사 국면 (" + matches + "회) 반영" : "밸류에이션 및 추세 혼합").build())
+                            .primaryReason(matches > 5 ? "역사적 유사 국면 (" + matches + "회) 반영" : "밸류에이션 및 추세 혼합")
+                            .distribution(bootstrapDistribution)
+                            .winRateCI(winRateCI)
+                            .build())
                     .longTerm(ProbabilityInfo.builder()
                             .upProbability(pLong).downProbability(100 - pLong)
                             .primaryReason("Yield Gap 및 펀더멘털 매력도 기반").build())
                     .historicalMatch(historicalMatch)
+                    .knnStats(knnStats)
+                    .outcomeDistribution(outcomeDistribution)
+                    .topMatches(topMatches)
                     .build();
 
         } catch (Exception e) {
@@ -1398,6 +2394,10 @@ public class MarketValuationService {
                     .longTerm(ProbabilityInfo.builder().upProbability(50).downProbability(50).primaryReason("N/A")
                             .build())
                     .historicalMatch(HistoricalMatch.builder().build())
+                    .knnStats(MarketValuationDto.KnnStats.builder()
+                            .confidence(MarketValuationDto.KnnConfidence.VERY_LOW)
+                            .oodWarning(true)
+                            .build())
                     .build();
         }
     }

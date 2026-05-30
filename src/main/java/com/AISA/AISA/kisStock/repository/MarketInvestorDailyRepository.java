@@ -33,4 +33,7 @@ public interface MarketInvestorDailyRepository extends JpaRepository<MarketInves
                         @Param("startDate") LocalDate startDate);
 
         java.util.List<MarketInvestorDaily> findTop30ByMarketCodeOrderByDateDesc(String marketCode);
+
+        java.util.List<MarketInvestorDaily> findAllByMarketCodeAndDateBetweenOrderByDateAsc(
+                        String marketCode, LocalDate startDate, LocalDate endDate);
 }

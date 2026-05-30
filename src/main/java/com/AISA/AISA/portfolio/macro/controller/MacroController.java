@@ -204,12 +204,104 @@ public class MacroController {
     }
 
     @PostMapping("/cpi/init")
-    @Operation(summary = "CPI 데이터 초기화/업데이트", description = "한국은행 ECOS API에서 소비자물가지수 데이터를 가져와 DB에 저장합니다.")
+    @Operation(summary = "소비자물가지수(CPI) 데이터 초기화/업데이트", description = "한국은행 ECOS API에서 소비자물가지수 데이터를 가져와 DB에 저장합니다.")
     public ResponseEntity<SuccessResponse<Void>> initCPI(
             @RequestParam String startDate,
             @RequestParam String endDate) {
         ecosService.saveCPI(startDate, endDate);
         return ResponseEntity.ok(new SuccessResponse<>(true, "CPI 데이터 저장 성공", null));
+    }
+
+    @GetMapping("/csi")
+    @Operation(summary = "소비자심리지수(CSI) 조회", description = "DB에 저장된 소비자심리지수(전국, 월간)를 조회합니다. (데이터가 없으면 POST /csi/init을 호출하세요)")
+    public ResponseEntity<SuccessResponse<List<MacroIndicatorDto>>> getCSI(
+            @RequestParam String startDate,
+            @RequestParam String endDate) {
+        List<MacroIndicatorDto> data = ecosService.fetchCSI(startDate, endDate);
+        return ResponseEntity.ok(new SuccessResponse<>(true, "CSI 조회 성공", data));
+    }
+
+    @PostMapping("/csi/init")
+    @Operation(summary = "CSI 데이터 초기화/업데이트", description = "한국은행 ECOS API에서 소비자심리지수 데이터를 가져와 DB에 저장합니다.")
+    public ResponseEntity<SuccessResponse<Void>> initCSI(
+            @RequestParam String startDate,
+            @RequestParam String endDate) {
+        ecosService.saveCSI(startDate, endDate);
+        return ResponseEntity.ok(new SuccessResponse<>(true, "CSI 데이터 저장 성공", null));
+    }
+
+    // ======= 예금은행 지역별 연체율 (전국, 월간) =======
+
+    @GetMapping("/delinquency/corporate")
+    @Operation(summary = "기업대출 연체율(전체) 조회", description = "DB에 저장된 예금은행 전국 기업대출 연체율(전체1M)을 조회합니다.")
+    public ResponseEntity<SuccessResponse<List<MacroIndicatorDto>>> getDelinquencyCorporate(
+            @RequestParam String startDate,
+            @RequestParam String endDate) {
+        List<MacroIndicatorDto> data = ecosService.fetchDelinquencyCorporate(startDate, endDate);
+        return ResponseEntity.ok(new SuccessResponse<>(true, "기업대출 연체율(전체) 조회 성공", data));
+    }
+
+    @PostMapping("/delinquency/corporate/init")
+    @Operation(summary = "기업대출 연체율(전체) 데이터 초기화/업데이트", description = "한국은행 ECOS API에서 예금은행 전국 기업대출 연체율 데이터를 가져와 DB에 저장합니다.")
+    public ResponseEntity<SuccessResponse<Void>> initDelinquencyCorporate(
+            @RequestParam String startDate,
+            @RequestParam String endDate) {
+        ecosService.saveDelinquencyCorporate(startDate, endDate);
+        return ResponseEntity.ok(new SuccessResponse<>(true, "기업대출 연체율(전체) 데이터 저장 성공", null));
+    }
+
+    @GetMapping("/delinquency/large")
+    @Operation(summary = "대기업대출 연체율 조회", description = "DB에 저장된 예금은행 전국 대기업대출 연체율(전체1M)을 조회합니다.")
+    public ResponseEntity<SuccessResponse<List<MacroIndicatorDto>>> getDelinquencyLarge(
+            @RequestParam String startDate,
+            @RequestParam String endDate) {
+        List<MacroIndicatorDto> data = ecosService.fetchDelinquencyLarge(startDate, endDate);
+        return ResponseEntity.ok(new SuccessResponse<>(true, "대기업대출 연체율 조회 성공", data));
+    }
+
+    @PostMapping("/delinquency/large/init")
+    @Operation(summary = "대기업대출 연체율 데이터 초기화/업데이트", description = "한국은행 ECOS API에서 예금은행 전국 대기업대출 연체율 데이터를 가져와 DB에 저장합니다.")
+    public ResponseEntity<SuccessResponse<Void>> initDelinquencyLarge(
+            @RequestParam String startDate,
+            @RequestParam String endDate) {
+        ecosService.saveDelinquencyLarge(startDate, endDate);
+        return ResponseEntity.ok(new SuccessResponse<>(true, "대기업대출 연체율 데이터 저장 성공", null));
+    }
+
+    @GetMapping("/delinquency/small")
+    @Operation(summary = "중소기업대출 연체율 조회", description = "DB에 저장된 예금은행 전국 중소기업대출 연체율(전체1M)을 조회합니다.")
+    public ResponseEntity<SuccessResponse<List<MacroIndicatorDto>>> getDelinquencySmall(
+            @RequestParam String startDate,
+            @RequestParam String endDate) {
+        List<MacroIndicatorDto> data = ecosService.fetchDelinquencySmall(startDate, endDate);
+        return ResponseEntity.ok(new SuccessResponse<>(true, "중소기업대출 연체율 조회 성공", data));
+    }
+
+    @PostMapping("/delinquency/small/init")
+    @Operation(summary = "중소기업대출 연체율 데이터 초기화/업데이트", description = "한국은행 ECOS API에서 예금은행 전국 중소기업대출 연체율 데이터를 가져와 DB에 저장합니다.")
+    public ResponseEntity<SuccessResponse<Void>> initDelinquencySmall(
+            @RequestParam String startDate,
+            @RequestParam String endDate) {
+        ecosService.saveDelinquencySmall(startDate, endDate);
+        return ResponseEntity.ok(new SuccessResponse<>(true, "중소기업대출 연체율 데이터 저장 성공", null));
+    }
+
+    @GetMapping("/delinquency/household")
+    @Operation(summary = "가계대출 연체율 조회", description = "DB에 저장된 예금은행 전국 가계대출 연체율(전체1M)을 조회합니다.")
+    public ResponseEntity<SuccessResponse<List<MacroIndicatorDto>>> getDelinquencyHousehold(
+            @RequestParam String startDate,
+            @RequestParam String endDate) {
+        List<MacroIndicatorDto> data = ecosService.fetchDelinquencyHousehold(startDate, endDate);
+        return ResponseEntity.ok(new SuccessResponse<>(true, "가계대출 연체율 조회 성공", data));
+    }
+
+    @PostMapping("/delinquency/household/init")
+    @Operation(summary = "가계대출 연체율 데이터 초기화/업데이트", description = "한국은행 ECOS API에서 예금은행 전국 가계대출 연체율 데이터를 가져와 DB에 저장합니다.")
+    public ResponseEntity<SuccessResponse<Void>> initDelinquencyHousehold(
+            @RequestParam String startDate,
+            @RequestParam String endDate) {
+        ecosService.saveDelinquencyHousehold(startDate, endDate);
+        return ResponseEntity.ok(new SuccessResponse<>(true, "가계대출 연체율 데이터 저장 성공", null));
     }
 
     // Endpoints moved to KisIndexController

@@ -37,4 +37,19 @@ public class GeminiProperties {
         }
         return apiKey;
     }
+
+    /**
+     * 로테이션으로 선택된 키와 그 인덱스(0-based)·전체 개수를 함께 반환.
+     * 로그/메트릭에서 "몇 번째 키"를 식별하기 위해 사용한다.
+     */
+    public record KeySelection(int index, int total, String key) {
+    }
+
+    public KeySelection nextKeySelection() {
+        if (apiKeys != null && !apiKeys.isEmpty()) {
+            int index = Math.abs(keyIndex.getAndIncrement() % apiKeys.size());
+            return new KeySelection(index, apiKeys.size(), apiKeys.get(index));
+        }
+        return new KeySelection(0, (apiKey != null ? 1 : 0), apiKey);
+    }
 }

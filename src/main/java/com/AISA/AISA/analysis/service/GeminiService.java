@@ -637,33 +637,44 @@ public class GeminiService {
 
         String lastError = "No keys available";
         for (int attempt = 0; attempt < maxRetries; attempt++) {
-            String currentKey = geminiProperties.getNextKey();
+            GeminiProperties.KeySelection sel = geminiProperties.nextKeySelection();
+            String currentKey = sel.key();
+            int keyNo = sel.index() + 1; // 사람이 읽기 좋게 1-based
+            String keyTag = String.valueOf(sel.index());
             String maskedKey = currentKey != null && currentKey.length() > 8
                     ? currentKey.substring(0, 4) + "****" + currentKey.substring(currentKey.length() - 4)
                     : "****";
-            log.info("Attempting Gemini API call {}/{} using key: {}...", attempt + 1, maxRetries, maskedKey);
+            log.info("[Gemini] 시도 {}/{} — 키 #{}/{} ({}) 호출", attempt + 1, maxRetries, keyNo, sel.total(), maskedKey);
+            long startNanos = System.nanoTime();
             try {
                 String response = callGeminiApi(context, currentKey);
-                meterRegistry.counter("gemini.attempts", "result", "success").increment();
+                long ms = (System.nanoTime() - startNanos) / 1_000_000;
+                meterRegistry.counter("gemini.attempts", "result", "success", "key", keyTag).increment();
+                log.info("[Gemini] 키 #{} 성공 ({}ms)", keyNo, ms);
                 return parseGeminiResponse(response);
 
             } catch (WebClientResponseException e) {
                 lastError = e.getResponseBodyAsString();
                 if (lastError == null || lastError.isEmpty())
                     lastError = e.getMessage();
+                int status = e.getStatusCode().value();
 
-                if (e.getStatusCode().value() == 429 || e.getStatusCode().value() == 400
-                        || e.getStatusCode().value() == 401 || e.getStatusCode().value() == 403) {
+                if (status == 429 || status == 400 || status == 401 || status == 403) {
                     // 429: 키당 호출 한도 초과 → 라운드 로빈으로 다음 키 시도
-                    String result = (e.getStatusCode().value() == 429) ? "rate_limited" : "client_error";
-                    meterRegistry.counter("gemini.attempts", "result", result).increment();
-                    log.warn("Gemini API Error ({}). Response: {}. Rotating key... (Attempt {}/{})",
-                            e.getStatusCode().value(), lastError, attempt + 1, maxRetries);
+                    String result = (status == 429) ? "rate_limited" : "client_error";
+                    meterRegistry.counter("gemini.attempts", "result", result, "key", keyTag).increment();
+                    if (status == 429) {
+                        log.warn("[Gemini] 키 #{} 한도 초과(429) → 다음 키로 회전 (시도 {}/{})",
+                                keyNo, attempt + 1, maxRetries);
+                    } else {
+                        log.warn("[Gemini] 키 #{} 인증/요청 오류({}) → 다음 키로 회전. 응답: {}",
+                                keyNo, status, lastError);
+                    }
                     continue;
                 }
                 if (e.getStatusCode().is5xxServerError()) {
-                    meterRegistry.counter("gemini.attempts", "result", "server_error").increment();
-                    log.warn("Gemini Server Error ({}). Rotating key...", e.getStatusCode().value());
+                    meterRegistry.counter("gemini.attempts", "result", "server_error", "key", keyTag).increment();
+                    log.warn("[Gemini] 키 #{} 서버 오류({}) → 다음 키로 회전", keyNo, status);
                     continue;
                 }
                 throw e;
@@ -671,6 +682,7 @@ public class GeminiService {
         }
         // 모든 키가 소진됨 — 라운드 로빈으로도 막지 못한 최종 실패 (정적 폴백으로 이어짐)
         meterRegistry.counter("gemini.exhausted").increment();
+        log.error("[Gemini] 모든 키({}개) 소진 — AI 호출 실패, 정적 폴백 전환. 최종 에러: {}", maxRetries, lastError);
         throw new RuntimeException("AI 서비스 사용량이 초과되었습니다. (최종 에러: " + lastError + ")");
     }
 

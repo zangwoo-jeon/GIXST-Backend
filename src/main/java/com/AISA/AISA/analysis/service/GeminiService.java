@@ -3,6 +3,8 @@ package com.AISA.AISA.analysis.service;
 import com.AISA.AISA.global.config.GeminiProperties;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
@@ -21,6 +23,7 @@ public class GeminiService {
 
     private final ObjectMapper objectMapper;
     private final GeminiProperties geminiProperties;
+    private final MeterRegistry meterRegistry;
 
     /**
      * Generates a context-aware market strategy based on the valuation data.
@@ -608,6 +611,20 @@ public class GeminiService {
     }
 
     private String generateResponseWithRetry(String context) throws Exception {
+        // 전체 요청 단위 지연/성공률 측정 (키 로테이션 전체를 포함한 체감 시간)
+        Timer.Sample requestSample = Timer.start(meterRegistry);
+        String requestOutcome = "failure";
+        try {
+            String result = doGenerateResponseWithRetry(context);
+            requestOutcome = "success";
+            return result;
+        } finally {
+            requestSample.stop(meterRegistry.timer("gemini.request.latency"));
+            meterRegistry.counter("gemini.requests", "outcome", requestOutcome).increment();
+        }
+    }
+
+    private String doGenerateResponseWithRetry(String context) throws Exception {
         List<String> keys = geminiProperties.getApiKeys();
         int size = (keys != null) ? keys.size() : (geminiProperties.getApiKey() != null ? 1 : 0);
         log.info("Gemini key rotation initialized. Total available keys: {}", size);
@@ -627,6 +644,7 @@ public class GeminiService {
             log.info("Attempting Gemini API call {}/{} using key: {}...", attempt + 1, maxRetries, maskedKey);
             try {
                 String response = callGeminiApi(context, currentKey);
+                meterRegistry.counter("gemini.attempts", "result", "success").increment();
                 return parseGeminiResponse(response);
 
             } catch (WebClientResponseException e) {
@@ -636,17 +654,23 @@ public class GeminiService {
 
                 if (e.getStatusCode().value() == 429 || e.getStatusCode().value() == 400
                         || e.getStatusCode().value() == 401 || e.getStatusCode().value() == 403) {
+                    // 429: 키당 호출 한도 초과 → 라운드 로빈으로 다음 키 시도
+                    String result = (e.getStatusCode().value() == 429) ? "rate_limited" : "client_error";
+                    meterRegistry.counter("gemini.attempts", "result", result).increment();
                     log.warn("Gemini API Error ({}). Response: {}. Rotating key... (Attempt {}/{})",
                             e.getStatusCode().value(), lastError, attempt + 1, maxRetries);
                     continue;
                 }
                 if (e.getStatusCode().is5xxServerError()) {
+                    meterRegistry.counter("gemini.attempts", "result", "server_error").increment();
                     log.warn("Gemini Server Error ({}). Rotating key...", e.getStatusCode().value());
                     continue;
                 }
                 throw e;
             }
         }
+        // 모든 키가 소진됨 — 라운드 로빈으로도 막지 못한 최종 실패 (정적 폴백으로 이어짐)
+        meterRegistry.counter("gemini.exhausted").increment();
         throw new RuntimeException("AI 서비스 사용량이 초과되었습니다. (최종 에러: " + lastError + ")");
     }
 
